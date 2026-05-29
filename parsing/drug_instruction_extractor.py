@@ -479,15 +479,25 @@ def _normalize_sentence_case(text: str) -> str:
     return text[0].upper() + text[1:]
 
 
+def _strip_leading_colon(value: str | None) -> str | None:
+    """Убирает лидирующее двоеточие и пробелы из значения.
+
+    Применяется к полям которые могут иметь артефакт ": " в начале.
+    """
+    if not value:
+        return None
+    return value.strip().lstrip(":").strip()
+
+
 def _clean_value(value: str) -> str | None:
     """Очищаем значение от артефактов парсинга.
 
-    - Убираем ведущие дефисы/тире и двоеточия.
+    - Убираем ведущие дефисы/тире.
     - Отфильтровываем заглушки («~», «нет данных» и т.п.).
     - Убираем строки UI-шума.
     - Нормализуем регистр первого символа.
     """
-    v = value.strip().lstrip("- –:").strip()
+    v = value.strip().lstrip("- –").strip()
     if not v or _JUNK_VALUES.match(v):
         return None
     # Убираем строки UI-шума
@@ -733,25 +743,26 @@ def _parse_with_regex(
     else:
         resolved_composition = raw_composition
 
+    # Применяем очистку лидирующих двоеточий к полям где это часто бывает
     parsed = ParsedInstruction(
         source_id=db_id,
         reg_number=resolved_reg,
         trade_name=resolved_trade_name,
         mnn=resolved_mnn,
         synonyms=_get("synonyms"),
-        dosage_form=_get("dosage_form"),
+        dosage_form=_strip_leading_colon(_get("dosage_form")),
         release_form_and_packaging=_get("release_form_and_packaging"),
         packaging=_get("packaging"),
         manufacturer=resolved_manufacturer,
         atx_code=_get("atx_code"),
-        pharmacological_group=_get("pharmacological_group"),
+        pharmacological_group=_strip_leading_colon(_get("pharmacological_group")),
         pharmacological_properties=_get("pharmacological_properties"),
         pharmacological_action=_get("pharmacological_action"),
         pharmacodynamics=_get("pharmacodynamics"),
         mechanism_of_action=_get("mechanism_of_action"),
         pharmacokinetics=_get("pharmacokinetics"),
         composition=resolved_composition,
-        excipients=raw_excipients,
+        excipients=_strip_leading_colon(raw_excipients),
         description=_get("description"),
         indications=_get("indications"),
         contraindications=_get("contraindications"),
