@@ -570,6 +570,56 @@ def _extract_name_from_header(text: str, db_trade_name: str) -> str | None:
     return db_trade_name or None
 
 
+def _validate_parse_quality(parsed: ParsedInstruction) -> bool:
+    """Проверяет качество распарсенных данных.
+
+    Возвращает True если парсинг некачественный и нужно отправить на LLM fallback.
+
+    Критерии плохого качества:
+    - Любое поле содержит очевидный мусор оглавления: "1.", "2.", "3.", "10." и т.п.
+    - Ключевые поля содержат только цифры или спецсимволы
+    - Все поля очень короткие (< 10 символов в среднем)
+    - Ключевые поля (trade_name, mnn, reg_number) пустые
+    """
+    # Проверяем все заполненные поля на мусор оглавления
+    junk_pattern = re.compile(r"^\d{1,2}\.\s*$", re.IGNORECASE)
+    for field_name in [
+        "trade_name", "mnn", "reg_number", "dosage_form",
+        "indications", "contraindications", "dosage_and_administration",
+        "side_effects", "pharmacological_group", "manufacturer"
+    ]:
+        value = getattr(parsed, field_name)
+        if value and junk_pattern.match(value):
+            return True  # Нашли мусор — отправляем на LLM
+
+    # Проверяем ключевые поля на мусор (только цифры/символы)
+    key_fields = [parsed.trade_name, parsed.mnn, parsed.reg_number]
+    only_digits_pattern = re.compile(r"^[\d\-\:\s]+$", re.IGNORECASE)
+    junk_key_fields = sum(1 for f in key_fields if f and only_digits_pattern.match(f))
+    if junk_key_fields >= 2:  # Если 2+ ключевых поля — мусор
+        return True
+
+    # Проверяем среднюю длину заполненных полей
+    field_values = [
+        getattr(parsed, field)
+        for field in [
+            "trade_name", "mnn", "reg_number", "indications",
+            "contraindications", "dosage_and_administration", "side_effects"
+        ]
+        if getattr(parsed, field)
+    ]
+    if field_values:
+        avg_length = sum(len(v) for v in field_values) / len(field_values)
+        if avg_length < 10:  # Если в среднем < 10 символов — мусор
+            return True
+
+    # Если ключевые поля пустые — некачественно
+    if not parsed.trade_name and not parsed.mnn:
+        return True
+
+    return False
+
+
 def _parse_with_regex(
     raw_text: str,
     db_id: int,
