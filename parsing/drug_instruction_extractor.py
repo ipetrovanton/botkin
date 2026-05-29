@@ -370,6 +370,7 @@ _JUNK_VALUES = re.compile(
     r"^("
     r"~|n/a|нет данных?|нет|данные отсутствуют|не установлено"
     r"|не определено|отсутствует|—|-|–|\.|не указано"
+    r"|еще|ещё|more|далее|показать ещё"
     r")$",
     re.IGNORECASE,
 )
@@ -423,6 +424,7 @@ def _normalize_reg_number(raw: str) -> str | None:
     'Р N003048/01'          → 'Р N003048/01'   (сам по себе корректен)
     'ЛС-001247/10-190210'   → 'ЛСР-001247/10'
     'ЛС-000325 от 26.05.2005' → 'ЛС-000325'
+    '64/228/14'             → '64/228/14'     (корректный формат старых рег. номеров)
     '74 Однородная масса...' → None            (мусор, не рег. номер)
     """
     v = raw.strip().lstrip(":").strip()
@@ -434,9 +436,10 @@ def _normalize_reg_number(raw: str) -> str | None:
     # Если после очистки осталось что-то длиннее 30 символов — скорее всего мусор
     if not v or len(v) > 30:
         return None
-    # Должен содержать букву и цифру
-    if not re.search(r"[а-яёА-ЯЁa-zA-Z]", v) or not re.search(r"\d", v):
+    # Должен содержать цифру (буквы необязательны для старых форматов типа 64/228/14)
+    if not re.search(r"\d", v):
         return None
+    # Если есть буквы — это хорошо, если нет — тоже ок (старые форматы)
     return v
 
 
@@ -532,11 +535,27 @@ def _find_content_start(lines: list[str]) -> int:
     непустая строка-значение длиной ≥ 20 символов. Это отличает реальные
     секции инструкции от блоков оглавления (где заголовки идут подряд без значений).
 
-    Дополнительно пропускаем навигационные заголовки типа "Новости", "Статьи".
+    Дополнительно пропускаем навигационные заголовки и блоки с типичной навигацией.
     """
-    navigation_headers = {"новости", "статьи", "болезни", "лекарства", "консультации", "контакты"}
+    navigation_headers = {
+        "новости", "статьи", "болезни", "лекарства", "консультации", "контакты",
+        "о компании", "редакция", "о технологиях рекомендаций", "политика конфиденциальности",
+        "поддержка", "условия использования сервисов", "реклама", "мы в соцсетях",
+        "все проекты", "правда о загаре"
+    }
 
-    for i in range(len(lines) - 1):
+    # Пропускаем первые 30 строк если там сплошная навигация
+    nav_block_end = 0
+    for i in range(min(30, len(lines))):
+        stripped = lines[i].strip()
+        norm = _normalize_key(stripped)
+        if norm in navigation_headers or stripped in ["© VK", "© 1999-2026"]:
+            nav_block_end = i + 1
+        elif len(stripped) > 10 and norm not in navigation_headers:
+            # Нашли не-навигационный текст — проверяем дальше
+            break
+
+    for i in range(nav_block_end, len(lines) - 1):
         stripped = lines[i].strip()
         norm = _normalize_key(stripped)
 
@@ -765,7 +784,9 @@ def _parse_with_regex(
     resolved_mnn = _normalize_mnn(raw_mnn) if raw_mnn else None
 
     # Регистрационный номер: из секций → из БД; нормализуем формат
-    raw_reg = _get("reg_number") or db_reg_number
+    raw_reg = _get("reg_number")
+    if not raw_reg or raw_reg.strip() == "":
+        raw_reg = db_reg_number
     resolved_reg = _normalize_reg_number(raw_reg) if raw_reg else None
 
     # Производитель: если значение слишком длинное или содержит фразы из шапки документа
