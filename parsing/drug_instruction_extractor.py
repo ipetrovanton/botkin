@@ -695,6 +695,115 @@ def _is_header_collision(value: str) -> bool:
     return False
 
 
+# Типичный футер-шум справочников (Видаль, РЛС), который нужно отрезать из конца любого поля
+_FOOTER_NOISE = re.compile(
+    r"\s*(?:"
+    r"Описание препарата.*?основано на официально утвержденной инструкции.*?"
+    r"|.*?предоставлены справочником лекарственных средств.*?"
+    r"|Предоставленная информация о ценах.*?"
+    r"|Информация предназначена исключительно для сравнения цен.*?"
+    r"|Обнаружили ошибку\?.*?"
+    r"|Информация предоставляется в справочных целях.*?"
+    r"|При первых признаках заболевания обращайтесь к врачу.*?"
+    r"|Купить.*?в ГорЗдрав.*?"
+    r"|Купить.*?в Планета Здоровья.*?"
+    r"|Цены в Москве.*?"
+    r"|Точная цена в Вашем городе.*?"
+    r"|Комментарии \(видны только специалистам.*?"
+    r"|Если Вы медицинский специалист, войдите или зарегистрируйтесь.*?"
+    r"|Условия и сроки хранения.*?"
+    r"|Условия отпуска из аптек.*?"
+    r"|Сроки хранения.*?"
+    r"|Вернуться к началу страницы.*?"
+    r"|Карта сайта.*?"
+    r")$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Паттерны лекарственных форм для извлечения из composition
+_DOSAGE_FORMS_PATTERNS = [
+    r"Таблетки", r"Капсулы", r"Раствор", r"Мазь", r"Крем", r"Гель",
+    r"Суппозитории", r"Суспензия", r"Лиофилизат", r"Порошок", r"Капли",
+    r"Эмульсия", r"Настойка", r"Паста", r"Сироп", r"Спрей", r"Аэрозоль",
+]
+_DOSAGE_FORMS_RE = re.compile(
+    r"^\s*(" + "|".join(_DOSAGE_FORMS_PATTERNS) + r")(?:\s+[\w\s,\-\(\)]+)?(?=\s|\.|\n|$)",
+    re.IGNORECASE,
+)
+
+# Паттерны упаковочной информации
+_PACKAGING_RE = re.compile(
+    r"(\d+\s*(?:шт|фл|амп|таб|капс).*?(?:упаковк|пачк|блистер|коробк|ячейков).*?)(?=\.|$|\n)",
+    re.IGNORECASE,
+)
+
+
+def _clean_footer_noise(text: str) -> str | None:
+    """Убирает футер-мусор справочников из текста."""
+    if not text:
+        return None
+    prev_len = len(text)
+    while True:
+        text = _FOOTER_NOISE.sub("", text).strip()
+        if len(text) == prev_len:
+            break
+        prev_len = len(text)
+    text = text.rstrip(".,; -–")
+    return text if text else None
+
+
+def _post_process_parsed(
+    parsed: ParsedInstruction,
+) -> ParsedInstruction:
+    """Интеллектуальный постпроцессинг: очистка футеров и разбор составных полей."""
+    # 1. Очищаем все текстовые поля от футер-шума
+    for field_name in [
+        "trade_name", "mnn", "dosage_form", "release_form_and_packaging",
+        "packaging", "manufacturer", "pharmacological_group",
+        "pharmacological_properties", "pharmacological_action",
+        "pharmacodynamics", "mechanism_of_action", "pharmacokinetics",
+        "composition", "excipients", "description", "indications",
+        "contraindications", "contraindications_absolute", "use_with_caution",
+        "dosage_and_administration", "side_effects", "interactions",
+        "overdose", "overdose_symptoms", "overdose_treatment",
+        "special_instructions", "notes", "driving_ability",
+        "pregnancy_and_lactation", "pregnancy_category", "pediatric_use",
+        "geriatric_use", "renal_impairment", "hepatic_impairment",
+        "storage_conditions", "shelf_life", "dispensing_conditions",
+        "coating_composition", "analogs", "synonyms",
+    ]:
+        value = getattr(parsed, field_name)
+        if value:
+            cleaned = _clean_footer_noise(value)
+            object.__setattr__(parsed, field_name, cleaned)
+
+    # 2. Разбираем composition на dosage_form + packaging + composition
+    comp = parsed.composition
+    if comp:
+        # Извлекаем лекарственную форму
+        if not parsed.dosage_form:
+            m_form = _DOSAGE_FORMS_RE.match(comp)
+            if m_form:
+                parsed.dosage_form = m_form.group(1).capitalize()
+                comp = comp[m_form.end():].strip().lstrip(".,;- ")
+
+        # Извлекаем ВСЮ упаковочную информацию
+        if not parsed.packaging:
+            all_packs = _PACKAGING_RE.findall(comp)
+            if all_packs:
+                parsed.packaging = "; ".join(all_packs)
+                # Убираем все упаковки из composition
+                for pack in all_packs:
+                    comp = comp.replace(pack, "")
+                comp = comp.strip().rstrip(".,;- ")
+
+        # Чистим composition от лишних пробелов и знаков
+        comp = re.sub(r"\s+", " ", comp).strip().rstrip(".,;- ")
+        parsed.composition = comp if comp else None
+
+    return parsed
+
+
 def _parse_with_regex(
     raw_text: str,
     db_id: int,
@@ -867,6 +976,8 @@ def _parse_with_regex(
         1 for f in MEANINGFUL_FIELDS
         if getattr(parsed, f, None)
     )
+    # Постпроцессинг: очистка футеров и разбор составных полей
+    parsed = _post_process_parsed(parsed)
     return parsed
 
 
