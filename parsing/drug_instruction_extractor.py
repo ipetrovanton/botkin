@@ -357,7 +357,7 @@ _JUNK_VALUES = re.compile(
     re.IGNORECASE,
 )
 
-# Строки, которые явно являются частью интерфейса сайта, а не контентом
+# Строки UI-шума внутри значений
 _UI_NOISE = re.compile(
     r"(показать ещё|показать еще|показать все|скрыть|подробнее"
     r"|данные из справочника есклп|оформить подписку"
@@ -365,21 +365,137 @@ _UI_NOISE = re.compile(
     re.IGNORECASE,
 )
 
+# Строки оглавления вида «1.», «2.», «1. Заголовок», «10.» — пустые нумерованные пункты
+_TOC_LINE = re.compile(r"^\d{1,2}\.\s*$")
+
+# Нумерованный пункт оглавления с текстом: «1. Форма выпуска и состав»
+_TOC_ITEM = re.compile(r"^\d{1,2}\.\s+(.+)$")
+
+# Мусор в reg_number: лидирующее ':', даты вида «-DDMMYY», «от DD.MM.YYYY», пробелы
+_REG_CLEANUP = re.compile(
+    r"^\s*:?\s*"         # убираем лидирующий «:» и пробелы
+    r"|"
+    r"\s*[-–]\s*\d{6,}"  # убираем суффикс даты «-190210»
+    r"|"
+    r"\s+от\s+\d{2}\.\d{2}\.\d{4}.*$"  # убираем «от 26.05.2005»
+    r"|"
+    r"\s+\d{4}$",        # убираем год в конце
+    re.IGNORECASE,
+)
+
+# Мусор в mnn: дозировки «- 250 мг», «(в пересчете ...)», «– 500 мг»
+_MNN_DOSAGE = re.compile(
+    r"\s*[-–(]\s*(?:в пересчете[^)]*\))?"
+    r"\s*[\d,.\s]*(?:мг|г|мкг|ме|ед)\b.*",
+    re.IGNORECASE,
+)
+
+# Мусор в trade_name: «Международное непатентованное название Нет», «МНН: ...»
+_TRADE_NAME_SUFFIX = re.compile(
+    r"\s+(?:Международное\s+(?:непатентованное\s+)?(?:название|наименование)"
+    r"|МНН|INN|ATC|АТХ).*$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_reg_number(raw: str) -> str | None:
+    """Очищаем регистрационный номер от артефактов парсинга.
+
+    Примеры входных данных → ожидаемый результат:
+    ': ЛС-000692'           → 'ЛС-000692'
+    'Р N003048/01'          → 'Р N003048/01'   (сам по себе корректен)
+    'ЛС-001247/10-190210'   → 'ЛСР-001247/10'
+    'ЛС-000325 от 26.05.2005' → 'ЛС-000325'
+    '74 Однородная масса...' → None            (мусор, не рег. номер)
+    """
+    v = raw.strip().lstrip(":").strip()
+    # Убираем суффиксы дат
+    v = re.sub(r"\s*-\s*\d{6,}$", "", v)
+    v = re.sub(r"\s+от\s+\d{2}\.\d{2}\.\d{4}.*$", "", v, flags=re.IGNORECASE)
+    v = re.sub(r"\s+\d{4}$", "", v)
+    v = v.strip()
+    # Если после очистки осталось что-то длиннее 30 символов — скорее всего мусор
+    if not v or len(v) > 30:
+        return None
+    # Должен содержать букву и цифру
+    if not re.search(r"[а-яёА-ЯЁa-zA-Z]", v) or not re.search(r"\d", v):
+        return None
+    return v
+
+
+def _normalize_mnn(raw: str) -> str | None:
+    """Очищаем МНН от дозировок, лишних пояснений и мусора.
+
+    Примеры:
+    'Натрия нуклеинат (в пересчете на сухое вещество) - 250 мг.'
+        → 'Натрия нуклеинат'
+    'кофеин (в пересчете на 100%) – 80 мг, натрия бензоат – 120 мг'
+        → None  (это состав, не МНН)
+    'экстракт из культуры термофильного штамма...'
+        → 'экстракт из культуры термофильного штамма...' (оставляем — биол. препарат)
+    """
+    v = raw.strip().lstrip(":").strip()
+    # Убираем дозировки: «- 250 мг», «– 500 мг», «(в пересчете на ...) 80 мг»
+    v = re.sub(
+        r"\s*[-–(]\s*(?:в пересчете[^)]*\))?\s*[\d,.\s]*(?:мг|г|мкг|мл|ме|ед)\b.*",
+        "", v, flags=re.IGNORECASE,
+    )
+    # Убираем лидирующий «-»
+    v = v.strip().lstrip("-–").strip()
+    if not v or _JUNK_VALUES.match(v):
+        return None
+    # Если больше 200 символов — это скорее всего состав препарата, не МНН
+    if len(v) > 200:
+        return None
+    # Если содержит числа с единицами после очистки — состав
+    if re.search(r"\d\s*(?:мг|г|мл)\b", v, re.IGNORECASE):
+        return None
+    return v
+
+
+def _normalize_trade_name(raw: str) -> str | None:
+    """Убираем мусор после торгового названия.
+
+    Некоторые источники (казахстанские регуляторные) включают в поле trade_name
+    строку «Международное непатентованное название Нет» или «МНН: Ибупрофен».
+    """
+    if not raw:
+        return None
+    v = _TRADE_NAME_SUFFIX.sub("", raw).strip().rstrip(".,;")
+    return v if v else None
+
+
+def _normalize_sentence_case(text: str) -> str:
+    """Нормализует регистр первого символа предложения.
+
+    Если текст начинается со строчной — делаем первую букву заглавной.
+    Не трогаем аббревиатуры (всё заглавными).
+    """
+    if not text:
+        return text
+    # Если вся строка — аббревиатура или цифры, не трогаем
+    if text.isupper() or text[0].isdigit():
+        return text
+    return text[0].upper() + text[1:]
+
 
 def _clean_value(value: str) -> str | None:
     """Очищаем значение от артефактов парсинга.
 
-    - Убираем ведущие дефисы/тире (артефакт некоторых форматов).
+    - Убираем ведущие дефисы/тире.
     - Отфильтровываем заглушки («~», «нет данных» и т.п.).
-    - Убираем UI-шум сайтов.
+    - Убираем строки UI-шума.
+    - Нормализуем регистр первого символа.
     """
     v = value.strip().lstrip("- –").strip()
     if not v or _JUNK_VALUES.match(v):
         return None
-    # Убираем строки UI-шума внутри значения
+    # Убираем строки UI-шума
     lines = [ln for ln in v.splitlines() if not _UI_NOISE.search(ln)]
     cleaned = " ".join(ln.strip() for ln in lines if ln.strip())
-    return cleaned if cleaned else None
+    if not cleaned:
+        return None
+    return _normalize_sentence_case(cleaned)
 
 
 def _find_content_start(lines: list[str]) -> int:
@@ -396,18 +512,24 @@ def _find_content_start(lines: list[str]) -> int:
             continue
         # Смотрим следующие 3 строки — есть ли хоть одна с содержимым
         following = [lines[j].strip() for j in range(i + 1, min(i + 4, len(lines)))]
-        has_content = any(len(ln) >= 20 and _normalize_key(ln) not in SYNONYM_MAP for ln in following)
+        has_content = any(
+            len(ln) >= 20
+            and _normalize_key(ln) not in SYNONYM_MAP
+            and not _TOC_LINE.match(ln)
+            for ln in following
+        )
         if has_content:
             return i
     return 0
 
 
 def _strip_noise_header(text: str) -> str:
-    """Убираем шапку/хвост сайта до начала реальной инструкции.
+    """Убираем шапку/хвост сайта и строки оглавления «1. 2. 3.».
 
     Алгоритм:
-    - Находим первую реальную секцию через _find_content_start (заголовок + значение).
+    - Находим первую реальную секцию через _find_content_start.
     - NOISE_PATTERNS фильтруется на всём протяжении текста.
+    - Строки вида «1.» / «2.» (нумерация оглавления без содержимого) удаляются.
     - TAIL_SENTINELS обрезают хвост только ПОСЛЕ начала содержимого.
     """
     lines = text.splitlines()
@@ -421,6 +543,9 @@ def _strip_noise_header(text: str) -> str:
             in_content = True
         if in_content and TAIL_SENTINELS.match(stripped):
             break
+        # Пустые строки оглавления «1.», «2.» отбрасываем везде
+        if _TOC_LINE.match(stripped):
+            continue
         if not NOISE_PATTERNS.match(stripped):
             cleaned.append(line)
     return "\n".join(cleaned)
@@ -523,28 +648,46 @@ def _parse_with_regex(
         joined = " ".join(val).strip()
         return _clean_value(joined)
 
-    # Торговое название: из секций → из БД → из шапки текста
-    resolved_trade_name = (
-        _get("trade_name")
-        or db_trade_name
-        or _extract_name_from_header(cleaned, db_trade_name)
-    )
+    # Торговое название: из секций → из БД → из шапки текста; затем нормализуем
+    raw_trade = _get("trade_name") or db_trade_name or _extract_name_from_header(cleaned, db_trade_name)
+    resolved_trade_name = _normalize_trade_name(raw_trade) if raw_trade else None
 
-    # Производитель: если значение слишком длинное (> 150 символов) или содержит
-    # типичные фразы из шапки документа — это ложное срабатывание заголовка «ИНСТРУКЦИЯ».
+    # МНН: из секций → из БД; убираем дозировки и мусор
+    raw_mnn = _get("mnn") or _clean_value(db_mnn)
+    resolved_mnn = _normalize_mnn(raw_mnn) if raw_mnn else None
+
+    # Регистрационный номер: из секций → из БД; нормализуем формат
+    raw_reg = _get("reg_number") or db_reg_number
+    resolved_reg = _normalize_reg_number(raw_reg) if raw_reg else None
+
+    # Производитель: если значение слишком длинное или содержит фразы из шапки документа
     raw_manufacturer = _get("manufacturer")
     resolved_manufacturer = (
         raw_manufacturer
-        if raw_manufacturer and len(raw_manufacturer) <= 200
-        and not re.search(r"по медицинскому применению|минздрав|утверждена", raw_manufacturer, re.IGNORECASE)
+        if raw_manufacturer
+        and len(raw_manufacturer) <= 200
+        and not re.search(
+            r"по медицинскому применению|минздрав|утверждена",
+            raw_manufacturer, re.IGNORECASE,
+        )
         else None
     )
 
+    # Состав: объединяем основной состав + вспомогательные вещества в одно поле,
+    # если основной состав — это только заголовочная фраза без содержимого
+    raw_composition = _get("composition")
+    raw_excipients = _get("excipients")
+    if raw_composition and len(raw_composition) < 25 and raw_excipients:
+        # «100 г препарата содержит» без тела — дополняем вспомогательными
+        resolved_composition = f"{raw_composition}; {raw_excipients}"
+    else:
+        resolved_composition = raw_composition
+
     parsed = ParsedInstruction(
         source_id=db_id,
-        reg_number=_get("reg_number") or _clean_value(db_reg_number) or None,
+        reg_number=resolved_reg,
         trade_name=resolved_trade_name,
-        mnn=_get("mnn") or _clean_value(db_mnn) or None,
+        mnn=resolved_mnn,
         synonyms=_get("synonyms"),
         dosage_form=_get("dosage_form"),
         release_form_and_packaging=_get("release_form_and_packaging"),
@@ -557,8 +700,8 @@ def _parse_with_regex(
         pharmacodynamics=_get("pharmacodynamics"),
         mechanism_of_action=_get("mechanism_of_action"),
         pharmacokinetics=_get("pharmacokinetics"),
-        composition=_get("composition"),
-        excipients=_get("excipients"),
+        composition=resolved_composition,
+        excipients=raw_excipients,
         description=_get("description"),
         indications=_get("indications"),
         contraindications=_get("contraindications"),
