@@ -783,11 +783,10 @@ def _parse_with_regex(
         raw_mnn = None  # Это заголовок, а не значение
     resolved_mnn = _normalize_mnn(raw_mnn) if raw_mnn else None
 
-    # Регистрационный номер: из секций → из БД; нормализуем формат
-    raw_reg = _get("reg_number")
-    if not raw_reg or raw_reg.strip() == "":
-        raw_reg = db_reg_number
-    resolved_reg = _normalize_reg_number(raw_reg) if raw_reg else None
+    # Регистрационный номер: приоритет БД, иначе из секций; без нормализации
+    resolved_reg = db_reg_number or _get("reg_number")
+    if resolved_reg:
+        resolved_reg = _strip_leading_colon(resolved_reg)
 
     # Производитель: если значение слишком длинное или содержит фразы из шапки документа
     raw_manufacturer = _get("manufacturer")
