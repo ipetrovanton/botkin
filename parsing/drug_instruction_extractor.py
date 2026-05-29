@@ -482,12 +482,12 @@ def _normalize_sentence_case(text: str) -> str:
 def _clean_value(value: str) -> str | None:
     """Очищаем значение от артефактов парсинга.
 
-    - Убираем ведущие дефисы/тире.
+    - Убираем ведущие дефисы/тире и двоеточия.
     - Отфильтровываем заглушки («~», «нет данных» и т.п.).
     - Убираем строки UI-шума.
     - Нормализуем регистр первого символа.
     """
-    v = value.strip().lstrip("- –").strip()
+    v = value.strip().lstrip("- –:").strip()
     if not v or _JUNK_VALUES.match(v):
         return None
     # Убираем строки UI-шума
