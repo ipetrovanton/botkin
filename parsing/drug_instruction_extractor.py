@@ -348,6 +348,23 @@ def _normalize_key(raw: str) -> str:
     return raw.strip().rstrip(":").lower().strip()
 
 
+def _is_junk_source(raw_text: str) -> bool:
+    """Проверяет, не является ли raw_text мусором с сайта (навигация, реклама).
+
+    Возвращает True если текст содержит явные признаки навигационного мусора.
+    """
+    # Более специфичные индикаторы — комбинация нескольких признаков
+    vk_indicators = ["© VK", "Мы в соцсетях", "О компании\nРедакция"]
+    text_lower = raw_text.lower()
+
+    # Если есть несколько индикаторов VK — это мусор
+    vk_count = sum(1 for ind in vk_indicators if ind.lower() in text_lower)
+    if vk_count >= 2:
+        return True
+
+    return False
+
+
 # Значения, которые не являются реальным содержимым
 _JUNK_VALUES = re.compile(
     r"^("
@@ -514,12 +531,22 @@ def _find_content_start(lines: list[str]) -> int:
     Эвристика: первая строка-заголовок из SYNONYM_MAP, за которой следует
     непустая строка-значение длиной ≥ 20 символов. Это отличает реальные
     секции инструкции от блоков оглавления (где заголовки идут подряд без значений).
+
+    Дополнительно пропускаем навигационные заголовки типа "Новости", "Статьи".
     """
+    navigation_headers = {"новости", "статьи", "болезни", "лекарства", "консультации", "контакты"}
+
     for i in range(len(lines) - 1):
         stripped = lines[i].strip()
         norm = _normalize_key(stripped)
+
+        # Пропускаем навигационные заголовки
+        if norm in navigation_headers:
+            continue
+
         if norm not in SYNONYM_MAP:
             continue
+
         # Смотрим следующие 3 строки — есть ли хоть одна с содержимым
         following = [lines[j].strip() for j in range(i + 1, min(i + 4, len(lines)))]
         has_content = any(
@@ -630,6 +657,25 @@ def _validate_parse_quality(parsed: ParsedInstruction) -> bool:
     return False
 
 
+def _is_header_collision(value: str) -> bool:
+    """Проверяет, не является ли значение другим заголовком.
+
+    Если значение похоже на заголовок (короткое, заканчивается на ":" или есть в SYNONYM_MAP),
+    значит это ошибка парсинга — заголовок попал в значение.
+    """
+    if not value or len(value) < 5:
+        return True
+    norm = _normalize_key(value)
+    if norm in SYNONYM_MAP:
+        return True
+    if value.endswith(":"):
+        return True
+    # Конкретные заголовки которые часто попадают в значения
+    if norm in ["форма выпуска, состав и упаковка", "действующее вещество", "клинико-фармакологическая группа"]:
+        return True
+    return False
+
+
 def _parse_with_regex(
     raw_text: str,
     db_id: int,
@@ -714,6 +760,8 @@ def _parse_with_regex(
 
     # МНН: из секций → из БД; убираем дозировки и мусор
     raw_mnn = _get("mnn") or _clean_value(db_mnn)
+    if raw_mnn and _is_header_collision(raw_mnn):
+        raw_mnn = None  # Это заголовок, а не значение
     resolved_mnn = _normalize_mnn(raw_mnn) if raw_mnn else None
 
     # Регистрационный номер: из секций → из БД; нормализуем формат
