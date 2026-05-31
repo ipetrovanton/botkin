@@ -4,7 +4,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from backend.contracts import ClassifyResult, DocType
 from .ollama_client import chat_completion, get_client
-from backend.config import VLM_MODEL, VLM_TEMP
+from backend.config import VLM_MODEL, VLM_TEMP, VLM_NUM_CTX, VLM_NUM_PREDICT
 import instructor
 
 CLASSIFY_VLM_SYSTEM = """Ты — точный классификатор медицинских документов. Твоя задача — определить тип документа по его изображению.
@@ -42,7 +42,8 @@ def run_vlm(source_path: Path) -> ClassifyResult:
         model=VLM_MODEL,
         messages=messages,
         response_model=ClassifySchema,
-        max_tokens=500
+        max_tokens=500,
+        extra_body={"options": {"num_ctx": VLM_NUM_CTX, "num_predict": VLM_NUM_PREDICT, "repeat_penalty": 1.2}}
     )
     return ClassifyResult(doc_type=response.doc_type, confidence=response.confidence)
 
