@@ -65,6 +65,64 @@ def _pdf_to_base64_images(file_path: Path | str) -> list[str]:
 
     return b64_images
 
+def _call_vlm_structured(messages: list[dict], response_model, doc_name: str, doc_type: str, source_path: Path | None = None):
+    import time
+    from backend.orchestrator import _log_to_vlm_file
+    
+    t0 = time.perf_counter()
+    _log_to_vlm_file(f"[START_EXTRACT] Doc: '{doc_name}' | Type: '{doc_type}' | Model: {VLM_MODEL}")
+    
+    client = get_client(temperature=VLM_TEMP, mode=instructor.Mode.JSON)
+    try:
+        response = client.chat.completions.create(
+            model=VLM_MODEL,
+            messages=messages,
+            response_model=response_model,
+            max_retries=2,
+            max_tokens=VLM_MAX_TOKENS,
+            extra_body={"options": {"num_ctx": VLM_NUM_CTX, "num_predict": VLM_NUM_PREDICT, "repeat_penalty": 1.2}}
+        )
+        elapsed = time.perf_counter() - t0
+        raw_resp = response._raw_response
+        prompt_tokens = raw_resp.usage.prompt_tokens
+        completion_tokens = raw_resp.usage.completion_tokens
+        speed = completion_tokens / elapsed if elapsed > 0 else 0.0
+        
+        log_msg = (
+            f"[SUCCESS_EXTRACT] Doc: '{doc_name}' | Type: '{doc_type}' | "
+            f"Elapsed: {elapsed:.2f}s | Prompt: {prompt_tokens} t | Completion: {completion_tokens} t | "
+            f"Inference Speed: {speed:.1f} t/s"
+        )
+        log.info(log_msg)
+        _log_to_vlm_file(log_msg)
+        
+        # Save raw JSON text to adjacent .txt files if source_path is provided
+        if source_path and source_path.exists():
+            try:
+                raw_text = raw_resp.choices[0].message.content or ""
+                # TXT file right next to the original file
+                txt_path = source_path.with_suffix(".txt")
+                txt_path.write_text(raw_text, encoding="utf-8")
+                
+                # Also save to adjacent results directory
+                results_dir = source_path.parent / "results"
+                results_dir.mkdir(exist_ok=True)
+                results_txt_path = results_dir / f"{source_path.stem}_result.txt"
+                results_txt_path.write_text(raw_text, encoding="utf-8")
+                
+                _log_to_vlm_file(f"[TXT_SAVED] Saved raw VLM output to {txt_path} and {results_txt_path}")
+            except Exception as e:
+                log.error(f"Failed to write txt result files: {e}")
+                
+        return response
+    except Exception as e:
+        elapsed = time.perf_counter() - t0
+        log_msg = f"[FAILED_EXTRACT] Doc: '{doc_name}' | Type: '{doc_type}' | Elapsed: {elapsed:.2f}s | Error: {e}"
+        log.error(log_msg)
+        _log_to_vlm_file(log_msg)
+        raise e
+
+
 def _extract_pdf_text(pdf_path: Path) -> str:
     """Извлекает текст из PDF с текстовым слоем."""
     from pypdf import PdfReader
@@ -159,14 +217,16 @@ ANALYSIS_FEWSHOT = """Пример входа:
 Холестерин общий 6.2 ммоль/л  < 5.2
 
 Пример выхода:
-[
+{
+  "results": [
   {"analyte_code": "HGB", "analyte_name": "Гемоглобин", "value_num": 145.0, "value_text": null,
    "unit": "г/л", "ref_low": 120.0, "ref_high": 160.0, "taken_at": null, "source_table_cell": null},
   {"analyte_code": "RBC", "analyte_name": "Эритроциты", "value_num": 4.8, "value_text": null,
    "unit": "×10^12/L", "ref_low": 3.9, "ref_high": 4.7, "taken_at": null, "source_table_cell": null},
   {"analyte_code": null, "analyte_name": "Холестерин общий", "value_num": 6.2, "value_text": null,
    "unit": "ммоль/л", "ref_low": null, "ref_high": 5.2, "taken_at": null, "source_table_cell": null}
-]"""
+  ]
+}"""
 
 ANALYSIS_VLM_SYSTEM = (
     ANALYSIS_SYSTEM
@@ -193,12 +253,12 @@ ANALYSIS_VLM_SYSTEM = (
 - analyte_name — на русском (как в бланке), analyte_code — на английском, если знаешь.
 
 ФИНАЛЬНЫЙ ВЫВОД:
-- Строго JSON-массив: первая буква ответа '[' и последняя ']'.
-- Никаких слов до/после JSON, никаких Markdown-блоков, комментариев или объяснений.
-- Если нет показателей, верни пустой массив [].
+- Строго JSON-объект с единственным ключом "results", содержащим список объектов показателей, внутри Markdown-блока ```json ... ```. Первая строка твоего ответа должна быть строго ```json, а последняя — ```.
+- Запрещено писать какой-либо текст, комментарии, вводные слова или размышления до или после этого блока! Начни ответ сразу с открывающего тега ```json.
+- Если нет показателей, верни пустой список внутри ключа "results" (т.е. {"results": []}).
 - Любой другой текст считается ошибкой и приводит к повтору запроса.
 ВНИМАНИЕ: Запрещено писать размышления (thinking/reasoning), проговаривать шаги или «Сначала посмотрим». Готовый
-JSON сразу, без преамбулы и кода."""
+JSON сразу внутри Markdown-блока, без преамбулы."""
 )
 
 def run_analysis(ocr: OCRResult | None = None, source_path: Path | None = None) -> list[LabResult]:
@@ -229,7 +289,8 @@ def run_analysis(ocr: OCRResult | None = None, source_path: Path | None = None) 
                 {"role": "system", "content": ANALYSIS_VLM_SYSTEM},
                 {"role": "user", "content": content}
             ]
-            return _run_vlm_analysis(messages)
+            response = _call_vlm_structured(messages, LabResults, source_path.name, "analysis", source_path)
+            return response.results
 
     if ocr is None:
         raise ValueError("Either source_path or ocr result must be provided")
@@ -250,41 +311,7 @@ def run_analysis(ocr: OCRResult | None = None, source_path: Path | None = None) 
     return response.results
 
 
-def _run_vlm_analysis(messages: list[dict]) -> list[LabResult]:
-    client = get_client(temperature=VLM_TEMP, mode=instructor.Mode.JSON)
-    try:
-        response = client.chat.completions.create(
-            model=VLM_MODEL,
-            messages=messages,
-            response_model=LabResults,
-            max_retries=2,
-            max_tokens=VLM_MAX_TOKENS,
-            extra_body={"options": {"num_ctx": VLM_NUM_CTX, "num_predict": VLM_NUM_PREDICT, "repeat_penalty": 1.2}}
-        )
-        return response.results
-    except (InstructorRetryException, IncompleteOutputException) as exc:
-        log.warning("VLM structured extraction failed, fallback to raw JSON: %s", exc)
-        partial_completion = getattr(exc, "last_completion", None)
-        if partial_completion:
-            partial_text = _completion_text(partial_completion)
-            if partial_text.strip():
-                try:
-                    return _parse_lab_results_from_text(partial_text)
-                except ValueError as parse_err:
-                    log.warning("Failed to parse partial completion: %s", parse_err)
 
-        raw_client = get_raw_client()
-        raw_completion = raw_client.chat.completions.create(
-            model=VLM_MODEL,
-            messages=messages,
-            temperature=VLM_TEMP,
-            max_tokens=VLM_MAX_TOKENS,
-            extra_body={"options": {"num_ctx": VLM_NUM_CTX, "num_predict": VLM_NUM_PREDICT, "repeat_penalty": 1.2}}
-        )
-        raw_text = _completion_text(raw_completion)
-        if not raw_text.strip():
-            raise RuntimeError("VLM вернул пустой ответ после fallback") from exc
-        return _parse_lab_results_from_text(raw_text)
 
     if ocr is None:
         raise ValueError("Either source_path or ocr result must be provided")
@@ -323,14 +350,16 @@ PRESCRIPTION_FEWSHOT = """Пример входа:
 Конкор 5 мг — 1 раз в день утром, длительно
 
 Пример выхода:
-[
+{
+  "results": [
   {"drug_mnn": "аторвастатин", "drug_trade": "Липримар", "dose": "20 мг",
    "frequency": "1 раз в день вечером после ужина", "duration_days": 30,
    "prescribed_at": null, "doctor_name": null, "form_107_1u_flag": false},
   {"drug_mnn": "бисопролол", "drug_trade": "Конкор", "dose": "5 мг",
    "frequency": "1 раз в день утром", "duration_days": null,
    "prescribed_at": null, "doctor_name": null, "form_107_1u_flag": false}
-]"""
+  ]
+}"""
 
 PRESCRIPTION_VLM_SYSTEM = """Ты — медицинский ассистент, который извлекает назначения лекарств по фото и сканам.
 
@@ -342,8 +371,8 @@ PRESCRIPTION_VLM_SYSTEM = """Ты — медицинский ассистент,
 5. frequency — строка: "1 раз в день вечером", "2 раза в день после еды".
 6. duration_days — число дней, если указано. Если "30 дней" → 30. Если "1 месяц" → 30. Если не указано → null.
 7. doctor_name — ФИО врача, если есть. Иначе null.
-8. ВЕРНИ только JSON массив объектов без Markdown и пояснений.
-ВНИМАНИЕ: Запрещено писать размышления (thinking/reasoning), объяснения или вводный текст. Сразу выводи готовый JSON без преамбулы."""
+8. ВЕРНИ только JSON объект с единственным ключом "results", содержащим список объектов назначений, внутри Markdown-блока ```json ... ```.
+ВНИМАНИЕ: Запрещено писать размышления (thinking/reasoning), объяснения или вводный текст. Сразу открывай блок кода ```json и начинай генерацию JSON. Никакого текста до и после блока ```json!"""
 
 def run_prescription(ocr: OCRResult, source_path: Path | None = None) -> list[Prescription]:
     """Извлекает назначения лекарств из документа."""
@@ -364,7 +393,6 @@ def run_prescription(ocr: OCRResult, source_path: Path | None = None) -> list[Pr
             )
             return response.results
         else:
-            client = get_client(temperature=VLM_TEMP, mode=instructor.Mode.JSON)
             b64_images = _pdf_to_base64_images(source_path)
             content = [{"type": "text", "text": "Extract prescriptions from these document images."}]
             for b64 in b64_images:
@@ -374,14 +402,7 @@ def run_prescription(ocr: OCRResult, source_path: Path | None = None) -> list[Pr
                 {"role": "system", "content": PRESCRIPTION_VLM_SYSTEM},
                 {"role": "user", "content": content}
             ]
-            response = client.chat.completions.create(
-                model=VLM_MODEL,
-                messages=messages,
-                response_model=Prescriptions,
-                max_retries=2,
-                max_tokens=VLM_MAX_TOKENS,
-                extra_body={"options": {"num_ctx": VLM_NUM_CTX, "num_predict": VLM_NUM_PREDICT, "repeat_penalty": 1.2}}
-            )
+            response = _call_vlm_structured(messages, Prescriptions, source_path.name, "prescription", source_path)
             return response.results
 
     if ocr is None:
@@ -422,9 +443,11 @@ DOCTOR_REPORT_FEWSHOT = """Пример входа:
 Осмотр: кардиолога, 15.05.2026
 
 Пример выхода:
-[
+{
+  "results": [
   {"diagnosis": "артериальная гипертензия", "recommendations": ["ограничить потребление соли", "контролировать АД 2 раза в день", "принимать назначенные препараты"], "complaints": ["головная боль", "слабость"], "anamnesis": null, "visit_date": "2026-05-15", "doctor_name": null, "department": "кардиологии", "medications": ["аторвастатин 20 мг 1 раз в день вечером", "бисопролол 5 мг 1 раз в день утром"]}
-]"""
+  ]
+}"""
 
 DOCTOR_REPORT_VLM_SYSTEM = """Ты — медицинский ассистент, который читает фото и сканы заключений врача.
 
@@ -437,8 +460,8 @@ DOCTOR_REPORT_VLM_SYSTEM = """Ты — медицинский ассистент
 6. doctor_name — ФИО врача (если есть)
 7. department — отделение (если есть)
 8. medications — список назначенных препаратов (названия препаратов, дозировки, кратность приёма)
-9. ВЕРНИ ТОЛЬКО JSON МАССИВ без Markdown и пояснений.
-ВНИМАНИЕ: Запрещено писать размышления. Сразу выводи чистый JSON."""
+9. ВЕРНИ только JSON объект с единственным ключом "results", содержащим список объектов заключений врача, внутри Markdown-блока ```json ... ```.
+ВНИМАНИЕ: Запрещено писать размышления (thinking/reasoning), объяснения или вводный текст. Сразу открывай блок кода ```json и начинай генерацию JSON. Никакого текста до и после блока ```json!"""
 
 def run_doctor_report(ocr: OCRResult, source_path: Path | None = None) -> list[DoctorReport]:
     """Извлекает заключения врача из документа."""
@@ -459,7 +482,6 @@ def run_doctor_report(ocr: OCRResult, source_path: Path | None = None) -> list[D
             )
             return response.results
         else:
-            client = get_client(temperature=VLM_TEMP, mode=instructor.Mode.JSON)
             b64_images = _pdf_to_base64_images(source_path)
             content = [{"type": "text", "text": "Extract doctor's report from these document images."}]
             for b64 in b64_images:
@@ -469,14 +491,7 @@ def run_doctor_report(ocr: OCRResult, source_path: Path | None = None) -> list[D
                 {"role": "system", "content": DOCTOR_REPORT_VLM_SYSTEM},
                 {"role": "user", "content": content}
             ]
-            response = client.chat.completions.create(
-                model=VLM_MODEL,
-                messages=messages,
-                response_model=DoctorReports,
-                max_retries=2,
-                max_tokens=VLM_MAX_TOKENS,
-                extra_body={"options": {"num_ctx": VLM_NUM_CTX, "num_predict": VLM_NUM_PREDICT, "repeat_penalty": 1.2}}
-            )
+            response = _call_vlm_structured(messages, DoctorReports, source_path.name, "doctor_report", source_path)
             return response.results
 
     if ocr is None:
