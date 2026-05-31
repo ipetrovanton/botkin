@@ -251,7 +251,7 @@ def run_analysis(ocr: OCRResult | None = None, source_path: Path | None = None) 
 
 
 def _run_vlm_analysis(messages: list[dict]) -> list[LabResult]:
-    client = get_client(temperature=VLM_TEMP, mode=instructor.Mode.MD_JSON)
+    client = get_client(temperature=VLM_TEMP, mode=instructor.Mode.JSON)
     try:
         response = client.chat.completions.create(
             model=VLM_MODEL,
@@ -364,7 +364,7 @@ def run_prescription(ocr: OCRResult, source_path: Path | None = None) -> list[Pr
             )
             return response.results
         else:
-            client = get_client(temperature=VLM_TEMP, mode=instructor.Mode.MD_JSON)
+            client = get_client(temperature=VLM_TEMP, mode=instructor.Mode.JSON)
             b64_images = _pdf_to_base64_images(source_path)
             content = [{"type": "text", "text": "Extract prescriptions from these document images."}]
             for b64 in b64_images:
@@ -459,7 +459,7 @@ def run_doctor_report(ocr: OCRResult, source_path: Path | None = None) -> list[D
             )
             return response.results
         else:
-            client = get_client(temperature=VLM_TEMP, mode=instructor.Mode.MD_JSON)
+            client = get_client(temperature=VLM_TEMP, mode=instructor.Mode.JSON)
             b64_images = _pdf_to_base64_images(source_path)
             content = [{"type": "text", "text": "Extract doctor's report from these document images."}]
             for b64 in b64_images:

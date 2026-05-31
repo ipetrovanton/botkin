@@ -1,4 +1,8 @@
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path("botkin-core").absolute()))
+sys.path.insert(0, str(Path("C:/Sandbox/botkin").absolute()))
+
 from openai import OpenAI
 from parsing.llm.extract import _pdf_to_base64_images, ANALYSIS_VLM_SYSTEM
 from backend.config import (
@@ -12,7 +16,8 @@ from backend.config import (
 PDF_PATH = Path(r"test-dataset/datasets/medknow-test/raw/user_samples/sample_020.pdf")
 
 images = _pdf_to_base64_images(PDF_PATH)
-client = OpenAI(base_url="http://172.31.82.112:11434/v1", api_key="ollama", timeout=600)
+from parsing.llm.ollama_client import OLLAMA_URL
+client = OpenAI(base_url=f"{OLLAMA_URL}/v1", api_key="ollama", timeout=600)
 
 content = [{"type": "text", "text": "Extract lab results from these document images."}]
 for b64 in images:

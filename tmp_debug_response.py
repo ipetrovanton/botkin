@@ -1,5 +1,8 @@
-from pathlib import Path
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path("botkin-core").absolute()))
+sys.path.insert(0, str(Path("C:/Sandbox/botkin").absolute()))
+
 import time
 import argparse
 from parsing.llm.extract import _pdf_to_base64_images, ANALYSIS_VLM_SYSTEM
