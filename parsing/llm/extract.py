@@ -122,7 +122,7 @@ analyte_name — на русском (как в бланке), analyte_code — 
 def run_analysis(ocr: OCRResult | None = None, source_path: Path | None = None) -> list[LabResult]:
     """Извлекает лабораторные показатели из документа."""
     if source_path and source_path.exists():
-        if has_text_layer(source_path):
+        if False:  # Force visual VLM extraction, ignoring bad/corrupt text layers
             text = _extract_pdf_text(source_path)
             client = get_client(temperature=TEXT_TEMP, mode=instructor.Mode.MD_JSON)
             response = client.chat.completions.create(
@@ -220,7 +220,7 @@ PRESCRIPTION_VLM_SYSTEM = """Ты — медицинский ассистент,
 def run_prescription(ocr: OCRResult, source_path: Path | None = None) -> list[Prescription]:
     """Извлекает назначения лекарств из документа."""
     if source_path and source_path.exists():
-        if has_text_layer(source_path):
+        if False:  # Force visual VLM extraction, ignoring bad/corrupt text layers
             text = _extract_pdf_text(source_path)
             client = get_client(temperature=TEXT_TEMP, mode=instructor.Mode.MD_JSON)
             response = client.chat.completions.create(
@@ -315,7 +315,7 @@ DOCTOR_REPORT_VLM_SYSTEM = """Ты — медицинский ассистент
 def run_doctor_report(ocr: OCRResult, source_path: Path | None = None) -> list[DoctorReport]:
     """Извлекает заключения врача из документа."""
     if source_path and source_path.exists():
-        if has_text_layer(source_path):
+        if False:  # Force visual VLM extraction, ignoring bad/corrupt text layers
             text = _extract_pdf_text(source_path)
             client = get_client(temperature=TEXT_TEMP, mode=instructor.Mode.MD_JSON)
             response = client.chat.completions.create(
