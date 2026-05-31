@@ -5,19 +5,10 @@ from pydantic import BaseModel
 from backend.contracts import ClassifyResult, DocType
 from .ollama_client import chat_completion, get_client
 from backend.config import VLM_MODEL, VLM_TEMP, VLM_NUM_CTX, VLM_NUM_PREDICT
+from .prompts import CLASSIFY_VLM_SYSTEM, CLASSIFY_PROMPT
 import instructor
 
-CLASSIFY_VLM_SYSTEM = """Ты — точный классификатор медицинских документов. Твоя задача — определить тип документа по его изображению.
 
-Доступные типы (выбери ОДИН):
-- analysis: лабораторный анализ (кровь, моча, биохимия) с показателями и нормами
-- prescription: рецепт врача или назначение лекарств
-- doctor_report: заключение врача, выписка, осмотр
-- certificate: справка медицинская
-- unknown: не подходит ни под один из выше
-
-Ответь СТРОГО в формате JSON внутри Markdown-блока ```json ... ```. Запрещено писать какой-либо текст, комментарии или размышления до или после этого блока! Начни ответ сразу с открывающего тега ```json.
-{"doc_type": "<один_из_типов>", "confidence": <число 0.0-1.0>}"""
 
 class ClassifySchema(BaseModel):
     doc_type: DocType
@@ -101,24 +92,7 @@ def _rules_score(text: str) -> dict[DocType, int]:
     return {dt: sum(1 for kw in kws if kw.lower() in lower) for dt, kws in KEYWORDS.items()}
 
 
-CLASSIFY_PROMPT = """Ты определяешь тип медицинского документа по его тексту.
 
-Доступные типы (выбери ОДИН):
-- analysis: лабораторный анализ (кровь, моча, биохимия) с показателями и нормами
-- prescription: рецепт врача или назначение лекарств
-- receipt: кассовый чек из аптеки или клиники
-- certificate: справка медицинская
-- doctor_report: заключение врача, выписка, осмотр
-- unknown: не подходит ни под один из выше
-
-Текст документа:
----
-{text}
----
-
-Ответь СТРОГО в формате JSON, без пояснений:
-{{"doc_type": "<один_из_типов>", "confidence": <число 0.0-1.0>}}
-"""
 
 
 def run(text: str) -> ClassifyResult:

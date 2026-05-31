@@ -18,6 +18,7 @@ import instructor
 # PIL Image is not used
 import pymupdf
 from parsing.ocr.preprocess import has_text_layer
+from .prompts import ANALYSIS_SYSTEM, ANALYSIS_FEWSHOT, ANALYSIS_VLM_SYSTEM, PRESCRIPTION_SYSTEM, PRESCRIPTION_FEWSHOT, PRESCRIPTION_VLM_SYSTEM, DOCTOR_REPORT_SYSTEM, DOCTOR_REPORT_FEWSHOT, DOCTOR_REPORT_VLM_SYSTEM
 
 log = logging.getLogger(__name__)
 
@@ -361,18 +362,7 @@ PRESCRIPTION_FEWSHOT = """Пример входа:
   ]
 }"""
 
-PRESCRIPTION_VLM_SYSTEM = """Ты — медицинский ассистент, который извлекает назначения лекарств по фото и сканам.
 
-Правила:
-1. Для каждого препарата извлеки: МНН (международное непатентованное наименование) и торговое название.
-2. МНН — обязательно на русском в нижнем регистре.
-3. Если в рецепте указано только торговое название — попробуй определить МНН по знаниям.
-4. dose — строка с единицей: "20 мг", "500 мг", "1 капля".
-5. frequency — строка: "1 раз в день вечером", "2 раза в день после еды".
-6. duration_days — число дней, если указано. Если "30 дней" → 30. Если "1 месяц" → 30. Если не указано → null.
-7. doctor_name — ФИО врача, если есть. Иначе null.
-8. ВЕРНИ только JSON объект с единственным ключом "results", содержащим список объектов назначений, внутри Markdown-блока ```json ... ```.
-ВНИМАНИЕ: Запрещено писать размышления (thinking/reasoning), объяснения или вводный текст. Сразу открывай блок кода ```json и начинай генерацию JSON. Никакого текста до и после блока ```json!"""
 
 def run_prescription(ocr: OCRResult, source_path: Path | None = None) -> list[Prescription]:
     """Извлекает назначения лекарств из документа."""
@@ -449,19 +439,7 @@ DOCTOR_REPORT_FEWSHOT = """Пример входа:
   ]
 }"""
 
-DOCTOR_REPORT_VLM_SYSTEM = """Ты — медицинский ассистент, который читает фото и сканы заключений врача.
 
-Правила:
-1. diagnosis — основной диагноз (если есть)
-2. recommendations — список рекомендаций врача по режиму, диете, образу жизни
-3. complaints — список жалоб пациента (если есть)
-4. anamnesis — анамнез заболевания (если есть)
-5. visit_date — дата визита (если есть в документе)
-6. doctor_name — ФИО врача (если есть)
-7. department — отделение (если есть)
-8. medications — список назначенных препаратов (названия препаратов, дозировки, кратность приёма)
-9. ВЕРНИ только JSON объект с единственным ключом "results", содержащим список объектов заключений врача, внутри Markdown-блока ```json ... ```.
-ВНИМАНИЕ: Запрещено писать размышления (thinking/reasoning), объяснения или вводный текст. Сразу открывай блок кода ```json и начинай генерацию JSON. Никакого текста до и после блока ```json!"""
 
 def run_doctor_report(ocr: OCRResult, source_path: Path | None = None) -> list[DoctorReport]:
     """Извлекает заключения врача из документа."""
