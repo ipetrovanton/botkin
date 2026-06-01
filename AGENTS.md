@@ -38,14 +38,12 @@
    ```
 2. Запустите оркестратор / FastAPI API-сервер:
    ```powershell
-   cd botkin-core
-   uv run python -m backend.app
+   uv run python -m backend
    ```
 3. В отдельном окне терминала запустите Telegram-бота:
    ```powershell
-   cd botkin-core
-   # Убедитесь, что в botkin-core/.env прописаны TG_BOT_TOKEN
-   uv run python -m bot_and_rag.bot.main
+   # Убедитесь, что в .env прописан TG_BOT_TOKEN
+   uv run python -m bot_and_rag.bot
    ```
 
 ---
@@ -81,13 +79,24 @@ wsl -u root -d Ubuntu systemctl restart ollama
 
 ---
 
-## 📁 5. Структура вспомогательных скриптов и Базы данных
+## 📁 5. Структура проекта
 
-Для поддержания чистоты кодовой базы все утилиты разработки, тестирования и диагностики перенесены во внутреннюю папку:
-
-- `scripts/dev/generate_regression.py` — Скрипт для прогона регрессионных тестов извлечения показателей.
-- `scripts/dev/check_sources.py` — Скрипт для проверки медицинских источников данных.
-- `scripts/dev/problems_check.txt` — Диагностический лог проблем.
+```
+botkin/
+├── backend/            # FastAPI-сервер, API загрузки, работа с БД
+│   ├── api/            # Роуты (upload)
+│   ├── db/             # Схема SQLite, connection pool, репозитории
+│   └── app.py          # Точка входа сервера
+├── bot_and_rag/        # Telegram-бот и визуализация
+│   ├── bot/            # Aiogram-бот, хендлеры (/start, /show, /dynamics, upload)
+│   └── viz/            # Plotly-графики динамики показателей
+├── parsing/            # Промпты и вызовы qwen3-vl
+│   └── llm/            # classify, extract, prompts, ollama_client
+├── tests/              # Дымовые тесты (импорты, инициализация БД, бот)
+├── config.json         # Детальные настройки VLM и загрузки
+├── pyproject.toml      # Зависимости и метаданные пакета
+└── .env.example        # Шаблон переменных окружения
+```
 
 ### Индексы Базы Данных для Оптимизации Производительности:
 Для ускорения SQL-запросов и исключения медленного последовательного сканирования таблиц (Table Scan) в схему `backend/db/schema.sql` добавлены следующие индексы:

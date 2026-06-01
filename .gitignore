@@ -25,8 +25,8 @@ __pycache__/
 # Uploaded files
 sources/
 
-# Legacy (старая структура, не удаляем чтобы не сломать .venv на диске)
-botkin-core/
+# Pytest artifacts
+pytest-cache-files-*/
 
 # OS
 .DS_Store
