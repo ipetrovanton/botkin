@@ -1,6 +1,6 @@
 [project]
 name = "botkin"
-version = "0.1.0"
+version = "0.2.0"
 description = "Dr.Botkin — Telegram-бот для парсинга медицинских документов через qwen3-vl"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -27,3 +27,18 @@ dev = [
     "pytest-asyncio==0.25.2",
     "ruff==0.8.6",
 ]
+
+[project.scripts]
+botkin-api = "botkin.api.app:app"
+botkin-bot = "botkin.bot.main:run"
+
+[tool.uv]
+package = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+src = ["src"]
