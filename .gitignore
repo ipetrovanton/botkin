@@ -1,0 +1,33 @@
+# Secrets
+.env
+.env.local
+
+# IDE
+.idea/
+.windsurf/
+.vscode/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Uploaded files
+sources/
+
+# Legacy (старая структура, не удаляем чтобы не сломать .venv на диске)
+botkin-core/
+
+# OS
+.DS_Store
+Thumbs.db

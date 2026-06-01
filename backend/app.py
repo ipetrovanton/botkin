@@ -1,0 +1,25 @@
+"""FastAPI-приложение botkin."""
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from .db.connection import init_db
+from .api import upload
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(
+    title="botkin API",
+    version="0.2.0",
+    lifespan=lifespan,
+)
+
+app.include_router(upload.router)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}

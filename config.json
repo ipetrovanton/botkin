@@ -1,0 +1,27 @@
+{
+  "vlm": {
+    "model": "qwen3-vl:3b",
+    "temperature": 0.0,
+    "num_ctx": 32768,
+    "num_predict": 8192,
+    "max_tokens": 8192,
+    "repeat_penalty": 1.2
+  },
+  "pdf_to_image": {
+    "scale_x": 2.0,
+    "scale_y": 2.0,
+    "max_pages": 50
+  },
+  "database": {
+    "sqlite_path": "./data/botkin.db"
+  },
+  "bot": {
+    "polling_timeout": 30,
+    "api_url": "http://localhost:8000"
+  },
+  "upload": {
+    "max_bytes": 20971520,
+    "allowed_extensions": [".pdf", ".jpg", ".jpeg", ".png", ".heic", ".webp"],
+    "sources_dir": "./sources"
+  }
+}
