@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 from pydantic import BaseModel
 from backend.contracts import ClassifyResult, DocType
-from backend.config import VLM_MODEL, VLM_TEMPERATURE, VLM_NUM_CTX, VLM_NUM_PREDICT
+from backend.config import VLM_MODEL, VLM_TEMPERATURE, VLM_NUM_CTX, VLM_MAX_TOKENS
 from .prompts import CLASSIFY_VLM_SYSTEM
 from .extract import _pdf_to_base64_images
 from .ollama_client import get_client
@@ -41,11 +41,10 @@ def run_vlm(source_path: Path) -> ClassifyResult:
             model=VLM_MODEL,
             messages=messages,
             response_model=ClassifySchema,
-            max_tokens=500,
+            max_tokens=VLM_MAX_TOKENS,
             extra_body={
                 "options": {
                     "num_ctx": VLM_NUM_CTX,
-                    "num_predict": VLM_NUM_PREDICT,
                     "repeat_penalty": 1.2,
                 }
             },

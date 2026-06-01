@@ -6,7 +6,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from backend.contracts import LabResult, Prescription, DoctorReport
 from backend.config import (
-    VLM_MODEL, VLM_TEMPERATURE, VLM_NUM_CTX, VLM_NUM_PREDICT,
+    VLM_MODEL, VLM_TEMPERATURE, VLM_NUM_CTX,
     VLM_MAX_TOKENS, PDF_SCALE_X, PDF_SCALE_Y, MAX_PAGES,
 )
 import instructor
@@ -90,7 +90,6 @@ def _call_vlm(
             extra_body={
                 "options": {
                     "num_ctx": VLM_NUM_CTX,
-                    "num_predict": VLM_NUM_PREDICT,
                     "repeat_penalty": 1.2,
                 }
             },
