@@ -9,7 +9,7 @@
 - **OS**: Windows 10/11 с установленной WSL2 (Ubuntu).
 - **Python**: `>= 3.12` на Windows-хосте и в WSL2.
 - **Движок моделей**: Ollama, запущенный внутри WSL2.
-- **Векторные / СУБД**: SQLite 3 встроенная в Python.
+- **СУБД**: SQLite 3 встроенная в Python.
 
 ---
 
@@ -32,18 +32,18 @@
    ```
 
 ### Шаг Б. Запуск бэкенда и Telegram-бота (на Windows-хосте)
-1. Активируйте виртуальное окружение на Windows-хосте:
+1. Установите зависимости и пакет:
    ```powershell
-   .venv\Scripts\activate
+   uv sync
    ```
-2. Запустите оркестратор / FastAPI API-сервер:
+2. Запустите FastAPI API-сервер:
    ```powershell
-   uv run python -m backend
+   uv run uvicorn botkin.api.app:app --host 0.0.0.0 --port 8000
    ```
 3. В отдельном окне терминала запустите Telegram-бота:
    ```powershell
    # Убедитесь, что в .env прописан TG_BOT_TOKEN
-   uv run python -m bot_and_rag.bot
+   uv run python -m botkin.bot.main
    ```
 
 ---
@@ -53,16 +53,13 @@
 После запуска бота, пользователь может выполнить следующие сценарии тестирования:
 
 1. **Активация и старт**:
-   - Отправьте боту команду `/start`. Бот предложит ввести код приглашения.
-   - Используйте код или зарегистрируйтесь. После успешной регистрации бот поприветствует вас и покажет список команд.
+   - Отправьте боту команду `/start`. Бот автоматически зарегистрирует вас и покажет приветствие.
 2. **Загрузка выписки / рецепта (Анализы и Назначения)**:
    - Отправьте боту PDF-документ или фото бланка (например, `sample_001.pdf` или `sample_030.jpg`).
-   - Если в вашей семье зарегистрировано несколько человек, бот отобразит **Inline-клавиатуру**:
-     `👥 Для кого этот документ? Выбери члена семьи:`
-   - Выберите пациента (например, "Иван"). Бот ответит: `✅ Документ #X успешно привязан к члену семьи: Иван`.
+   - Бот примет документ и запустит фоновую обработку.
 3. **Просмотр результатов и аналитики**:
    - **/last** или **/show**: Показывает результаты обработки последнего загруженного документа. Бот выведет тип (Анализы 🧪 или Рецепт 💊), дату, а также структурированный список показателей (показатели анализов с маркерами нормы ⬇️/⬆️, или названия препаратов с дозировками и длительностью).
-   - **/dynamics <название_показателя>**: Бот сгенерирует красивый PNG-график динамики этого показателя на `plotly`, отрендерит референсный коридор нормы зеленым цветом и пришлет картинку! (Например, `/dynamics гемоглобин`).
+   - **/dynamics <название_показателя>**: Бот сгенерирует PNG-график динамики этого показателя на `plotly`, отрендерит референсный коридор нормы зеленым цветом и пришлет картинку. (Например, `/dynamics гемоглобин`).
 
 ---
 
@@ -83,21 +80,50 @@ wsl -u root -d Ubuntu systemctl restart ollama
 
 ```
 botkin/
-├── backend/            # FastAPI-сервер, API загрузки, работа с БД
-│   ├── api/            # Роуты (upload)
-│   ├── db/             # Схема SQLite, connection pool, репозитории
-│   └── app.py          # Точка входа сервера
-├── bot_and_rag/        # Telegram-бот и визуализация
-│   ├── bot/            # Aiogram-бот, хендлеры (/start, /show, /dynamics, upload)
-│   └── viz/            # Plotly-графики динамики показателей
-├── parsing/            # Промпты и вызовы qwen3-vl
-│   └── llm/            # classify, extract, prompts, ollama_client
-├── tests/              # Дымовые тесты (импорты, инициализация БД, бот)
-├── config.json         # Детальные настройки VLM и загрузки
-├── pyproject.toml      # Зависимости и метаданные пакета
-└── .env.example        # Шаблон переменных окружения
+├── src/botkin/              # Пакет (устанавливаемый через uv/pip)
+│   ├── api/                 # FastAPI-приложение
+│   │   ├── app.py           # Точка входа сервера
+│   │   ├── deps.py          # Зависимости (get_user_id)
+│   │   └── routes/          # Роуты
+│   │       └── upload.py    # POST /upload
+│   ├── bot/                 # Telegram-бот (aiogram)
+│   │   ├── main.py          # Точка входа бота
+│   │   └── handlers/        # /start, /help, /show, /dynamics, upload
+│   ├── db/                  # База данных
+│   │   ├── connection.py    # Подключение, init_db
+│   │   ├── schema.sql       # DDL-схема (5 таблиц)
+│   │   ├── queries.py       # Аналитические запросы
+│   │   └── repos.py         # Репозитории (DocumentRepo, UserRepo)
+│   ├── domain/              # Доменные модели
+│   │   └── models.py        # LabResult, Prescription, DoctorReport, etc.
+│   ├── llm/                 # VLM-интеграция (qwen3-vl)
+│   │   ├── client.py        # Ollama OpenAI-совместимый клиент
+│   │   ├── classify.py      # Классификация документа
+│   │   ├── extract.py       # Извлечение данных
+│   │   └── prompts.py       # Все VLM-промпты
+│   ├── pipeline/            # Пайплайн обработки
+│   │   ├── orchestrator.py  # classify → extract → persist
+│   │   └── notifications.py # Telegram-уведомления
+│   ├── viz/                 # Визуализация
+│   │   └── plots.py         # Plotly-графики динамики
+│   ├── config.py            # Централизованная конфигурация
+│   └── exceptions.py        # Типизированные исключения
+├── tests/                   # Тесты
+│   ├── conftest.py          # Фикстуры
+│   └── test_smoke.py        # 9 smoke-тестов
+├── config.json              # Переопределения конфигурации
+├── pyproject.toml           # Зависимости, entry points, tool config
+├── .env.example             # Шаблон переменных окружения
+├── AGENTS.md                # Этот файл
+├── LICENSE                  # MIT
+└── README.md
 ```
 
 ### Индексы Базы Данных для Оптимизации Производительности:
-Для ускорения SQL-запросов и исключения медленного последовательного сканирования таблиц (Table Scan) в схему `backend/db/schema.sql` добавлены следующие индексы:
-- `idx_doctor_reports_document` на `doctor_reports(document_id)` — оптимизирует выборку врачебных заключений в команде `/show`.
+Для ускорения SQL-запросов в схему `src/botkin/db/schema.sql` добавлены индексы:
+- `idx_documents_user` на `documents(user_id)`
+- `idx_documents_status` на `documents(status)`
+- `idx_lab_user_analyte` на `lab_results(user_id, analyte_name, taken_at)`
+- `idx_presc_user_mnn` на `prescriptions(user_id, drug_mnn)`
+- `idx_doctor_reports_user` на `doctor_reports(user_id, visit_date)`
+- `idx_doctor_reports_document` на `doctor_reports(document_id)` — оптимизирует `/show`
