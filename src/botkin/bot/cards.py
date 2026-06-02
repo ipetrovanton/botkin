@@ -42,6 +42,33 @@ def format_list_body(docs: list[dict], offset: int, total: int) -> str:
     return "\n".join(lines)
 
 
+def format_labs_summary(groups: list[dict], label: str) -> str:
+    if not groups:
+        return f"📊 За {label}: данных по показателям нет."
+    total = sum(len(g["points"]) for g in groups)
+    lines = [f"📊 Показатели за {label} (по {total} значениям)", "────────────"]
+    for g in groups:
+        pts = g["points"]
+        vals = [p["value_num"] for p in pts]
+        unit = html.escape(pts[-1].get("unit") or "")
+        trend = " → ".join(str(v) for v in vals)
+        last = pts[-1]
+        marker = ""
+        lo, hi, v = last.get("ref_low"), last.get("ref_high"), last["value_num"]
+        if hi is not None and v > hi:
+            marker = " ⬆️"
+        elif lo is not None and v < lo:
+            marker = " ⬇️"
+        norm = ""
+        if lo is not None and hi is not None:
+            norm = f"  (норма {lo}–{hi})"
+        elif hi is not None:
+            norm = f"  (норма <{hi})"
+        name = html.escape(g["analyte_name"])
+        lines.append(f"{name}: {trend} {unit}{marker}{norm}")
+    return "\n".join(lines)
+
+
 def _reg_warning(reg_statuses_json: str | None) -> str:
     """⚠️ если в наборе статусов ГРЛС нет ни одного 'active'."""
     if not reg_statuses_json:
