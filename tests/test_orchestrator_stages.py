@@ -17,9 +17,10 @@ def _make_doc():
     return uid, did
 
 
-def test_title_clinic_saved_after_classify(set_test_db):
+def test_title_clinic_saved_after_classify(set_test_db, monkeypatch):
     from botkin.pipeline import orchestrator
     from botkin.db.connection import get_conn
+    monkeypatch.setattr(orchestrator, "DELIVERY_FALLBACK_DELAY", 0.0)
     uid, did = _make_doc()
     with patch.object(orchestrator.classify, "run_vlm",
                       return_value=ClassifyResult(doc_type="analysis", confidence=0.9,
@@ -35,10 +36,11 @@ def test_title_clinic_saved_after_classify(set_test_db):
     assert row["status"] == "extracted"
 
 
-def test_stages_recorded(set_test_db):
+def test_stages_recorded(set_test_db, monkeypatch):
     """Стадии recognizing и normalizing проставляются по ходу."""
     from botkin.pipeline import orchestrator
     from botkin.db.connection import get_conn
+    monkeypatch.setattr(orchestrator, "DELIVERY_FALLBACK_DELAY", 0.0)
     uid, did = _make_doc()
     seen = []
 

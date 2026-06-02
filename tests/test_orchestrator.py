@@ -17,9 +17,10 @@ async def _anoop(*args, **kwargs):
     return None
 
 
-def test_prescription_drug_normalized_and_raw_saved(set_test_db):
+def test_prescription_drug_normalized_and_raw_saved(set_test_db, monkeypatch):
     from botkin.pipeline import orchestrator
     from botkin.db.connection import get_conn
+    monkeypatch.setattr(orchestrator, "DELIVERY_FALLBACK_DELAY", 0.0)
 
     uid, did = _make_doc()
 

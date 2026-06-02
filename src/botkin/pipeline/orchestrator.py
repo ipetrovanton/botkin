@@ -4,6 +4,7 @@ import json
 import logging
 from pathlib import Path
 
+from botkin.config import DELIVERY_FALLBACK_DELAY
 from botkin.db.connection import get_conn
 from botkin.db.repos import DocumentRepo
 from botkin.domain.models import LabResult, Prescription, DoctorReport
@@ -116,9 +117,14 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
     # ── 4. Финал ───────────────────────────────────────────────────────────
     with get_conn() as conn:
         DocumentRepo(conn, user_id).set_status(document_id, "extracted")
-
     log.info("Doc %d processed", document_id)
-    await notify_user(telegram_user_id, document_processed(document_id, doc_type))
+
+    # Push-fallback: ждём, пока поллинг бота покажет результат и захватит доставку.
+    await asyncio.sleep(DELIVERY_FALLBACK_DELAY)
+    with get_conn() as conn:
+        claimed = DocumentRepo(conn, user_id).claim_delivery(document_id)
+    if claimed:
+        await notify_user(telegram_user_id, document_processed(document_id, doc_type))
 
 
 # ── Хелперы ────────────────────────────────────────────────────────────────────

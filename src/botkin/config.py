@@ -146,3 +146,6 @@ BOT_API_URL = os.getenv("API_URL", _get("bot.api_url", _DEFAULTS["bot"]["api_url
 UPLOAD_MAX_BYTES = int(_get("upload.max_bytes", _DEFAULTS["upload"]["max_bytes"]))
 UPLOAD_ALLOWED_EXTENSIONS: set[str] = set(_get("upload.allowed_extensions", _DEFAULTS["upload"]["allowed_extensions"]))
 UPLOAD_SOURCES_DIR = _resolve_path(os.getenv("SOURCES_DIR", _get("upload.sources_dir", _DEFAULTS["upload"]["sources_dir"])))
+
+# Задержка перед push-fallback доставки финала (> таймаута поллинга бота 120с).
+DELIVERY_FALLBACK_DELAY = float(os.getenv("DELIVERY_FALLBACK_DELAY", "130"))
