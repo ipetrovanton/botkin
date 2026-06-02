@@ -1,14 +1,19 @@
-"""Навигация по документам: /list, карточка, листание, фильтр."""
+"""Навигация по документам: /list, /period, карточка, листание, фильтр."""
+from datetime import datetime
+
 from aiogram import Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, Message
 
-from botkin.bot.cards import format_card_header, format_list_body
+from botkin.bot.cards import format_card_header, format_labs_summary, format_list_body
 from botkin.bot.keyboards import (
     PAGE_SIZE, TYPE_CODES, card_keyboard, decode_cb, list_keyboard,
+    period_presets_keyboard, period_view_keyboard,
 )
+from botkin.bot.period import parse_manual, preset_range
 from botkin.db.queries import (
-    count_documents, get_document, get_user_id, list_documents,
+    count_documents, documents_in_period, get_document, get_user_id,
+    labs_in_period, list_documents,
 )
 
 router = Router(name="browse")
@@ -53,6 +58,36 @@ async def cmd_list(message: Message) -> None:
     await _show_list(message.answer, uid, "all", 0)
 
 
+async def _period_labs(target, user_id, start, end, label):
+    groups = labs_in_period(user_id, start, end)
+    await target(format_labs_summary(groups, label=label))
+
+
+async def _show_period_docs(target, user_id, start, end, preset):
+    docs = documents_in_period(user_id, start, end, limit=PAGE_SIZE, offset=0)
+    body = format_list_body(docs, offset=0, total=len(docs))
+    kb = list_keyboard([d["id"] for d in docs], doc_type=None, offset=0, total=len(docs))
+    await target(body, reply_markup=kb)
+
+
+@router.message(Command("period"))
+async def cmd_period(message: Message, command: CommandObject) -> None:
+    uid = await _need_user(message, message.from_user.id)
+    if not uid:
+        return
+    args = (command.args or "").split()
+    if args:
+        rng = parse_manual(args)
+        if not rng:
+            await message.answer(
+                "Формат: /period 2026-01 2026-03  или  /period 2026-01-01 2026-01-31")
+            return
+        start, end = rng
+        await _period_labs(message.answer, uid, start, end, label=f"{args[0]}–{args[1]}")
+        return
+    await message.answer("📅 За какой период?", reply_markup=period_presets_keyboard())
+
+
 @router.callback_query()
 async def on_callback(cb: CallbackQuery) -> None:
     uid = await _need_user(cb, cb.from_user.id)
@@ -81,4 +116,16 @@ async def on_callback(cb: CallbackQuery) -> None:
             if 0 <= j < len(siblings):
                 text, kb = _render_card(siblings[j], uid)
                 await cb.message.edit_text(text, reply_markup=kb)
+
+    elif action == "per":
+        preset, view = parts[0], parts[1]
+        if view == "menu":
+            await cb.message.edit_text(f"📅 {preset} — что показать?",
+                                       reply_markup=period_view_keyboard(preset))
+        else:
+            start, end = preset_range(preset, now=datetime.now())
+            if view == "docs":
+                await _show_period_docs(cb.message.edit_text, uid, start, end, preset)
+            else:
+                await _period_labs(cb.message.edit_text, uid, start, end, label=preset)
     await cb.answer()

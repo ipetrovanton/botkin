@@ -53,3 +53,21 @@ def card_keyboard(doc_id: int, has_prev: bool, has_next: bool) -> InlineKeyboard
     if has_next:
         row.append(InlineKeyboardButton(text="След. →", callback_data=encode_cb("nav", doc_id, "next")))
     return InlineKeyboardMarkup(inline_keyboard=[row])
+
+
+_PRESETS = [("Месяц", "month"), ("3 месяца", "3m"), ("Год", "year"), ("Всё время", "all")]
+
+
+def period_presets_keyboard() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for label, code in _PRESETS:
+        b.button(text=label, callback_data=encode_cb("per", code, "menu"))
+    b.adjust(2, 2)
+    return b.as_markup()
+
+
+def period_view_keyboard(preset: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="📁 Документы", callback_data=encode_cb("per", preset, "docs"))
+    b.button(text="📊 Показатели", callback_data=encode_cb("per", preset, "labs"))
+    return b.as_markup()
