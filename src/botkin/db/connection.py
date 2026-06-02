@@ -52,7 +52,7 @@ def _migrate_documents_status_check(conn: sqlite3.Connection) -> None:
         source_path TEXT NOT NULL,
         raw_text TEXT,
         status TEXT NOT NULL DEFAULT 'received'
-            CHECK(status IN ('received','recognizing','normalizing','extracted','failed')),
+            CHECK(status IN ('received','processing','recognizing','normalizing','extracted','failed')),
         confidence REAL,
         raw_extraction TEXT,
         title TEXT,
