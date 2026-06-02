@@ -1,13 +1,17 @@
-"""Pipeline обработки документа: classify → extract → persist."""
+"""Pipeline обработки документа: classify → extract → normalize → persist."""
 import asyncio
+import json
 import logging
 from pathlib import Path
 
+from botkin.config import DELIVERY_FALLBACK_DELAY
 from botkin.db.connection import get_conn
 from botkin.db.repos import DocumentRepo
-from botkin.domain.models import LabResult, Prescription, DoctorReport
+from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ClassificationError, ExtractionError
 from botkin.llm import classify, extract
+from botkin.normalize.drugs import DrugNormalizer, load_default
+from botkin.normalize.units import canonical_unit
 from botkin.pipeline.notifications import (
     classify_failed, document_processed, extract_failed, notify_user, pipeline_failed,
 )
@@ -15,6 +19,16 @@ from botkin.pipeline.notifications import (
 log = logging.getLogger("botkin.pipeline")
 
 LLM_SEMAPHORE = asyncio.Semaphore(1)
+
+_DRUG_NORMALIZER: DrugNormalizer | None = None
+
+
+def get_drug_normalizer() -> DrugNormalizer:
+    """Ленивый синглтон: справочник лекарств читается из registry.jsonl один раз."""
+    global _DRUG_NORMALIZER
+    if _DRUG_NORMALIZER is None:
+        _DRUG_NORMALIZER = load_default()
+    return _DRUG_NORMALIZER
 
 
 async def process_document(document_id: int, telegram_user_id: int) -> None:
@@ -41,9 +55,9 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
     user_id = doc["user_id"]
     source_path = Path(doc["source_path"])
 
-    # ── 1. Статус: processing ──────────────────────────────────────────────
+    # ── 1. Статус: распознавание ───────────────────────────────────────────
     with get_conn() as conn:
-        DocumentRepo(conn, user_id).set_status(document_id, "processing")
+        DocumentRepo(conn, user_id).set_status(document_id, "recognizing")
 
     # ── 2. Classify (VLM) ──────────────────────────────────────────────────
     async with LLM_SEMAPHORE:
@@ -60,7 +74,13 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
     log.info("Doc %d classified as %s (conf=%.2f)", document_id, doc_type, result.confidence)
 
     with get_conn() as conn:
-        DocumentRepo(conn, user_id).set_doc_type(document_id, doc_type)
+        repo = DocumentRepo(conn, user_id)
+        repo.set_doc_type(document_id, doc_type)
+        repo.set_metadata(document_id, result.title, result.clinic)
+
+    # ── Статус: нормализация (извлечение деталей + нормализация) ────────────
+    with get_conn() as conn:
+        DocumentRepo(conn, user_id).set_status(document_id, "normalizing")
 
     # ── 3. Extract (VLM) ───────────────────────────────────────────────────
     async with LLM_SEMAPHORE:
@@ -69,18 +89,14 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
                 items: list[LabResult] = await asyncio.get_event_loop().run_in_executor(
                     None, extract.run_analysis, source_path,
                 )
+                _save_raw_extraction(document_id, items)
                 _persist_lab(document_id, user_id, items)
-
-            elif doc_type == "prescription":
-                items: list[Prescription] = await asyncio.get_event_loop().run_in_executor(
-                    None, extract.run_prescription, source_path,
-                )
-                _persist_prescription(document_id, user_id, items)
 
             elif doc_type == "doctor_report":
                 items: list[DoctorReport] = await asyncio.get_event_loop().run_in_executor(
                     None, extract.run_doctor_report, source_path,
                 )
+                _save_raw_extraction(document_id, items)
                 _persist_doctor_report(document_id, user_id, items)
 
             else:
@@ -94,9 +110,14 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
     # ── 4. Финал ───────────────────────────────────────────────────────────
     with get_conn() as conn:
         DocumentRepo(conn, user_id).set_status(document_id, "extracted")
-
     log.info("Doc %d processed", document_id)
-    await notify_user(telegram_user_id, document_processed(document_id, doc_type))
+
+    # Push-fallback: ждём, пока поллинг бота покажет результат и захватит доставку.
+    await asyncio.sleep(DELIVERY_FALLBACK_DELAY)
+    with get_conn() as conn:
+        claimed = DocumentRepo(conn, user_id).claim_delivery(document_id)
+    if claimed:
+        await notify_user(telegram_user_id, document_processed(document_id, doc_type))
 
 
 # ── Хелперы ────────────────────────────────────────────────────────────────────
@@ -107,54 +128,61 @@ def _mark_failed(document_id: int) -> None:
         conn.commit()
 
 
+def _save_raw_extraction(document_id: int, items: list) -> None:
+    """Сохраняет полный сырой ответ модели (до нормализации) — гарантия восстановимости."""
+    payload = json.dumps([i.model_dump(mode="json") for i in items], ensure_ascii=False)
+    with get_conn() as conn:
+        conn.execute("UPDATE documents SET raw_extraction = ? WHERE id = ?", (payload, document_id))
+        conn.commit()
+
+
 # ── Persist ────────────────────────────────────────────────────────────────────
 
 def _persist_lab(document_id: int, user_id: int, items: list[LabResult]) -> None:
     with get_conn() as conn:
         for item in items:
+            unit_canon, unit_raw = canonical_unit(item.unit)
             conn.execute(
                 """INSERT INTO lab_results(document_id, user_id, analyte_code, analyte_name,
-                   value_num, value_text, unit, ref_low, ref_high, taken_at, source_table_cell)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   value_num, value_text, unit, ref_low, ref_high, taken_at, source_table_cell,
+                   value_raw, unit_raw, taken_at_raw)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (document_id, user_id, item.analyte_code, item.analyte_name,
-                 item.value_num, item.value_text, item.unit,
+                 item.value_num, item.value_text, unit_canon,
                  item.ref_low, item.ref_high,
                  item.taken_at.isoformat() if item.taken_at else None,
-                 item.source_table_cell),
+                 item.source_table_cell,
+                 item.value_raw, unit_raw, item.taken_at_raw),
             )
         conn.commit()
 
 
-def _persist_prescription(document_id: int, user_id: int, items: list[Prescription]) -> None:
-    with get_conn() as conn:
-        for item in items:
-            conn.execute(
-                """INSERT INTO prescriptions(document_id, user_id, drug_mnn, drug_trade,
-                   dose, frequency, duration_days, prescribed_at, doctor_name, form_107_1u_flag)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (document_id, user_id, item.drug_mnn, item.drug_trade,
-                 item.dose, item.frequency, item.duration_days,
-                 item.prescribed_at.isoformat() if item.prescribed_at else None,
-                 item.doctor_name, item.form_107_1u_flag),
-            )
-        conn.commit()
+def _normalize_medications(lines: list[str]) -> str:
+    """Best-effort нормализация строк medications (свободный текст с дозой)."""
+    normalizer = get_drug_normalizer()
+    out = []
+    for line in lines:
+        m = normalizer.correct_free_text(line)
+        out.append({"raw": m.raw, "canonical": m.canonical, "mnn": m.mnn,
+                    "statuses": list(m.statuses), "status": m.status})
+    return json.dumps(out, ensure_ascii=False)
 
 
 def _persist_doctor_report(document_id: int, user_id: int, items: list[DoctorReport]) -> None:
-    import json
-
     with get_conn() as conn:
         for item in items:
             conn.execute(
                 """INSERT INTO doctor_reports(document_id, user_id, diagnosis,
                    recommendations_json, complaints_json, anamnesis, medications_json,
+                   medications_normalized_json,
                    visit_date, doctor_name, department)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (document_id, user_id, item.diagnosis,
                  json.dumps(item.recommendations, ensure_ascii=False),
                  json.dumps(item.complaints, ensure_ascii=False),
                  item.anamnesis,
                  json.dumps(item.medications, ensure_ascii=False),
+                 _normalize_medications(item.medications),
                  item.visit_date.isoformat() if item.visit_date else None,
                  item.doctor_name, item.department),
             )

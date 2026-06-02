@@ -6,14 +6,13 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from botkin.bot.cards import format_card_header
+from botkin.bot.keyboards import card_keyboard
 from botkin.db.queries import (
-    get_doctor_reports, get_lab_results, get_last_document, get_prescriptions, get_user_id,
+    get_doctor_reports, get_lab_results, get_last_document, get_user_id,
 )
 
 router = Router(name="show")
-
-STATUS_EMOJI = {"received": "📥", "processing": "⏳", "extracted": "✅", "failed": "❌"}
-TYPE_EMOJI = {"analysis": "🧪", "prescription": "💊", "doctor_report": "👨‍⚕️"}
 
 
 @router.message(Command("show", "last"))
@@ -30,13 +29,9 @@ async def cmd_show(message: Message) -> None:
 
     doc_id = doc["id"]
     details = _format_document(doc_id, doc)
-    status = STATUS_EMOJI.get(doc["status"], "❓")
-    type_e = TYPE_EMOJI.get(doc["doc_type"], "📄")
-
     await message.answer(
-        f"{status} Документ #{doc['id']}  {type_e}\n"
-        f"Тип: {doc['doc_type']}\n"
-        f"Загружен: {doc['created_at']}\n\n{details}"
+        f"{format_card_header(doc)}\n────────────\n{details}",
+        reply_markup=card_keyboard(doc_id, has_prev=False, has_next=False),
     )
 
 
@@ -44,12 +39,13 @@ def _format_document(doc_id: int, doc: dict) -> str:
     doc_type = doc["doc_type"]
     if doc_type == "analysis":
         return _format_labs(get_lab_results(doc_id))
-    elif doc_type == "prescription":
-        return _format_rx(get_prescriptions(doc_id))
     elif doc_type == "doctor_report":
         return _format_doctor_reports(get_doctor_reports(doc_id))
     else:
-        return html.escape(doc["raw_text"][:500]) if doc.get("raw_text") else ""
+        return (
+            "ℹ️ Распознавание этого типа документа (например, рецептов) "
+            "пока не поддерживается — сохранён только сам файл."
+        )
 
 
 def _format_labs(rows: list[dict]) -> str:
@@ -66,18 +62,6 @@ def _format_labs(rows: list[dict]) -> str:
         unit = html.escape(r["unit"]) if r["unit"] else ""
         lines.append(f"• <b>{name}</b>: {r['value_num']} {unit}{ref}{marker}")
     return "\n".join(lines) or "—"
-
-
-def _format_rx(rows: list[dict]) -> str:
-    lines = []
-    for r in rows:
-        trade = f" ({html.escape(r['drug_trade'])})" if r["drug_trade"] else ""
-        dur = f", {r['duration_days']} дн." if r["duration_days"] else ""
-        mnn = html.escape(r["drug_mnn"])
-        dose = html.escape(r["dose"]) if r["dose"] else ""
-        freq = html.escape(r["frequency"]) if r["frequency"] else ""
-        lines.append(f"• <b>{mnn}{trade}</b>: {dose}, {freq}{dur}")
-    return "\n".join(lines) or "-"
 
 
 def _format_doctor_reports(rows: list[dict]) -> str:

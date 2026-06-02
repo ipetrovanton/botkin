@@ -1,0 +1,76 @@
+"""Inline-клавиатуры и компактное кодирование callback_data (лимит 64 байта)."""
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+_SEP = ":"
+
+# Коды типов для краткого callback_data.
+TYPE_CODES = {"a": "analysis", "d": "doctor_report", "all": None}
+CODE_BY_TYPE = {"analysis": "a", "doctor_report": "d", None: "all"}
+
+PAGE_SIZE = 7
+# Эмодзи + подпись, чтобы из ряда фильтров было понятно, где что.
+# Подписи согласованы с domain/models.py и help.py.
+_FILTERS = [("🧪 Анализы", "a"), ("👨‍⚕️ Заключения", "d"), ("📋 Все", "all")]
+
+
+def encode_cb(action: str, *parts) -> str:
+    return _SEP.join([action, *[str(p) for p in parts]])
+
+
+def decode_cb(data: str) -> tuple[str, list[str]]:
+    action, *parts = data.split(_SEP)
+    return action, parts
+
+
+def list_keyboard(doc_ids: list[int], doc_type, offset: int, total: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    # ряд фильтров
+    for label, code in _FILTERS:
+        b.button(text=label, callback_data=encode_cb("lst", code, 0))
+    # ряд номеров выбора
+    for i, did in enumerate(doc_ids, start=1):
+        b.button(text=str(i), callback_data=encode_cb("doc", did))
+    # ряд пагинации
+    code = CODE_BY_TYPE.get(doc_type, "all")
+    nav_row = []
+    if offset > 0:
+        nav_row.append(InlineKeyboardButton(
+            text="← Назад", callback_data=encode_cb("lst", code, max(0, offset - PAGE_SIZE))))
+    if offset + PAGE_SIZE < total:
+        nav_row.append(InlineKeyboardButton(
+            text="Вперёд →", callback_data=encode_cb("lst", code, offset + PAGE_SIZE)))
+    # фильтры — один ряд из 3 кнопок, затем ряд номеров
+    b.adjust(len(_FILTERS), len(doc_ids))
+    kb = b.as_markup()
+    if nav_row:
+        kb.inline_keyboard.append(nav_row)
+    return kb
+
+
+def card_keyboard(doc_id: int, has_prev: bool, has_next: bool) -> InlineKeyboardMarkup:
+    row = []
+    if has_prev:
+        row.append(InlineKeyboardButton(text="← Пред.", callback_data=encode_cb("nav", doc_id, "prev")))
+    row.append(InlineKeyboardButton(text="☰ К списку", callback_data=encode_cb("lst", "all", 0)))
+    if has_next:
+        row.append(InlineKeyboardButton(text="След. →", callback_data=encode_cb("nav", doc_id, "next")))
+    return InlineKeyboardMarkup(inline_keyboard=[row])
+
+
+_PRESETS = [("Месяц", "month"), ("3 месяца", "3m"), ("Год", "year"), ("Всё время", "all")]
+
+
+def period_presets_keyboard() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for label, code in _PRESETS:
+        b.button(text=label, callback_data=encode_cb("per", code, "menu"))
+    b.adjust(2, 2)
+    return b.as_markup()
+
+
+def period_view_keyboard(preset: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="📁 Документы", callback_data=encode_cb("per", preset, "docs"))
+    b.button(text="📊 Показатели", callback_data=encode_cb("per", preset, "labs"))
+    return b.as_markup()

@@ -42,6 +42,23 @@ class DocumentRepo(BaseRepo):
         )
         self.conn.commit()
 
+    def set_metadata(self, document_id: int, title: str | None, clinic: str | None) -> None:
+        self.conn.execute(
+            "UPDATE documents SET title = ?, clinic = ? WHERE id = ? AND user_id = ?",
+            (title, clinic, document_id, self.user_id),
+        )
+        self.conn.commit()
+
+    def claim_delivery(self, document_id: int) -> bool:
+        """Атомарно помечает доставку; True если захватил первым."""
+        cur = self.conn.execute(
+            "UPDATE documents SET delivered_at = CURRENT_TIMESTAMP "
+            "WHERE id = ? AND user_id = ? AND delivered_at IS NULL",
+            (document_id, self.user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
     def set_doc_type(self, document_id: int, doc_type: str) -> None:
         self.conn.execute(
             "UPDATE documents SET doc_type = ? WHERE id = ? AND user_id = ?",

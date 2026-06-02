@@ -25,9 +25,17 @@ __pycache__/
 # Uploaded files
 sources/
 
+# Вход build-скрипта справочника (большая выгрузка ГРЛС) — не коммитим, см. registry.jsonl
+grls*.zip
+
 # Pytest artifacts
 pytest-cache-files-*/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Секреты и локальные тестовые образцы — НЕ коммитить
+token.txt
+example.jpg.jpg
+*.jpg.jpg

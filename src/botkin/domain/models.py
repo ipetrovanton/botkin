@@ -6,14 +6,15 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from botkin.normalize.dates import parse_date as _parse_date
+
 # ── Типы ──────────────────────────────────────────────────────────────────────
 
-DocType = Literal["analysis", "prescription", "doctor_report", "certificate", "unknown"]
+DocType = Literal["analysis", "doctor_report", "certificate", "unknown"]
 DocStatus = Literal["received", "processing", "extracted", "failed"]
 
 DOC_TYPE_LABELS: dict[str, str] = {
     "analysis": "Анализы 🧪",
-    "prescription": "Рецепт 💊",
     "doctor_report": "Заключение врача 👨‍⚕️",
     "certificate": "Справка 📄",
     "unknown": "Документ 📄",
@@ -21,30 +22,11 @@ DOC_TYPE_LABELS: dict[str, str] = {
 
 # ── Парсинг русских дат ───────────────────────────────────────────────────────
 
-_MONTHS_RU = {
-    "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
-    "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
-}
-
 
 def parse_ru_date(value: str | datetime | None) -> datetime | None:
-    """Парсит русские даты ('23 марта 2026 г.') или возвращает datetime."""
-    if value is None or isinstance(value, datetime):
-        return value
-    if not isinstance(value, str):
-        return None
-    cleaned = value.strip().lower().replace(" г.", "").replace("г.", "")
-    parts = cleaned.split()
-    if len(parts) == 3 and parts[1] in _MONTHS_RU:
-        try:
-            day, month_name, year = parts
-            return datetime(int(year), _MONTHS_RU[month_name], int(day))
-        except (ValueError, KeyError):
-            pass
-    try:
-        return datetime.fromisoformat(cleaned.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+    """Совместимость: возвращает только datetime (сырое хранит orchestrator)."""
+    dt, _ = _parse_date(value)
+    return dt
 
 
 # ── Модели ────────────────────────────────────────────────────────────────────
@@ -66,29 +48,13 @@ class LabResult(BaseModel):
     taken_at: Optional[datetime] = None
     source_table_cell: Optional[str] = None
     comments: Optional[str] = None
+    value_raw: Optional[str] = None
+    unit_raw: Optional[str] = None
+    taken_at_raw: Optional[str] = None
 
     @field_validator("taken_at", mode="before")
     @classmethod
     def _validate_taken_at(cls, v):
-        return parse_ru_date(v)
-
-
-class Prescription(BaseModel):
-    """Одно назначение из рецепта/выписки."""
-    model_config = ConfigDict(extra="forbid")
-
-    drug_mnn: str = Field(..., min_length=2)
-    drug_trade: Optional[str] = None
-    dose: Optional[str] = None
-    frequency: Optional[str] = None
-    duration_days: Optional[int] = Field(default=None, ge=0)
-    prescribed_at: Optional[datetime] = None
-    doctor_name: Optional[str] = None
-    form_107_1u_flag: bool = False
-
-    @field_validator("prescribed_at", mode="before")
-    @classmethod
-    def _validate_prescribed_at(cls, v):
         return parse_ru_date(v)
 
 
@@ -117,6 +83,8 @@ class ClassifyResult(BaseModel):
 
     doc_type: DocType
     confidence: float = Field(..., ge=0.0, le=1.0)
+    title: Optional[str] = None
+    clinic: Optional[str] = None
 
 
 class UploadResponse(BaseModel):

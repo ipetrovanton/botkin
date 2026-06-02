@@ -17,16 +17,22 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
-    doc_type TEXT CHECK(doc_type IN ('analysis','prescription','doctor_report','certificate','unknown')),
+    doc_type TEXT CHECK(doc_type IN ('analysis','doctor_report','certificate','unknown')),
     source_path TEXT NOT NULL,
     raw_text TEXT,
     status TEXT NOT NULL DEFAULT 'received'
-        CHECK(status IN ('received','processing','extracted','failed')),
+        CHECK(status IN ('received','processing','recognizing','normalizing','extracted','failed')),
     confidence REAL,
+    raw_extraction TEXT,
+    title TEXT,
+    clinic TEXT,
+    delivered_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
 CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
+-- лента и навигация по соседям: фильтр user_id + сортировка/сравнение по дате
+CREATE INDEX IF NOT EXISTS idx_documents_user_created ON documents(user_id, created_at);
 
 -- ============ LAB RESULTS ============
 
@@ -43,27 +49,12 @@ CREATE TABLE IF NOT EXISTS lab_results (
     ref_high REAL,
     taken_at TIMESTAMP,
     source_table_cell TEXT,
+    value_raw TEXT,
+    unit_raw TEXT,
+    taken_at_raw TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_lab_user_analyte ON lab_results(user_id, analyte_name, taken_at);
-
--- ============ PRESCRIPTIONS ============
-
-CREATE TABLE IF NOT EXISTS prescriptions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id INTEGER NOT NULL REFERENCES documents(id),
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    drug_mnn TEXT NOT NULL,
-    drug_trade TEXT,
-    dose TEXT,
-    frequency TEXT,
-    duration_days INTEGER,
-    prescribed_at TIMESTAMP,
-    doctor_name TEXT,
-    form_107_1u_flag BOOLEAN DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_presc_user_mnn ON prescriptions(user_id, drug_mnn);
 
 -- ============ DOCTOR REPORTS ============
 
@@ -76,6 +67,7 @@ CREATE TABLE IF NOT EXISTS doctor_reports (
     complaints_json TEXT,
     anamnesis TEXT,
     medications_json TEXT,
+    medications_normalized_json TEXT,
     visit_date TIMESTAMP,
     doctor_name TEXT,
     department TEXT,

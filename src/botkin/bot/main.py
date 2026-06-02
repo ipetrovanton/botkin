@@ -8,7 +8,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 
-from botkin.bot.handlers import dynamics, help, show, start, upload
+from botkin.bot.handlers import browse, dynamics, help, show, start, upload
 
 try:
     from dotenv import load_dotenv
@@ -36,11 +36,14 @@ async def main() -> None:
     dp.include_router(upload.router)
     dp.include_router(show.router)
     dp.include_router(dynamics.router)
+    dp.include_router(browse.router)  # содержит catch-all callback_query — последним
 
     await bot.set_my_commands([
         BotCommand(command="start", description="Регистрация"),
         BotCommand(command="help", description="Справка"),
         BotCommand(command="show", description="Последний документ"),
+        BotCommand(command="list", description="Список документов"),
+        BotCommand(command="period", description="Документы и показатели за период"),
         BotCommand(command="dynamics", description="График показателя"),
     ])
 
