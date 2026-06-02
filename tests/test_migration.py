@@ -16,3 +16,10 @@ def test_migration_idempotent(set_test_db):
     from botkin.db.connection import init_db
     init_db()
     init_db()
+
+
+def test_documents_has_new_columns(set_test_db):
+    from botkin.db.connection import get_conn
+    with get_conn() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(documents)").fetchall()}
+    assert {"title", "clinic", "delivered_at"} <= cols

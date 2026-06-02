@@ -21,9 +21,12 @@ CREATE TABLE IF NOT EXISTS documents (
     source_path TEXT NOT NULL,
     raw_text TEXT,
     status TEXT NOT NULL DEFAULT 'received'
-        CHECK(status IN ('received','processing','extracted','failed')),
+        CHECK(status IN ('received','recognizing','normalizing','extracted','failed')),
     confidence REAL,
     raw_extraction TEXT,
+    title TEXT,
+    clinic TEXT,
+    delivered_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);

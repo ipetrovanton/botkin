@@ -12,7 +12,12 @@ SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
 # Колонки, добавляемые поверх существующих таблиц (идемпотентно).
 _MIGRATIONS: dict[str, dict[str, str]] = {
-    "documents": {"raw_extraction": "TEXT"},
+    "documents": {
+        "raw_extraction": "TEXT",
+        "title": "TEXT",
+        "clinic": "TEXT",
+        "delivered_at": "TIMESTAMP",
+    },
     "lab_results": {"value_raw": "TEXT", "unit_raw": "TEXT", "taken_at_raw": "TEXT"},
     "prescriptions": {
         "drug_raw": "TEXT", "match_status": "TEXT",
