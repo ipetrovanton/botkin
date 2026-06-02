@@ -13,7 +13,11 @@ def test_list_keyboard_has_filters_numbers_and_paging():
     ids = [11, 12, 13]
     kb = list_keyboard(ids, doc_type=None, offset=0, total=20)
     texts = _texts(kb)
-    assert "🧪" in texts and "💊" in texts and "👨‍⚕️" in texts and "Все" in texts
+    # фильтры — эмодзи С подписью, чтобы было понятно, где что
+    assert "🧪 Анализы" in texts
+    assert "💊 Рецепты" in texts
+    assert "👨‍⚕️ Заключения" in texts
+    assert "📋 Все" in texts
     assert "1" in texts and "3" in texts          # номера по количеству на странице
     assert any("Вперёд" in t for t in texts)      # есть следующая страница
     assert not any("Назад" in t for t in texts)   # на offset=0 назад нет

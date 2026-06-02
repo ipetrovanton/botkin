@@ -9,7 +9,9 @@ TYPE_CODES = {"a": "analysis", "p": "prescription", "d": "doctor_report", "all":
 CODE_BY_TYPE = {"analysis": "a", "prescription": "p", "doctor_report": "d", None: "all"}
 
 PAGE_SIZE = 7
-_FILTERS = [("🧪", "a"), ("💊", "p"), ("👨‍⚕️", "d"), ("Все", "all")]
+# Эмодзи + подпись, чтобы из ряда фильтров было понятно, где что.
+# Подписи согласованы с domain/models.py и help.py.
+_FILTERS = [("🧪 Анализы", "a"), ("💊 Рецепты", "p"), ("👨‍⚕️ Заключения", "d"), ("📋 Все", "all")]
 
 
 def encode_cb(action: str, *parts) -> str:
@@ -38,7 +40,8 @@ def list_keyboard(doc_ids: list[int], doc_type, offset: int, total: int) -> Inli
     if offset + PAGE_SIZE < total:
         nav_row.append(InlineKeyboardButton(
             text="Вперёд →", callback_data=encode_cb("lst", code, offset + PAGE_SIZE)))
-    b.adjust(len(_FILTERS), len(doc_ids))
+    # фильтры — сетка 2×2 (подписи не влезают в один ряд), затем ряд номеров
+    b.adjust(2, 2, len(doc_ids))
     kb = b.as_markup()
     if nav_row:
         kb.inline_keyboard.append(nav_row)
