@@ -19,5 +19,5 @@ WELCOME = (
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     with get_conn() as conn:
-        UserRepo(conn, 0).get_or_create(message.from_user.id)
+        UserRepo(conn).get_or_create(message.from_user.id)
     await message.answer(WELCOME)

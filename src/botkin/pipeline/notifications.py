@@ -1,7 +1,6 @@
 """Отправка уведомлений пользователю через Telegram."""
 import logging
 import os
-from typing import Optional
 
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties

@@ -8,7 +8,7 @@ import urllib.request
 from openai import OpenAI
 
 import instructor
-from botkin.config import OLLAMA_URL, VLM_MODEL
+from botkin.config import OLLAMA_URL
 
 log = logging.getLogger(__name__)
 

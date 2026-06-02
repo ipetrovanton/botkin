@@ -6,7 +6,6 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from botkin.db.connection import get_conn
 from botkin.db.queries import (
     get_doctor_reports, get_lab_results, get_last_document, get_prescriptions, get_user_id,
 )

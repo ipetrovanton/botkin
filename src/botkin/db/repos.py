@@ -67,8 +67,11 @@ class DocumentRepo(BaseRepo):
         return [dict(r) for r in rows]
 
 
-class UserRepo(BaseRepo):
+class UserRepo:
     table = "users"
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
 
     def get_or_create(self, telegram_user_id: int) -> int:
         """Возвращает user_id по telegram_user_id, создаёт при необходимости."""
