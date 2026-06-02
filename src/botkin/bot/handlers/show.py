@@ -6,14 +6,12 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from botkin.bot.cards import format_card_header, format_rx_line
 from botkin.db.queries import (
     get_doctor_reports, get_lab_results, get_last_document, get_prescriptions, get_user_id,
 )
 
 router = Router(name="show")
-
-STATUS_EMOJI = {"received": "📥", "processing": "⏳", "extracted": "✅", "failed": "❌"}
-TYPE_EMOJI = {"analysis": "🧪", "prescription": "💊", "doctor_report": "👨‍⚕️"}
 
 
 @router.message(Command("show", "last"))
@@ -30,14 +28,7 @@ async def cmd_show(message: Message) -> None:
 
     doc_id = doc["id"]
     details = _format_document(doc_id, doc)
-    status = STATUS_EMOJI.get(doc["status"], "❓")
-    type_e = TYPE_EMOJI.get(doc["doc_type"], "📄")
-
-    await message.answer(
-        f"{status} Документ #{doc['id']}  {type_e}\n"
-        f"Тип: {doc['doc_type']}\n"
-        f"Загружен: {doc['created_at']}\n\n{details}"
-    )
+    await message.answer(f"{format_card_header(doc)}\n────────────\n{details}")
 
 
 def _format_document(doc_id: int, doc: dict) -> str:
@@ -69,15 +60,7 @@ def _format_labs(rows: list[dict]) -> str:
 
 
 def _format_rx(rows: list[dict]) -> str:
-    lines = []
-    for r in rows:
-        trade = f" ({html.escape(r['drug_trade'])})" if r["drug_trade"] else ""
-        dur = f", {r['duration_days']} дн." if r["duration_days"] else ""
-        mnn = html.escape(r["drug_mnn"])
-        dose = html.escape(r["dose"]) if r["dose"] else ""
-        freq = html.escape(r["frequency"]) if r["frequency"] else ""
-        lines.append(f"• <b>{mnn}{trade}</b>: {dose}, {freq}{dur}")
-    return "\n".join(lines) or "-"
+    return "\n".join(format_rx_line(r) for r in rows) or "-"
 
 
 def _format_doctor_reports(rows: list[dict]) -> str:
