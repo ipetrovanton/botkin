@@ -54,9 +54,9 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
     user_id = doc["user_id"]
     source_path = Path(doc["source_path"])
 
-    # ── 1. Статус: processing ──────────────────────────────────────────────
+    # ── 1. Статус: распознавание ───────────────────────────────────────────
     with get_conn() as conn:
-        DocumentRepo(conn, user_id).set_status(document_id, "processing")
+        DocumentRepo(conn, user_id).set_status(document_id, "recognizing")
 
     # ── 2. Classify (VLM) ──────────────────────────────────────────────────
     async with LLM_SEMAPHORE:
@@ -73,7 +73,13 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
     log.info("Doc %d classified as %s (conf=%.2f)", document_id, doc_type, result.confidence)
 
     with get_conn() as conn:
-        DocumentRepo(conn, user_id).set_doc_type(document_id, doc_type)
+        repo = DocumentRepo(conn, user_id)
+        repo.set_doc_type(document_id, doc_type)
+        repo.set_metadata(document_id, result.title, result.clinic)
+
+    # ── Статус: нормализация (извлечение деталей + нормализация) ────────────
+    with get_conn() as conn:
+        DocumentRepo(conn, user_id).set_status(document_id, "normalizing")
 
     # ── 3. Extract (VLM) ───────────────────────────────────────────────────
     async with LLM_SEMAPHORE:
