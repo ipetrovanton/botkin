@@ -29,6 +29,8 @@ def test_classify_uses_small_image_and_mocked_client(tmp_path):
     resp = MagicMock()
     resp.doc_type = "analysis"
     resp.confidence = 0.9
+    resp.title = "Биохимия крови"
+    resp.clinic = "Инвитро"
     resp._raw_response.usage.prompt_tokens = 10
     resp._raw_response.usage.completion_tokens = 5
     fake.chat.completions.create.return_value = resp
@@ -39,6 +41,8 @@ def test_classify_uses_small_image_and_mocked_client(tmp_path):
 
     assert isinstance(result, ClassifyResult)
     assert result.doc_type == "analysis"
+    assert result.title == "Биохимия крови"
+    assert result.clinic == "Инвитро"
     # classify использует уменьшенное разрешение
     from botkin.config import IMAGE_CLASSIFY_LONG_SIDE
     _, kwargs = prep.call_args
