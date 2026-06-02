@@ -7,6 +7,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from botkin.bot.cards import format_card_header, format_rx_line
+from botkin.bot.keyboards import card_keyboard
 from botkin.db.queries import (
     get_doctor_reports, get_lab_results, get_last_document, get_prescriptions, get_user_id,
 )
@@ -28,7 +29,10 @@ async def cmd_show(message: Message) -> None:
 
     doc_id = doc["id"]
     details = _format_document(doc_id, doc)
-    await message.answer(f"{format_card_header(doc)}\n────────────\n{details}")
+    await message.answer(
+        f"{format_card_header(doc)}\n────────────\n{details}",
+        reply_markup=card_keyboard(doc_id, has_prev=False, has_next=False),
+    )
 
 
 def _format_document(doc_id: int, doc: dict) -> str:

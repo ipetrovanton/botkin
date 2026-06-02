@@ -126,3 +126,10 @@ def test_domain_models():
     assert lab2.value_raw == "145"
     rx2 = Prescription(drug_mnn="аторвастатин", drug_raw="аторвастатин", match_status="matched")
     assert rx2.match_status == "matched"
+
+def test_show_attaches_nav_keyboard():
+    from botkin.bot.keyboards import card_keyboard
+    kb = card_keyboard(doc_id=1, has_prev=False, has_next=False)
+    # хотя бы кнопка «к списку» всегда присутствует
+    datas = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert any(d.startswith("lst:") for d in datas)
