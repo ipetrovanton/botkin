@@ -80,6 +80,7 @@ def _migrate_documents_schema(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE _documents_old")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_user_created ON documents(user_id, created_at)")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.commit()
 

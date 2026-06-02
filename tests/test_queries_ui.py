@@ -28,6 +28,25 @@ def test_get_document_status(set_test_db):
     assert get_document_status(ids[0], uid) == "received"
 
 
+def test_adjacent_document_navigation(set_test_db):
+    """Сосед по дате через SQL, тай-брейк по id (created_at одинаков в _seed)."""
+    from botkin.db.queries import get_adjacent_document_id
+    uid, ids = _seed(3)          # ids по возрастанию → c новее всех, a старее всех
+    a, b, c = ids
+    # старее (prev в ленте по убыванию даты)
+    assert get_adjacent_document_id(uid, b, older=True) == a
+    assert get_adjacent_document_id(uid, a, older=True) is None    # самый старый
+    # новее (next)
+    assert get_adjacent_document_id(uid, b, older=False) == c
+    assert get_adjacent_document_id(uid, c, older=False) is None   # самый новый
+
+
+def test_adjacent_document_owner_scoped(set_test_db):
+    from botkin.db.queries import get_adjacent_document_id
+    uid, ids = _seed(2)
+    assert get_adjacent_document_id(uid + 999, ids[0], older=True) is None   # чужой
+
+
 def test_count_and_list_documents_with_filter_and_paging(set_test_db):
     from botkin.db.queries import count_documents, list_documents
     uid, _ = _seed(3, "analysis")

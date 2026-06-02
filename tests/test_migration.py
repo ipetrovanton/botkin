@@ -10,6 +10,15 @@ def test_new_columns_exist(set_test_db):
         assert {"value_raw", "unit_raw", "taken_at_raw"} <= cols(conn, "lab_results")
 
 
+def test_documents_user_created_index_exists(set_test_db):
+    """Составной индекс для ленты и навигации по соседям."""
+    from botkin.db.connection import get_conn
+    with get_conn() as conn:
+        names = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
+    assert "idx_documents_user_created" in names
+
+
 def test_prescriptions_table_dropped(set_test_db):
     """Тип prescription снят с поддержки — таблицы prescriptions быть не должно."""
     from botkin.db.connection import get_conn

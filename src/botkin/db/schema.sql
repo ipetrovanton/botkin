@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
 CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
+-- лента и навигация по соседям: фильтр user_id + сортировка/сравнение по дате
+CREATE INDEX IF NOT EXISTS idx_documents_user_created ON documents(user_id, created_at);
 
 -- ============ LAB RESULTS ============
 

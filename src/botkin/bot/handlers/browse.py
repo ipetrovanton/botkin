@@ -12,8 +12,8 @@ from botkin.bot.keyboards import (
 )
 from botkin.bot.period import parse_manual, preset_range
 from botkin.db.queries import (
-    count_documents, documents_in_period, get_document, get_user_id,
-    labs_in_period, list_documents,
+    count_documents, documents_in_period, get_adjacent_document_id, get_document,
+    get_user_id, labs_in_period, list_documents,
 )
 
 router = Router(name="browse")
@@ -32,11 +32,9 @@ def _render_card(doc_id: int, user_id: int):
     doc = get_document(doc_id, user_id)
     if not doc:
         return None, None
-    # соседи по дате в пределах всех документов пользователя
-    siblings = [d["id"] for d in list_documents(user_id, limit=10_000)]
-    idx = siblings.index(doc_id) if doc_id in siblings else 0
-    has_prev = idx < len(siblings) - 1     # список по убыванию даты → prev = старее
-    has_next = idx > 0
+    # соседи по дате — прямым индексным запросом, без выгрузки всего списка id
+    has_prev = get_adjacent_document_id(user_id, doc_id, older=True) is not None
+    has_next = get_adjacent_document_id(user_id, doc_id, older=False) is not None
     text = f"{format_card_header(doc)}\n────────────\n{_format_document(doc_id, doc)}"
     return text, card_keyboard(doc_id, has_prev=has_prev, has_next=has_next)
 
@@ -109,13 +107,10 @@ async def on_callback(cb: CallbackQuery) -> None:
 
     elif action == "nav":
         doc_id, direction = int(parts[0]), parts[1]
-        siblings = [d["id"] for d in list_documents(uid, limit=10_000)]
-        if doc_id in siblings:
-            i = siblings.index(doc_id)
-            j = i + 1 if direction == "prev" else i - 1   # prev = старее (дальше по списку)
-            if 0 <= j < len(siblings):
-                text, kb = _render_card(siblings[j], uid)
-                await cb.message.edit_text(text, reply_markup=kb)
+        target_id = get_adjacent_document_id(uid, doc_id, older=(direction == "prev"))
+        if target_id is not None:
+            text, kb = _render_card(target_id, uid)
+            await cb.message.edit_text(text, reply_markup=kb)
 
     elif action == "per":
         preset, view = parts[0], parts[1]

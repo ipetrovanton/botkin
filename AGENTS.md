@@ -123,6 +123,7 @@ botkin/
 Для ускорения SQL-запросов в схему `src/botkin/db/schema.sql` добавлены индексы:
 - `idx_documents_user` на `documents(user_id)`
 - `idx_documents_status` на `documents(status)`
+- `idx_documents_user_created` на `documents(user_id, created_at)` — лента `/list` и навигация по соседям карточки
 - `idx_lab_user_analyte` на `lab_results(user_id, analyte_name, taken_at)`
 - `idx_doctor_reports_user` на `doctor_reports(user_id, visit_date)`
 - `idx_doctor_reports_document` на `doctor_reports(document_id)` — оптимизирует `/show`

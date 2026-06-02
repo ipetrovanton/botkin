@@ -60,6 +60,38 @@ def get_document_status(document_id: int, user_id: int) -> str | None:
     return row["status"] if row else None
 
 
+def get_adjacent_document_id(user_id: int, document_id: int, *, older: bool) -> int | None:
+    """id соседнего документа по дате (тай-брейк по id), в пределах пользователя.
+
+    older=True — старее текущего (предыдущий в ленте по убыванию даты);
+    older=False — новее. Возвращает None, если соседа нет или документ чужой.
+    Опирается на индекс по created_at вместо выгрузки всего списка id.
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT created_at, id FROM documents WHERE id = ? AND user_id = ?",
+            (document_id, user_id),
+        ).fetchone()
+        if not cur:
+            return None
+        if older:
+            sql = (
+                "SELECT id FROM documents WHERE user_id = ? "
+                "AND (created_at < ? OR (created_at = ? AND id < ?)) "
+                "ORDER BY created_at DESC, id DESC LIMIT 1"
+            )
+        else:
+            sql = (
+                "SELECT id FROM documents WHERE user_id = ? "
+                "AND (created_at > ? OR (created_at = ? AND id > ?)) "
+                "ORDER BY created_at ASC, id ASC LIMIT 1"
+            )
+        row = conn.execute(
+            sql, (user_id, cur["created_at"], cur["created_at"], cur["id"])
+        ).fetchone()
+    return row["id"] if row else None
+
+
 def count_documents(user_id: int, doc_type: str | None = None) -> int:
     sql = "SELECT COUNT(*) AS c FROM documents WHERE user_id = ?"
     params: list = [user_id]
@@ -77,7 +109,7 @@ def list_documents(user_id: int, doc_type: str | None = None,
     if doc_type:
         sql += " AND doc_type = ?"
         params.append(doc_type)
-    sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    sql += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
     params += [limit, offset]
     with get_conn() as conn:
         rows = conn.execute(sql, tuple(params)).fetchall()
