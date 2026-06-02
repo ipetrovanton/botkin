@@ -5,13 +5,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 _SEP = ":"
 
 # Коды типов для краткого callback_data.
-TYPE_CODES = {"a": "analysis", "p": "prescription", "d": "doctor_report", "all": None}
-CODE_BY_TYPE = {"analysis": "a", "prescription": "p", "doctor_report": "d", None: "all"}
+TYPE_CODES = {"a": "analysis", "d": "doctor_report", "all": None}
+CODE_BY_TYPE = {"analysis": "a", "doctor_report": "d", None: "all"}
 
 PAGE_SIZE = 7
 # Эмодзи + подпись, чтобы из ряда фильтров было понятно, где что.
 # Подписи согласованы с domain/models.py и help.py.
-_FILTERS = [("🧪 Анализы", "a"), ("💊 Рецепты", "p"), ("👨‍⚕️ Заключения", "d"), ("📋 Все", "all")]
+_FILTERS = [("🧪 Анализы", "a"), ("👨‍⚕️ Заключения", "d"), ("📋 Все", "all")]
 
 
 def encode_cb(action: str, *parts) -> str:
@@ -40,8 +40,8 @@ def list_keyboard(doc_ids: list[int], doc_type, offset: int, total: int) -> Inli
     if offset + PAGE_SIZE < total:
         nav_row.append(InlineKeyboardButton(
             text="Вперёд →", callback_data=encode_cb("lst", code, offset + PAGE_SIZE)))
-    # фильтры — сетка 2×2 (подписи не влезают в один ряд), затем ряд номеров
-    b.adjust(2, 2, len(doc_ids))
+    # фильтры — один ряд из 3 кнопок, затем ряд номеров
+    b.adjust(len(_FILTERS), len(doc_ids))
     kb = b.as_markup()
     if nav_row:
         kb.inline_keyboard.append(nav_row)

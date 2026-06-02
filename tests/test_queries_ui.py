@@ -32,7 +32,7 @@ def test_count_and_list_documents_with_filter_and_paging(set_test_db):
     from botkin.db.queries import count_documents, list_documents
     uid, _ = _seed(3, "analysis")
     with get_conn() as conn:
-        DocumentRepo(conn, uid).create(source_path="/tmp/p.jpg", doc_type="prescription")
+        DocumentRepo(conn, uid).create(source_path="/tmp/p.jpg", doc_type="doctor_report")
     assert count_documents(uid) == 4
     assert count_documents(uid, doc_type="analysis") == 3
     page = list_documents(uid, doc_type="analysis", limit=2, offset=0)

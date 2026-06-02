@@ -9,7 +9,7 @@ def test_header_with_title_and_clinic():
 
 
 def test_header_fallback_title_from_doc_type():
-    h = format_card_header({"id": 5, "doc_type": "prescription", "title": None,
+    h = format_card_header({"id": 5, "doc_type": "doctor_report", "title": None,
                             "clinic": None, "created_at": "2026-05-01", "status": "extracted"})
-    assert "Рецепт" in h        # лейбл из DOC_TYPE_LABELS
-    assert "🏥 —" in h           # клиника не указана
+    assert "Заключение врача" in h   # лейбл из DOC_TYPE_LABELS
+    assert "🏥 —" in h               # клиника не указана

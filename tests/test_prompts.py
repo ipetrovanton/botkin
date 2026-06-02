@@ -15,5 +15,5 @@ def test_prompts_have_no_antithinking_cruft():
 def test_core_prompts_present():
     assert prompts.CLASSIFY_VLM_SYSTEM
     assert prompts.ANALYSIS_VLM_SYSTEM
-    assert prompts.PRESCRIPTION_VLM_SYSTEM
     assert prompts.DOCTOR_REPORT_VLM_SYSTEM
+    assert not hasattr(prompts, "PRESCRIPTION_VLM_SYSTEM")   # рецепты сняты с поддержки

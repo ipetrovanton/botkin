@@ -53,10 +53,10 @@ def test_db_init(set_test_db):
             for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
 
-    expected = {"users", "documents", "lab_results", "prescriptions", "doctor_reports"}
+    expected = {"users", "documents", "lab_results", "doctor_reports"}
     assert expected.issubset(tables), f"Missing tables: {expected - tables}"
 
-    forbidden = {"patients", "invites", "sessions", "tenants"}
+    forbidden = {"patients", "invites", "sessions", "tenants", "prescriptions"}
     found_forbidden = forbidden & tables
     assert not found_forbidden, f"Found old tables: {found_forbidden}"
 
@@ -98,7 +98,7 @@ def test_pipeline_imports():
 
 def test_domain_models():
     from datetime import datetime
-    from botkin.domain.models import LabResult, Prescription, DoctorReport, ClassifyResult, parse_ru_date
+    from botkin.domain.models import LabResult, DoctorReport, ClassifyResult, parse_ru_date
 
     # parse_ru_date
     dt = parse_ru_date("23 марта 2026 г.")
@@ -108,10 +108,6 @@ def test_domain_models():
     lab = LabResult(analyte_name="Гемоглобин", value_num=145.0, unit="г/л", ref_low=120.0, ref_high=160.0)
     assert lab.analyte_name == "Гемоглобин"
     assert lab.value_num == 145.0
-
-    # Prescription
-    rx = Prescription(drug_mnn="аторвастатин", dose="10 мг", frequency="1 раз в день")
-    assert rx.drug_mnn == "аторвастатин"
 
     # DoctorReport
     report = DoctorReport(diagnosis="ОРВИ", doctor_name="Иванов И.И.")
@@ -124,8 +120,6 @@ def test_domain_models():
     # *_raw поля сохраняют оригинал
     lab2 = LabResult(analyte_name="Гемоглобин", value_num=145.0, value_raw="145", unit_raw="g/l", taken_at_raw="23.03.2026")
     assert lab2.value_raw == "145"
-    rx2 = Prescription(drug_mnn="аторвастатин", drug_raw="аторвастатин", match_status="matched")
-    assert rx2.match_status == "matched"
 
 def test_show_attaches_nav_keyboard():
     from botkin.bot.keyboards import card_keyboard

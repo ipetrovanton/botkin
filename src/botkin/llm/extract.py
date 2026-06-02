@@ -7,12 +7,10 @@ import instructor
 from pydantic import BaseModel
 
 from botkin.config import VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_EXTRACT_LONG_SIDE
-from botkin.domain.models import LabResult, Prescription, DoctorReport
+from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ExtractionError
 from botkin.llm.client import get_client, default_options
-from botkin.llm.prompts import (
-    ANALYSIS_VLM_SYSTEM, PRESCRIPTION_VLM_SYSTEM, DOCTOR_REPORT_VLM_SYSTEM,
-)
+from botkin.llm.prompts import ANALYSIS_VLM_SYSTEM, DOCTOR_REPORT_VLM_SYSTEM
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
 
 log = logging.getLogger(__name__)
@@ -20,10 +18,6 @@ log = logging.getLogger(__name__)
 
 class LabResults(BaseModel):
     results: list[LabResult] = []
-
-
-class Prescriptions(BaseModel):
-    results: list[Prescription] = []
 
 
 class DoctorReports(BaseModel):
@@ -74,11 +68,6 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
 def run_analysis(source_path: Path) -> list[LabResult]:
     messages = _build_messages(ANALYSIS_VLM_SYSTEM, "Extract lab results from these document images.", source_path)
     return _call_vlm(messages, LabResults, source_path.name, "analysis").results
-
-
-def run_prescription(source_path: Path) -> list[Prescription]:
-    messages = _build_messages(PRESCRIPTION_VLM_SYSTEM, "Extract prescriptions from these document images.", source_path)
-    return _call_vlm(messages, Prescriptions, source_path.name, "prescription").results
 
 
 def run_doctor_report(source_path: Path) -> list[DoctorReport]:

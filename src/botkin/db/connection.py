@@ -19,10 +19,6 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "delivered_at": "TIMESTAMP",
     },
     "lab_results": {"value_raw": "TEXT", "unit_raw": "TEXT", "taken_at_raw": "TEXT"},
-    "prescriptions": {
-        "drug_raw": "TEXT", "match_status": "TEXT",
-        "reg_statuses": "TEXT", "reg_numbers": "TEXT",
-    },
     "doctor_reports": {"medications_normalized_json": "TEXT"},
 }
 
@@ -36,19 +32,28 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _migrate_documents_status_check(conn: sqlite3.Connection) -> None:
-    """Пересоздаёт documents, если CHECK статусов не содержит новых стадий."""
+def _drop_prescriptions(conn: sqlite3.Connection) -> None:
+    """Тип prescription снят с поддержки — удаляем таблицу из старых БД."""
+    conn.execute("DROP TABLE IF EXISTS prescriptions")
+    conn.commit()
+
+
+def _migrate_documents_schema(conn: sqlite3.Connection) -> None:
+    """Пересоздаёт documents, если CHECK не содержит новых стадий или ещё допускает prescription."""
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='documents'"
     ).fetchone()
-    if not row or "recognizing" in (row["sql"] or ""):
+    if not row:
+        return
+    sql = row["sql"] or ""
+    if "recognizing" in sql and "'prescription'" not in sql:
         return  # свежая схема или уже мигрировано
 
     new_ddl = """
     CREATE TABLE documents (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL REFERENCES users(id),
-        doc_type TEXT CHECK(doc_type IN ('analysis','prescription','doctor_report','certificate','unknown')),
+        doc_type TEXT CHECK(doc_type IN ('analysis','doctor_report','certificate','unknown')),
         source_path TEXT NOT NULL,
         raw_text TEXT,
         status TEXT NOT NULL DEFAULT 'received'
@@ -68,6 +73,8 @@ def _migrate_documents_status_check(conn: sqlite3.Connection) -> None:
 
     conn.execute("PRAGMA foreign_keys=OFF")
     conn.execute("ALTER TABLE documents RENAME TO _documents_old")
+    # legacy-рецепты больше не валидны под новым CHECK — переразмечаем в unknown.
+    conn.execute("UPDATE _documents_old SET doc_type='unknown' WHERE doc_type='prescription'")
     conn.executescript(new_ddl)
     conn.execute(f"INSERT INTO documents ({shared}) SELECT {shared} FROM _documents_old")
     conn.execute("DROP TABLE _documents_old")
@@ -83,7 +90,8 @@ def init_db() -> None:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         conn.commit()
         _apply_migrations(conn)
-        _migrate_documents_status_check(conn)
+        _migrate_documents_schema(conn)
+        _drop_prescriptions(conn)
 
 
 @contextmanager

@@ -124,16 +124,6 @@ def get_lab_results(document_id: int, limit: int = 20) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_prescriptions(document_id: int) -> list[dict]:
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT drug_mnn, drug_trade, dose, frequency, duration_days, "
-            "match_status, reg_statuses FROM prescriptions WHERE document_id = ?",
-            (document_id,),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
 def get_doctor_reports(document_id: int) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(

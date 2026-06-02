@@ -1,7 +1,7 @@
 import asyncio
 from unittest.mock import patch
 
-from botkin.domain.models import ClassifyResult, Prescription
+from botkin.domain.models import ClassifyResult
 
 
 def _make_doc(source_path="/tmp/x.jpg"):
@@ -17,7 +17,8 @@ async def _anoop(*args, **kwargs):
     return None
 
 
-def test_prescription_drug_normalized_and_raw_saved(set_test_db, monkeypatch):
+def test_unknown_doc_saved_without_extraction(set_test_db, monkeypatch):
+    """Неподдерживаемый тип (например, рецепт → unknown) сохраняется без извлечения деталей."""
     from botkin.pipeline import orchestrator
     from botkin.db.connection import get_conn
     monkeypatch.setattr(orchestrator, "DELIVERY_FALLBACK_DELAY", 0.0)
@@ -25,22 +26,17 @@ def test_prescription_drug_normalized_and_raw_saved(set_test_db, monkeypatch):
     uid, did = _make_doc()
 
     with patch.object(orchestrator.classify, "run_vlm",
-                      return_value=ClassifyResult(doc_type="prescription", confidence=0.9)), \
-         patch.object(orchestrator.extract, "run_prescription",
-                      return_value=[Prescription(drug_mnn="элкап", drug_trade="элкап")]), \
+                      return_value=ClassifyResult(doc_type="unknown", confidence=0.9)), \
          patch("botkin.pipeline.orchestrator.notify_user", side_effect=_anoop):
         asyncio.run(orchestrator.process_document(did, 777))
 
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT drug_mnn, drug_trade, drug_raw, match_status, reg_statuses "
-            "FROM prescriptions WHERE document_id=?", (did,)).fetchone()
-        doc = conn.execute("SELECT status, raw_extraction FROM documents WHERE id=?", (did,)).fetchone()
+        doc = conn.execute(
+            "SELECT doc_type, status, raw_extraction FROM documents WHERE id=?", (did,)).fetchone()
+        labs = conn.execute("SELECT COUNT(*) c FROM lab_results WHERE document_id=?", (did,)).fetchone()
+        reports = conn.execute("SELECT COUNT(*) c FROM doctor_reports WHERE document_id=?", (did,)).fetchone()
 
-    assert row["drug_raw"] == "элкап"           # оригинал сохранён
-    assert row["drug_trade"] == "Элькар"        # торговое нормализовано по справочнику
-    assert row["drug_mnn"] == "Левокарнитин"    # МНН дозаполнен из связки реестра
-    assert row["match_status"] == "matched"
-    assert "modified" in row["reg_statuses"]    # статус-список из ГРЛС сохранён
-    assert doc["status"] == "extracted"
-    assert doc["raw_extraction"] and "элкап" in doc["raw_extraction"]   # сырой JSON сохранён
+    assert doc["doc_type"] == "unknown"
+    assert doc["status"] == "extracted"          # документ обработан и доставлен
+    assert doc["raw_extraction"] is None          # деталей не извлекали
+    assert labs["c"] == 0 and reports["c"] == 0   # никаких записей деталей

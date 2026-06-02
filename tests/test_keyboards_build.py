@@ -15,9 +15,9 @@ def test_list_keyboard_has_filters_numbers_and_paging():
     texts = _texts(kb)
     # фильтры — эмодзи С подписью, чтобы было понятно, где что
     assert "🧪 Анализы" in texts
-    assert "💊 Рецепты" in texts
     assert "👨‍⚕️ Заключения" in texts
     assert "📋 Все" in texts
+    assert not any("Рецепт" in t for t in texts)   # рецепты сняты с поддержки
     assert "1" in texts and "3" in texts          # номера по количеству на странице
     assert any("Вперёд" in t for t in texts)      # есть следующая страница
     assert not any("Назад" in t for t in texts)   # на offset=0 назад нет

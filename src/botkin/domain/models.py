@@ -10,12 +10,11 @@ from botkin.normalize.dates import parse_date as _parse_date
 
 # ── Типы ──────────────────────────────────────────────────────────────────────
 
-DocType = Literal["analysis", "prescription", "doctor_report", "certificate", "unknown"]
+DocType = Literal["analysis", "doctor_report", "certificate", "unknown"]
 DocStatus = Literal["received", "processing", "extracted", "failed"]
 
 DOC_TYPE_LABELS: dict[str, str] = {
     "analysis": "Анализы 🧪",
-    "prescription": "Рецепт 💊",
     "doctor_report": "Заключение врача 👨‍⚕️",
     "certificate": "Справка 📄",
     "unknown": "Документ 📄",
@@ -56,27 +55,6 @@ class LabResult(BaseModel):
     @field_validator("taken_at", mode="before")
     @classmethod
     def _validate_taken_at(cls, v):
-        return parse_ru_date(v)
-
-
-class Prescription(BaseModel):
-    """Одно назначение из рецепта/выписки."""
-    model_config = ConfigDict(extra="forbid")
-
-    drug_mnn: str = Field(..., min_length=2)
-    drug_trade: Optional[str] = None
-    dose: Optional[str] = None
-    frequency: Optional[str] = None
-    duration_days: Optional[int] = Field(default=None, ge=0)
-    prescribed_at: Optional[datetime] = None
-    doctor_name: Optional[str] = None
-    form_107_1u_flag: bool = False
-    drug_raw: Optional[str] = None
-    match_status: Optional[str] = None
-
-    @field_validator("prescribed_at", mode="before")
-    @classmethod
-    def _validate_prescribed_at(cls, v):
         return parse_ru_date(v)
 
 

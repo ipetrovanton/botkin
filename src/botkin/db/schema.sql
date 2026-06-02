@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
-    doc_type TEXT CHECK(doc_type IN ('analysis','prescription','doctor_report','certificate','unknown')),
+    doc_type TEXT CHECK(doc_type IN ('analysis','doctor_report','certificate','unknown')),
     source_path TEXT NOT NULL,
     raw_text TEXT,
     status TEXT NOT NULL DEFAULT 'received'
@@ -53,28 +53,6 @@ CREATE TABLE IF NOT EXISTS lab_results (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_lab_user_analyte ON lab_results(user_id, analyte_name, taken_at);
-
--- ============ PRESCRIPTIONS ============
-
-CREATE TABLE IF NOT EXISTS prescriptions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id INTEGER NOT NULL REFERENCES documents(id),
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    drug_mnn TEXT NOT NULL,
-    drug_trade TEXT,
-    dose TEXT,
-    frequency TEXT,
-    duration_days INTEGER,
-    prescribed_at TIMESTAMP,
-    doctor_name TEXT,
-    form_107_1u_flag BOOLEAN DEFAULT 0,
-    drug_raw TEXT,
-    match_status TEXT,
-    reg_statuses TEXT,
-    reg_numbers TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_presc_user_mnn ON prescriptions(user_id, drug_mnn);
 
 -- ============ DOCTOR REPORTS ============
 

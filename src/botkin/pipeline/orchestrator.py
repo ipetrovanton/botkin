@@ -7,7 +7,7 @@ from pathlib import Path
 from botkin.config import DELIVERY_FALLBACK_DELAY
 from botkin.db.connection import get_conn
 from botkin.db.repos import DocumentRepo
-from botkin.domain.models import LabResult, Prescription, DoctorReport
+from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ClassificationError, ExtractionError
 from botkin.llm import classify, extract
 from botkin.normalize.drugs import DrugNormalizer, load_default
@@ -92,13 +92,6 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
                 _save_raw_extraction(document_id, items)
                 _persist_lab(document_id, user_id, items)
 
-            elif doc_type == "prescription":
-                items: list[Prescription] = await asyncio.get_event_loop().run_in_executor(
-                    None, extract.run_prescription, source_path,
-                )
-                _save_raw_extraction(document_id, items)
-                _persist_prescription(document_id, user_id, items)
-
             elif doc_type == "doctor_report":
                 items: list[DoctorReport] = await asyncio.get_event_loop().run_in_executor(
                     None, extract.run_doctor_report, source_path,
@@ -160,38 +153,6 @@ def _persist_lab(document_id: int, user_id: int, items: list[LabResult]) -> None
                  item.taken_at.isoformat() if item.taken_at else None,
                  item.source_table_cell,
                  item.value_raw, unit_raw, item.taken_at_raw),
-            )
-        conn.commit()
-
-
-def _persist_prescription(document_id: int, user_id: int, items: list[Prescription]) -> None:
-    normalizer = get_drug_normalizer()
-    with get_conn() as conn:
-        for item in items:
-            # Сверяем по торговому названию (если есть), иначе по МНН.
-            probe = item.drug_trade or item.drug_mnn
-            match = normalizer.correct(probe) if probe else None
-            if match and match.status == "matched":
-                # Торговое → канон; МНН дозаполняем из связки реестра (или матча типа mnn).
-                drug_trade = match.canonical if match.type in ("trade", "both") else item.drug_trade
-                drug_mnn = match.mnn or (match.canonical if match.type in ("mnn", "both") else item.drug_mnn)
-                reg_statuses = json.dumps(list(match.statuses), ensure_ascii=False)
-                reg_numbers = json.dumps(list(match.reg_numbers), ensure_ascii=False)
-                match_status = match.status
-            else:
-                drug_trade, drug_mnn = item.drug_trade, item.drug_mnn
-                reg_statuses, reg_numbers = None, None
-                match_status = match.status if match else None
-            conn.execute(
-                """INSERT INTO prescriptions(document_id, user_id, drug_mnn, drug_trade,
-                   dose, frequency, duration_days, prescribed_at, doctor_name, form_107_1u_flag,
-                   drug_raw, match_status, reg_statuses, reg_numbers)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (document_id, user_id, drug_mnn, drug_trade,
-                 item.dose, item.frequency, item.duration_days,
-                 item.prescribed_at.isoformat() if item.prescribed_at else None,
-                 item.doctor_name, item.form_107_1u_flag,
-                 probe, match_status, reg_statuses, reg_numbers),
             )
         conn.commit()
 

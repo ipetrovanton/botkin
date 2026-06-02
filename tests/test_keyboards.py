@@ -20,4 +20,4 @@ def test_under_64_bytes():
 
 
 def test_type_codes_map_all():
-    assert set(TYPE_CODES.values()) >= {"analysis", "prescription", "doctor_report"}
+    assert set(TYPE_CODES.values()) >= {"analysis", "doctor_report"}
