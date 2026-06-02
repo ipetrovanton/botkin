@@ -98,6 +98,9 @@ async def on_photo(message: Message) -> None:
     try:
         result = await _upload_to_api(message.from_user.id, filename, file_bytes.read())
         doc_id = result["document_id"]
+        # Подсказка/предупреждение о разрешении — ДО прогресс-сообщения и поллинга,
+        # иначе фоновый таск успевает продвинуть прогресс-бар раньше предупреждения.
+        await message.answer(photo_followup_text(photo.width))
         sent = await message.answer(render_progress("received", doc_id))
 
         async def _edit(text: str):
@@ -107,7 +110,6 @@ async def on_photo(message: Message) -> None:
                 log.debug("edit skipped: %s", e)
 
         asyncio.create_task(run_progress_flow(message.from_user.id, doc_id, _edit))
-        await message.answer(photo_followup_text(photo.width))
     except httpx.HTTPStatusError as e:
         log.exception("Upload failed")
         await message.answer(f"❌ Ошибка загрузки: {e.response.status_code}")
