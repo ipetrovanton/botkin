@@ -9,6 +9,7 @@ from botkin.db.connection import get_conn
 from botkin.db.repos import DocumentRepo
 from botkin.domain.models import UploadResponse
 from botkin.pipeline.orchestrator import process_document
+from botkin.preprocess.formats import resolve_extension
 
 from ..deps import get_user_id
 
@@ -22,21 +23,25 @@ async def upload_document(
     user_id: int = Depends(get_user_id),
     x_telegram_user_id: int = Header(..., alias="X-Telegram-User-Id"),
 ) -> UploadResponse:
-    ext = Path(file.filename or "").suffix.lower()
-    if ext not in UPLOAD_ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=415, detail=f"Unsupported file ext: {ext}")
-
     body = await file.read()
     if len(body) > UPLOAD_MAX_BYTES:
         raise HTTPException(status_code=413, detail=f"File too large: {len(body)} bytes")
     if not body:
         raise HTTPException(status_code=400, detail="Empty file")
 
+    # Валидируем по содержимому: имя файла — лишь подсказка (iPhone шлёт HEIC без расширения).
+    ext = resolve_extension(file.filename, body[:32], UPLOAD_ALLOWED_EXTENSIONS)
+    if ext is None:
+        raise HTTPException(status_code=415, detail="Unsupported file content")
+
     yyyy_mm = datetime.now(timezone.utc).strftime("%Y-%m")
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     dest_dir = UPLOAD_SOURCES_DIR / str(user_id) / yyyy_mm
     dest_dir.mkdir(parents=True, exist_ok=True)
     safe_name = (file.filename or "doc").replace("/", "_").replace("\\", "_")
+    # Гарантируем корректное расширение: ниже по конвейеру PDF/изображение различаются по суффиксу.
+    if Path(safe_name).suffix.lower() not in UPLOAD_ALLOWED_EXTENSIONS:
+        safe_name = f"{safe_name}{ext}"
     dest = dest_dir / f"{ts}-{safe_name}"
     dest.write_bytes(body)
 

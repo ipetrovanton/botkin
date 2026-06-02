@@ -6,7 +6,7 @@ from pathlib import Path
 import instructor
 from pydantic import BaseModel
 
-from botkin.config import VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS
+from botkin.config import VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_EXTRACT_LONG_SIDE
 from botkin.domain.models import LabResult, Prescription, DoctorReport
 from botkin.exceptions import ExtractionError
 from botkin.llm.client import get_client, default_options
@@ -31,7 +31,11 @@ class DoctorReports(BaseModel):
 
 
 def _build_messages(system_prompt: str, instruction: str, source_path: Path) -> list[dict]:
-    b64_images = to_base64_jpegs(prepare_images(source_path))
+    b64_images = to_base64_jpegs(prepare_images(
+        source_path,
+        long_side=IMAGE_EXTRACT_LONG_SIDE,
+        upscale=True, deskew=True, enhance=True,
+    ))
     content: list[dict] = [{"type": "text", "text": instruction}]
     for b64 in b64_images:
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})

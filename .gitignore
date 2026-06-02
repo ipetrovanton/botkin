@@ -34,3 +34,8 @@ pytest-cache-files-*/
 # OS
 .DS_Store
 Thumbs.db
+
+# Секреты и локальные тестовые образцы — НЕ коммитить
+token.txt
+example.jpg.jpg
+*.jpg.jpg

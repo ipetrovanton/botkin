@@ -39,9 +39,15 @@ _DEFAULTS: dict = {
         "max_pages": 50,
     },
     "image": {
-        "max_long_side": 1800,
+        "extract_long_side": 2200,
         "jpeg_quality": 90,
         "classify_long_side": 1000,
+        "clahe_clip": 2.0,
+        "unsharp_amount": 1.5,
+        "deskew_min_angle": 3.0,
+        "deskew_min_area": 0.40,
+        "deskew_max_area": 0.97,
+        "lowres_warn": 1500,
     },
     "database": {
         "sqlite_path": "./data/botkin.db",
@@ -52,7 +58,7 @@ _DEFAULTS: dict = {
     },
     "upload": {
         "max_bytes": 20 * 1024 * 1024,
-        "allowed_extensions": [".pdf", ".jpg", ".jpeg", ".png", ".heic", ".webp"],
+        "allowed_extensions": [".pdf", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"],
         "sources_dir": "./sources",
     },
     "drugs": {
@@ -113,9 +119,15 @@ PDF_RENDER_DPI = int(_get("pdf_to_image.render_dpi", _DEFAULTS["pdf_to_image"]["
 MAX_PAGES = int(_get("pdf_to_image.max_pages", _DEFAULTS["pdf_to_image"]["max_pages"]))
 
 # ── Подготовка изображений ────────────────────────────────────────────────────
-IMAGE_MAX_LONG_SIDE = int(_get("image.max_long_side", _DEFAULTS["image"]["max_long_side"]))
+IMAGE_EXTRACT_LONG_SIDE = int(_get("image.extract_long_side", _DEFAULTS["image"]["extract_long_side"]))
 IMAGE_JPEG_QUALITY = int(_get("image.jpeg_quality", _DEFAULTS["image"]["jpeg_quality"]))
 IMAGE_CLASSIFY_LONG_SIDE = int(_get("image.classify_long_side", _DEFAULTS["image"]["classify_long_side"]))
+IMAGE_CLAHE_CLIP = float(_get("image.clahe_clip", _DEFAULTS["image"]["clahe_clip"]))
+IMAGE_UNSHARP_AMOUNT = float(_get("image.unsharp_amount", _DEFAULTS["image"]["unsharp_amount"]))
+IMAGE_DESKEW_MIN_ANGLE = float(_get("image.deskew_min_angle", _DEFAULTS["image"]["deskew_min_angle"]))
+IMAGE_DESKEW_MIN_AREA = float(_get("image.deskew_min_area", _DEFAULTS["image"]["deskew_min_area"]))
+IMAGE_DESKEW_MAX_AREA = float(_get("image.deskew_max_area", _DEFAULTS["image"]["deskew_max_area"]))
+PHOTO_LOWRES_WARN = int(_get("image.lowres_warn", _DEFAULTS["image"]["lowres_warn"]))
 
 # ── Нормализация лекарств ─────────────────────────────────────────────────────
 # Scorer = дистанция Дамерау-Левенштейна (выбран по замеру на словаре 20 948, см. спек):

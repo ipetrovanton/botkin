@@ -56,7 +56,13 @@ def test_extract_analysis_mocked(tmp_path):
     fake.chat.completions.create.return_value = resp
 
     with patch("botkin.llm.extract.get_client", return_value=fake), \
-         patch("botkin.llm.extract.prepare_images", return_value=[b"\xff\xd8fakejpeg"]):
+         patch("botkin.llm.extract.prepare_images", return_value=[b"\xff\xd8fakejpeg"]) as prep:
         items = extract.run_analysis(_tiny_pdf(tmp_path))
 
     assert items and items[0].analyte_name == "Гемоглобин"
+    _, kwargs = prep.call_args
+    from botkin.config import IMAGE_EXTRACT_LONG_SIDE
+    assert kwargs.get("long_side") == IMAGE_EXTRACT_LONG_SIDE
+    assert kwargs.get("upscale") is True
+    assert kwargs.get("deskew") is True
+    assert kwargs.get("enhance") is True

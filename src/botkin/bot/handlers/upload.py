@@ -1,14 +1,37 @@
 """Принимаем фото/PDF от пользователя и шлём на backend API."""
 import logging
+from pathlib import Path
 
 import httpx
 from aiogram import F, Router
 from aiogram.types import Message
 
-from botkin.config import BOT_API_URL, UPLOAD_MAX_BYTES
+from botkin.config import BOT_API_URL, PHOTO_LOWRES_WARN, UPLOAD_MAX_BYTES
 
 router = Router(name="upload")
 log = logging.getLogger("bot.upload")
+
+# Telegram сжимает «фото» (~1280px). Файлом сохраняется полное разрешение камеры.
+_FILE_HINT = (
+    "📎 Совет: для лучшего распознавания пришлите документ файлом "
+    "(скрепка → Файл), а не фото — так сохранится полное разрешение."
+)
+
+# Telegram отдаёт mime для документов без расширения в имени.
+_MIME_EXT = {
+    "image/heic": ".heic", "image/heif": ".heif", "image/jpeg": ".jpg",
+    "image/png": ".png", "image/webp": ".webp", "application/pdf": ".pdf",
+}
+
+
+def photo_followup_text(image_long_side: int) -> str:
+    """Подсказка после приёма фото; при низком разрешении — усиленное предупреждение."""
+    if image_long_side < PHOTO_LOWRES_WARN:
+        return (
+            "⚠️ Фото пришло в низком разрешении — качество распознавания может пострадать.\n"
+            + _FILE_HINT
+        )
+    return _FILE_HINT
 
 
 async def _upload_to_api(tg_user_id: int, filename: str, file_bytes: bytes) -> dict:
@@ -34,6 +57,7 @@ async def on_photo(message: Message) -> None:
         result = await _upload_to_api(message.from_user.id, filename, file_bytes.read())
         doc_id = result["document_id"]
         await message.answer(f"✅ Документ #{doc_id} принят.\nСтатус: {result['status']}\nПодожди ~30-60 с, обрабатываю.")
+        await message.answer(photo_followup_text(photo.width))
     except httpx.HTTPStatusError as e:
         log.exception("Upload failed")
         await message.answer(f"❌ Ошибка загрузки: {e.response.status_code}")
@@ -52,6 +76,8 @@ async def on_document(message: Message) -> None:
     file_info = await message.bot.get_file(doc.file_id)
     file_bytes = await message.bot.download_file(file_info.file_path)
     filename = doc.file_name or f"doc_{doc.file_unique_id}"
+    if not Path(filename).suffix and doc.mime_type in _MIME_EXT:
+        filename += _MIME_EXT[doc.mime_type]
 
     await message.answer("📥 Принято, обрабатываю...")
     try:
