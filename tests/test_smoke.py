@@ -133,3 +133,8 @@ def test_show_attaches_nav_keyboard():
     # хотя бы кнопка «к списку» всегда присутствует
     datas = [b.callback_data for row in kb.inline_keyboard for b in row]
     assert any(d.startswith("lst:") for d in datas)
+
+
+def test_browse_router_importable():
+    from botkin.bot.handlers import browse
+    assert browse.router.name == "browse"
