@@ -29,6 +29,19 @@ def format_card_header(doc: dict) -> str:
     )
 
 
+def format_list_body(docs: list[dict], offset: int, total: int) -> str:
+    if not docs:
+        return "📭 Документов пока нет."
+    head = f"📁 Твои документы ({offset + 1}–{offset + len(docs)} из {total})\n"
+    lines = [head]
+    for i, d in enumerate(docs, start=1):
+        type_e = TYPE_EMOJI.get(d.get("doc_type"), "📄")
+        clinic = html.escape(d["clinic"]) if d.get("clinic") else "—"
+        date = str(d.get("created_at", ""))[:10]
+        lines.append(f"{i}. {type_e} {doc_title(d)}\n   🏥 {clinic} · {date}")
+    return "\n".join(lines)
+
+
 def _reg_warning(reg_statuses_json: str | None) -> str:
     """⚠️ если в наборе статусов ГРЛС нет ни одного 'active'."""
     if not reg_statuses_json:
