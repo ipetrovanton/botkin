@@ -1,12 +1,19 @@
 """Принимаем фото/PDF от пользователя и шлём на backend API."""
+import asyncio
 import logging
+import time
 from pathlib import Path
 
 import httpx
 from aiogram import F, Router
 from aiogram.types import Message
 
+from botkin.bot.cards import format_card_header
+from botkin.bot.progress import poll_until_done, render_progress
 from botkin.config import BOT_API_URL, PHOTO_LOWRES_WARN, UPLOAD_MAX_BYTES
+from botkin.db.connection import get_conn
+from botkin.db.queries import get_document, get_document_status, get_user_id
+from botkin.db.repos import DocumentRepo
 
 router = Router(name="upload")
 log = logging.getLogger("bot.upload")
@@ -45,6 +52,42 @@ async def _upload_to_api(tg_user_id: int, filename: str, file_bytes: bytes) -> d
         return resp.json()
 
 
+def render_document_card(doc_id: int, user_id: int) -> str:
+    """Полная карточка документа по id (шапка + детали из show-рендера)."""
+    from botkin.bot.handlers.show import _format_document
+    doc = get_document(doc_id, user_id)
+    if not doc:
+        return "❌ Документ не найден."
+    return f"{format_card_header(doc)}\n────────────\n{_format_document(doc_id, doc)}"
+
+
+def claim_delivery_for(doc_id: int, user_id: int) -> bool:
+    with get_conn() as conn:
+        return DocumentRepo(conn, user_id).claim_delivery(doc_id)
+
+
+async def run_progress_flow(tg_user_id: int, doc_id: int, edit) -> None:
+    """Поллит статус и по завершении показывает карточку. `edit(text)` — корутина."""
+    user_id = get_user_id(tg_user_id)
+    if not user_id:
+        return
+
+    async def _get_status():
+        return get_document_status(doc_id, user_id)
+
+    final = await poll_until_done(
+        doc_id=doc_id, get_status=_get_status, edit=edit,
+        sleep=asyncio.sleep, now=time.monotonic,
+    )
+    if final == "extracted":
+        if claim_delivery_for(doc_id, user_id):
+            await edit(render_document_card(doc_id, user_id))
+    elif final == "failed":
+        await edit(f"❌ Документ #{doc_id}: обработка завершилась ошибкой.")
+    else:
+        await edit("⏳ Обработка затянулась. Загляните позже через /show.")
+
+
 @router.message(F.photo)
 async def on_photo(message: Message) -> None:
     photo = message.photo[-1]
@@ -52,11 +95,18 @@ async def on_photo(message: Message) -> None:
     file_bytes = await message.bot.download_file(file_info.file_path)
     filename = f"photo_{photo.file_unique_id}.jpg"
 
-    await message.answer("📥 Принято, обрабатываю...")
     try:
         result = await _upload_to_api(message.from_user.id, filename, file_bytes.read())
         doc_id = result["document_id"]
-        await message.answer(f"✅ Документ #{doc_id} принят.\nСтатус: {result['status']}\nПодожди ~30-60 с, обрабатываю.")
+        sent = await message.answer(render_progress("received", doc_id))
+
+        async def _edit(text: str):
+            try:
+                await sent.edit_text(text)
+            except Exception as e:  # noqa: BLE001 — "message is not modified" и пр.
+                log.debug("edit skipped: %s", e)
+
+        asyncio.create_task(run_progress_flow(message.from_user.id, doc_id, _edit))
         await message.answer(photo_followup_text(photo.width))
     except httpx.HTTPStatusError as e:
         log.exception("Upload failed")
@@ -79,11 +129,18 @@ async def on_document(message: Message) -> None:
     if not Path(filename).suffix and doc.mime_type in _MIME_EXT:
         filename += _MIME_EXT[doc.mime_type]
 
-    await message.answer("📥 Принято, обрабатываю...")
     try:
         result = await _upload_to_api(message.from_user.id, filename, file_bytes.read())
         doc_id = result["document_id"]
-        await message.answer(f"✅ Документ «{filename}» #{doc_id} принят.\n\nПодожди ~30-60 с.")
+        sent = await message.answer(render_progress("received", doc_id))
+
+        async def _edit(text: str):
+            try:
+                await sent.edit_text(text)
+            except Exception as e:  # noqa: BLE001 — "message is not modified" и пр.
+                log.debug("edit skipped: %s", e)
+
+        asyncio.create_task(run_progress_flow(message.from_user.id, doc_id, _edit))
     except httpx.HTTPStatusError as e:
         log.exception("Upload failed")
         await message.answer(f"❌ Ошибка загрузки: {e.response.status_code}")
