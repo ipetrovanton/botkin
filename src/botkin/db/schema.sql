@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS documents (
     status TEXT NOT NULL DEFAULT 'received'
         CHECK(status IN ('received','processing','extracted','failed')),
     confidence REAL,
+    raw_extraction TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
@@ -43,6 +44,9 @@ CREATE TABLE IF NOT EXISTS lab_results (
     ref_high REAL,
     taken_at TIMESTAMP,
     source_table_cell TEXT,
+    value_raw TEXT,
+    unit_raw TEXT,
+    taken_at_raw TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_lab_user_analyte ON lab_results(user_id, analyte_name, taken_at);
@@ -61,6 +65,10 @@ CREATE TABLE IF NOT EXISTS prescriptions (
     prescribed_at TIMESTAMP,
     doctor_name TEXT,
     form_107_1u_flag BOOLEAN DEFAULT 0,
+    drug_raw TEXT,
+    match_status TEXT,
+    reg_statuses TEXT,
+    reg_numbers TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_presc_user_mnn ON prescriptions(user_id, drug_mnn);
@@ -76,6 +84,7 @@ CREATE TABLE IF NOT EXISTS doctor_reports (
     complaints_json TEXT,
     anamnesis TEXT,
     medications_json TEXT,
+    medications_normalized_json TEXT,
     visit_date TIMESTAMP,
     doctor_name TEXT,
     department TEXT,

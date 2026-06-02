@@ -1,57 +1,104 @@
 # Dr. Botkin — Telegram-бот для парсинга медицинских документов
 
 Telegram-бот, который принимает фото и PDF медицинских документов (анализы, рецепты, выписки),
-распознаёт их через vision-модель **qwen3-vl** (Ollama) и сохраняет структурированные
-данные в SQLite. Умеет строить графики динамики показателей.
+распознаёт их через vision-модель **qwen3-vl:8b-instruct** (Ollama) и сохраняет
+**нормализованные** структурированные данные в SQLite. Названия лекарств сверяются с офлайн-
+справочником ГРЛС (исправление ошибок распознавания), сохраняются статусы регистрации и
+оригинал извлечения. Умеет строить графики динамики показателей.
 
 ## Возможности
 
 - Приём PDF и изображений (`.jpg`, `.png`, `.heic`, `.webp`) через Telegram
-- Распознавание показателей анализов и назначений врача через qwen3-vl:8b
+- Распознавание анализов / рецептов / заключений через `qwen3-vl:8b-instruct`
+- **Нормализация данных:** даты → единый ISO, единицы → канон, числа (запятая → точка)
+- **Коррекция названий лекарств** по справочнику ГРЛС (фаззи-матчинг, дистанция
+  Дамерау-Левенштейна): `Элкап` → `Элькар`, `Глиалатин` → `Глиатилин` и т.п.; редкие/неизвестные
+  препараты не подменяются (статус `unverified`)
+- Заполнение МНН из торгового названия + сохранение статуса регистрации (действующий,
+  исключён, приостановлен и т.д.) и номера РУ
+- Сохранение **сырого извлечения** (`raw_extraction`) — данные восстановимы без потерь
 - Хранение истории в SQLite с изоляцией данных пользователей
-- Построение графиков динамики показателей (`/dynamics гемоглобин`)
-- Просмотр последнего результата (`/last`, `/show`)
+- Построение графиков динамики показателей (`/dynamics гемоглобин`), просмотр (`/last`, `/show`)
 
 ## Архитектура
 
 ```
-┌──────────────┐     ┌────────────────┐     ┌─────────┐
-│  Telegram    │────▶│  FastAPI       │────▶│  SQLite │
-│  Bot (aiogram)│    │  Backend (:8000)│    │         │
-└──────────────┘     └───────┬────────┘     └─────────┘
-                             │
-                      ┌──────▼────────┐
-                      │  Ollama (WSL2)│
-                      │  qwen3-vl:8b  │
-                      └───────────────┘
+┌───────────────┐     ┌─────────────────┐     ┌─────────┐
+│  Telegram     │────▶│  FastAPI        │────▶│  SQLite │
+│  Bot (aiogram)│     │  Backend (:8000)│     │         │
+└───────────────┘     └───────┬─────────┘     └─────────┘
+                              │
+              classify → extract → normalize → persist
+                              │                    │
+                   ┌──────────▼─────────┐   ┌──────▼──────────────┐
+                   │  Ollama (WSL2)     │   │ reference/drugs/    │
+                   │  qwen3-vl:8b-instr │   │ registry.jsonl(ГРЛС)│
+                   └────────────────────┘   └─────────────────────┘
 ```
 
 ## Требования
 
-- Python 3.12
-- [uv](https://github.com/astral-sh/uv) — менеджер пакетов
-- Ollama с моделью `qwen3-vl:8b` (запущена в WSL2 или Linux)
+- Python 3.12, [uv](https://github.com/astral-sh/uv) — менеджер пакетов
+- Ollama с моделью `qwen3-vl:8b-instruct` (важно: **instruct**-вариант, не thinking — он
+  кратно быстрее; запущена в WSL2 или Linux)
 - Токен Telegram-бота (получить у [@BotFather](https://t.me/BotFather))
+- Справочник лекарств `src/botkin/reference/drugs/registry.jsonl` (уже в репозитории;
+  пересборка — см. ниже)
 
-## Быстрый старт
+## Запуск под Windows (WSL2 + Ollama)
+
+Целевая конфигурация: ноутбук с NVIDIA GPU, Ollama в WSL2.
+
+**1. Ollama в WSL2 и модель**
 
 ```bash
-# 1. Клонировать репозиторий
+# внутри WSL2 (Ubuntu)
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen3-vl:8b-instruct
+# проверить, что отвечает
+curl http://localhost:11434/api/version
+```
+
+> Если бот запускается из Windows (вне WSL2), а Ollama — внутри WSL2, укажите в `.env`
+> `OLLAMA_URL=http://<IP-WSL2>:11434` (узнать IP: `wsl hostname -I`). Бот также умеет
+> автоопределять адрес WSL2 (см. `llm/client.py`).
+
+**2. Проект (в WSL2 или Windows с установленным uv)**
+
+```bash
 git clone <repo-url>
 cd botkin
+uv sync                      # ставит зависимости в .venv (Python 3.12)
+cp .env.example .env         # заполнить TG_BOT_TOKEN
+```
 
-# 2. Установить зависимости и настроить пакет
-uv sync
+**3. Запуск бэкенда и бота (два терминала)**
 
-# 3. Создать .env из примера и заполнить TG_BOT_TOKEN
-cp .env.example .env
-
-# 4. Запустить FastAPI API-сервер
+```bash
+# терминал 1 — FastAPI backend
 uv run uvicorn botkin.api.app:app --host 0.0.0.0 --port 8000
 
-# 5. В другом терминале — запустить бота
+# терминал 2 — Telegram-бот
 uv run python -m botkin.bot.main
 ```
+
+База данных и таблицы создаются автоматически при старте (включая идемпотентную миграцию
+новых колонок). Отправьте боту `/start`, затем фото или PDF документа.
+
+## Справочник лекарств (ГРЛС)
+
+Коррекция названий опирается на офлайн-справочник `src/botkin/reference/drugs/registry.jsonl`
+(≈21 тыс. названий: торговые + МНН, со статусами и номерами РУ). Он уже собран и закоммичен.
+
+Пересборка из свежей официальной выгрузки ГРЛС (ZIP с 8 листами-статусами):
+
+```bash
+uv run python -m scripts.build_drug_reference \
+    --src grls2026-06-02-1.zip \
+    --out src/botkin/reference/drugs/registry.jsonl
+```
+
+Сам ZIP в репозиторий не коммитится (он — вход скрипта, см. `.gitignore`).
 
 ## Конфигурация
 
@@ -61,49 +108,37 @@ uv run python -m botkin.bot.main
 |------------------|-----------------------------|---------------------------|
 | `TG_BOT_TOKEN`   | Токен Telegram-бота         | *обязательно*             |
 | `OLLAMA_URL`     | URL Ollama API              | `http://localhost:11434`  |
-| `VLM_MODEL`      | Название vision-модели      | `qwen3-vl:8b`             |
+| `VLM_MODEL`      | Название vision-модели      | `qwen3-vl:8b-instruct`    |
 | `SQLITE_PATH`    | Путь к файлу БД             | `./data/botkin.db`        |
 | `API_URL`        | URL бэкенда (для бота)      | `http://localhost:8000`   |
 
-Дополнительные параметры VLM (температура, контекст, штраф повторов) — в `config.json`.
+Детальные параметры — в `config.json`: VLM (`temperature`, `num_ctx`, `num_predict`,
+`repeat_penalty`), `ollama.keep_alive` (держит модель в VRAM между вызовами), подготовка
+изображений (`render_dpi`, `max_long_side`, `jpeg_quality`, `classify_long_side`) и пороги
+фаззи-коррекции (`drugs.max_edit_ratio`, `drugs.ratio_floor`). Эти значения — стартовые,
+подбираются замером на целевой машине.
 
 ## Структура проекта
 
 ```
 botkin/
-├── src/botkin/              # Пакет исходного кода приложения
-│   ├── api/                 # FastAPI-приложение
-│   │   ├── app.py           # Точка входа API-сервера
-│   │   ├── deps.py          # Зависимости внедрения (get_user_id)
-│   │   └── routes/          # Маршруты API
-│   │       └── upload.py    # POST /upload эндпоинт загрузки
-│   ├── bot/                 # Telegram-бот (aiogram)
-│   │   ├── main.py          # Точка входа бота
-│   │   └── handlers/        # Обработчики команд (/start, /show, /dynamics, upload)
-│   ├── db/                  # Работа с СУБД SQLite
-│   │   ├── connection.py    # Подключение к БД и инициализация
-│   │   ├── schema.sql       # Схема структуры БД (5 таблиц)
-│   │   ├── queries.py       # Оптимизированные запросы для аналитики
-│   │   └── repos.py         # Репозитории (DocumentRepo, UserRepo)
-│   ├── domain/              # Доменные сущности
-│   │   └── models.py        # Pydantic-модели и валидаторы
-│   ├── llm/                 # Интеграция с ИИ моделями через Ollama
-│   │   ├── client.py        # OpenAI-совместимый клиент
-│   │   ├── classify.py      # Модуль классификации документов
-│   │   ├── extract.py       # Модуль структурированного извлечения данных
-│   │   └── prompts.py       # Оптимизированные VLM-промпты
-│   ├── pipeline/            # Бизнес-логика оркестрации
-│   │   ├── orchestrator.py  # Пайплайн: classify -> extract -> persist
-│   │   └── notifications.py # Системные уведомления в Telegram
-│   ├── viz/                 # Визуализация и аналитика
-│   │   └── plots.py         # Отрисовка графиков динамики показателей через Plotly
-│   ├── config.py            # Централизованная конфигурация приложения
+├── src/botkin/
+│   ├── api/                 # FastAPI: app.py, deps.py, routes/upload.py
+│   ├── bot/                 # Telegram-бот (aiogram): main.py, handlers/
+│   ├── db/                  # SQLite: connection.py (+миграция), schema.sql, queries.py, repos.py
+│   ├── domain/models.py     # Pydantic-модели (+*_raw поля)
+│   ├── llm/                 # Ollama: client.py, classify.py, extract.py, prompts.py
+│   ├── preprocess/images.py # Подготовка PDF/фото к VLM (DPI, даунскейл, EXIF, HEIC)
+│   ├── normalize/           # numbers.py, dates.py, units.py, drugs.py
+│   ├── reference/           # units.py + drugs/registry.jsonl (справочник ГРЛС)
+│   ├── pipeline/            # orchestrator.py (classify→extract→normalize→persist), notifications.py
+│   ├── viz/plots.py         # Графики динамики (Plotly)
+│   ├── config.py            # Централизованная конфигурация
 │   └── exceptions.py        # Типизированные исключения
-├── tests/                   # Автоматические тесты
-│   ├── conftest.py          # Тестовое окружение и фикстуры
-│   └── test_smoke.py        # Smoke-тесты (9 сценариев)
-├── config.json              # Детальные настройки VLM
-├── pyproject.toml           # Метаданные пакета и зависимости (управляется uv)
+├── scripts/build_drug_reference.py  # Сборка registry.jsonl из выгрузки ГРЛС (openpyxl)
+├── tests/                   # pytest (LLM мокается; модель в тестах не запускается)
+├── config.json              # Детальные настройки
+├── pyproject.toml           # Зависимости (uv)
 └── .env.example             # Шаблон переменных окружения
 ```
 
@@ -119,11 +154,8 @@ botkin/
 ## Разработка
 
 ```bash
-# Проверка качества кода ( Ruff )
-uv run ruff check .
-
-# Запуск тестов
-uv run pytest tests/ -v
+uv run ruff check src tests scripts   # линтер
+uv run pytest -q                      # тесты (без сети и GPU; LLM мокается)
 ```
 
 ## Лицензия

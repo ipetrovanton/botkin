@@ -3,17 +3,26 @@
 
 def test_config_imports():
     from botkin.config import (
-        VLM_MODEL, VLM_TEMPERATURE, VLM_NUM_CTX,
-        VLM_MAX_TOKENS, PDF_SCALE_X, PDF_SCALE_Y, MAX_PAGES,
+        VLM_MODEL, VLM_TEMPERATURE, VLM_NUM_CTX, VLM_MAX_TOKENS,
+        VLM_NUM_PREDICT, VLM_REPEAT_PENALTY, OLLAMA_KEEP_ALIVE,
+        PDF_RENDER_DPI, MAX_PAGES,
+        IMAGE_MAX_LONG_SIDE, IMAGE_JPEG_QUALITY, IMAGE_CLASSIFY_LONG_SIDE,
+        DRUG_MAX_EDIT_RATIO, DRUG_RATIO_FLOOR,
         SQLITE_PATH, UPLOAD_MAX_BYTES, UPLOAD_ALLOWED_EXTENSIONS,
     )
-    assert isinstance(VLM_MODEL, str) and len(VLM_MODEL) > 0
+    assert VLM_MODEL == "qwen3-vl:8b-instruct"  # instruct-вариант, не thinking
     assert 0.0 <= VLM_TEMPERATURE <= 1.0
     assert VLM_NUM_CTX > 0
     assert VLM_MAX_TOKENS > 0
-    assert PDF_SCALE_X > 0
-    assert PDF_SCALE_Y > 0
+    assert VLM_NUM_PREDICT > 0
+    assert VLM_REPEAT_PENALTY > 0
+    assert isinstance(OLLAMA_KEEP_ALIVE, str) and len(OLLAMA_KEEP_ALIVE) > 0
+    assert PDF_RENDER_DPI > 0
     assert MAX_PAGES > 0
+    assert IMAGE_MAX_LONG_SIDE > IMAGE_CLASSIFY_LONG_SIDE > 0
+    assert 1 <= IMAGE_JPEG_QUALITY <= 100
+    assert 0 < DRUG_MAX_EDIT_RATIO < 1
+    assert 0 < DRUG_RATIO_FLOOR <= 100
     assert len(SQLITE_PATH) > 0
     assert UPLOAD_MAX_BYTES > 0
     assert len(UPLOAD_ALLOWED_EXTENSIONS) > 0
@@ -103,3 +112,9 @@ def test_domain_models():
     # ClassifyResult
     cr = ClassifyResult(doc_type="analysis", confidence=0.95)
     assert cr.doc_type == "analysis"
+
+    # *_raw поля сохраняют оригинал
+    lab2 = LabResult(analyte_name="Гемоглобин", value_num=145.0, value_raw="145", unit_raw="g/l", taken_at_raw="23.03.2026")
+    assert lab2.value_raw == "145"
+    rx2 = Prescription(drug_mnn="аторвастатин", drug_raw="аторвастатин", match_status="matched")
+    assert rx2.match_status == "matched"

@@ -1,27 +1,21 @@
 {
   "vlm": {
-    "model": "qwen3-vl:3b",
+    "model": "qwen3-vl:8b-instruct",
     "temperature": 0.0,
-    "num_ctx": 32768,
-    "num_predict": 8192,
+    "num_ctx": 16384,
     "max_tokens": 8192,
+    "num_predict": 8192,
     "repeat_penalty": 1.2
   },
-  "pdf_to_image": {
-    "scale_x": 2.0,
-    "scale_y": 2.0,
-    "max_pages": 50
-  },
-  "database": {
-    "sqlite_path": "./data/botkin.db"
-  },
-  "bot": {
-    "polling_timeout": 30,
-    "api_url": "http://localhost:8000"
-  },
+  "ollama": { "keep_alive": "30m" },
+  "pdf_to_image": { "render_dpi": 200, "max_pages": 50 },
+  "image": { "max_long_side": 1800, "jpeg_quality": 90, "classify_long_side": 1000 },
+  "database": { "sqlite_path": "./data/botkin.db" },
+  "bot": { "polling_timeout": 30, "api_url": "http://localhost:8000" },
   "upload": {
     "max_bytes": 20971520,
     "allowed_extensions": [".pdf", ".jpg", ".jpeg", ".png", ".heic", ".webp"],
     "sources_dir": "./sources"
-  }
+  },
+  "drugs": { "max_edit_ratio": 0.40, "ratio_floor": 70 }
 }

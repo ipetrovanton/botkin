@@ -25,6 +25,9 @@ __pycache__/
 # Uploaded files
 sources/
 
+# Вход build-скрипта справочника (большая выгрузка ГРЛС) — не коммитим, см. registry.jsonl
+grls*.zip
+
 # Pytest artifacts
 pytest-cache-files-*/
 

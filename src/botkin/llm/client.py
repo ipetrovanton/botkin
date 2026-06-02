@@ -8,9 +8,21 @@ import urllib.request
 from openai import OpenAI
 
 import instructor
-from botkin.config import OLLAMA_URL
+from botkin.config import (
+    OLLAMA_URL, OLLAMA_KEEP_ALIVE, VLM_NUM_CTX, VLM_REPEAT_PENALTY, VLM_NUM_PREDICT,
+)
 
 log = logging.getLogger(__name__)
+
+
+def default_options() -> dict:
+    """Опции Ollama для VLM-вызовов. keep_alive держит модель в VRAM между вызовами."""
+    return {
+        "keep_alive": OLLAMA_KEEP_ALIVE,
+        "num_ctx": VLM_NUM_CTX,
+        "repeat_penalty": VLM_REPEAT_PENALTY,
+        "num_predict": VLM_NUM_PREDICT,
+    }
 
 _ollama_url: str | None = None
 
