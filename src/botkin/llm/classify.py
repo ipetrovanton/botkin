@@ -19,6 +19,8 @@ log = logging.getLogger(__name__)
 class ClassifySchema(BaseModel):
     doc_type: DocType
     confidence: float
+    title: str | None = None
+    clinic: str | None = None
 
 
 def run_vlm(source_path: Path) -> ClassifyResult:
@@ -55,7 +57,10 @@ def run_vlm(source_path: Path) -> ClassifyResult:
             source_path.name, response.doc_type, response.confidence,
             elapsed, usage.prompt_tokens, usage.completion_tokens,
         )
-        return ClassifyResult(doc_type=response.doc_type, confidence=response.confidence)
+        return ClassifyResult(
+            doc_type=response.doc_type, confidence=response.confidence,
+            title=response.title, clinic=response.clinic,
+        )
     except Exception as e:
         elapsed = time.perf_counter() - t0
         log.error("[FAILED_CLASSIFY] Doc: '%s' | Elapsed: %.2fs | Error: %s", source_path.name, elapsed, e)

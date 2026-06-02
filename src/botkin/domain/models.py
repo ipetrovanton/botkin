@@ -105,6 +105,8 @@ class ClassifyResult(BaseModel):
 
     doc_type: DocType
     confidence: float = Field(..., ge=0.0, le=1.0)
+    title: Optional[str] = None
+    clinic: Optional[str] = None
 
 
 class UploadResponse(BaseModel):
