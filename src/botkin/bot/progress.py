@@ -27,3 +27,25 @@ def render_progress(status: str, doc_id: int) -> str:
         else:
             lines.append(label)
     return "\n".join(lines)
+
+
+async def poll_until_done(doc_id, get_status, edit, sleep, now,
+                          interval: float = 2.0, timeout: float = 120.0):
+    """Поллит статус, редактирует сообщение при смене стадии.
+
+    Параметры-функции инъектируются для тестируемости:
+      get_status() -> awaitable[str|None]; edit(text)->awaitable;
+      sleep(sec)->awaitable; now()->float (монотонные секунды).
+    Возвращает финальный статус (extracted/failed) или None при таймауте.
+    """
+    start = now()
+    last_rendered = None
+    while now() - start <= timeout:
+        status = await get_status()
+        if status and status != last_rendered:
+            if is_terminal(status):
+                return status
+            await edit(render_progress(status, doc_id))
+            last_rendered = status
+        await sleep(interval)
+    return None
