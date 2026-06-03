@@ -5,11 +5,13 @@ reference_range, а не плоский LabResults. Эти тесты фикси
 """
 from botkin.llm.extract import (
     RawAnalysis,
+    extraction_quality,
     harvest_lab_rows,
     parse_lab_value,
     parse_reference_range,
     rows_from_raw,
 )
+from botkin.domain.models import LabResult
 
 
 # ── value: число / флаг / запятая / текст / пусто ────────────────────────────
@@ -203,3 +205,24 @@ def test_harvest_textual_value():
 def test_harvest_empty_on_garbage():
     assert harvest_lab_rows({"foo": "bar", "n": 5}) == []
     assert harvest_lab_rows([]) == []
+
+
+# ── метрики качества извлечения (для сравнения конфигов) ──────────────────────
+
+def test_extraction_quality_counts():
+    items = [
+        LabResult(analyte_name="Гематокрит", value_num=40.8, unit="%", ref_low=35.0, ref_high=45.0),
+        LabResult(analyte_name="HBsAg", value_text="не обнаружено", ref_text="отрицательно"),
+        LabResult(analyte_name="Глюкоза", value_num=5.4),  # без единицы и без нормы
+    ]
+    q = extraction_quality(items)
+    assert q["total"] == 3
+    assert q["with_value_num"] == 2
+    assert q["with_value_text"] == 1
+    assert q["with_ref"] == 2          # двусторонняя + текстовая норма
+    assert q["with_unit"] == 1
+
+
+def test_extraction_quality_empty():
+    q = extraction_quality([])
+    assert q["total"] == 0 and q["with_value_num"] == 0

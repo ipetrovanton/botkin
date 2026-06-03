@@ -4,7 +4,10 @@ import json
 import logging
 from pathlib import Path
 
-from botkin.config import DELIVERY_FALLBACK_DELAY
+from botkin.config import (
+    DELIVERY_FALLBACK_DELAY, IMAGE_CLASSIFY_LONG_SIDE, IMAGE_EXTRACT_LONG_SIDE,
+    PDF_RENDER_DPI, VLM_MODEL, VLM_NUM_CTX, VLM_NUM_PREDICT, VLM_TEMPERATURE,
+)
 from botkin.db.connection import get_conn
 from botkin.db.repos import DocumentRepo
 from botkin.domain.models import LabResult, DoctorReport
@@ -67,6 +70,13 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
     user_id = doc["user_id"]
     source_path = Path(doc["source_path"])
 
+    log.info(
+        "[CONFIG] Doc %d | model=%s temp=%.2f num_ctx=%d num_predict=%d | "
+        "extract_long_side=%d classify_long_side=%d pdf_dpi=%d",
+        document_id, VLM_MODEL, VLM_TEMPERATURE, VLM_NUM_CTX, VLM_NUM_PREDICT,
+        IMAGE_EXTRACT_LONG_SIDE, IMAGE_CLASSIFY_LONG_SIDE, PDF_RENDER_DPI,
+    )
+
     # ── 1. Статус: распознавание ───────────────────────────────────────────
     with get_conn() as conn:
         DocumentRepo(conn, user_id).set_status(document_id, "recognizing")
@@ -104,8 +114,14 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
                 log.info("Doc %d: извлечено строк анализов=%d", document_id, len(items))
                 _save_raw_extraction(document_id, items)
                 matches = _persist_lab(document_id, user_id, items)
-                # Обобщённый заголовок по биоматериалу (вместо «по одному показателю» из classify).
+                # Метрика качества нормализации по ФСЛИ — для сравнения конфигов.
                 if matches:
+                    matched = sum(1 for m in matches if m.status == "matched")
+                    log.info(
+                        "[NORMALIZE_QUALITY] Doc %d | сопоставлено ФСЛИ: %d/%d | не распознано: %d",
+                        document_id, matched, len(matches), len(matches) - matched,
+                    )
+                    # Обобщённый заголовок по биоматериалу (вместо «по одному показателю» из classify).
                     title = summary_title([m.specimen for m in matches])
                     with get_conn() as conn:
                         DocumentRepo(conn, user_id).set_metadata(document_id, title, result.clinic)

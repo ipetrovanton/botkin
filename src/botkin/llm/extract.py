@@ -269,16 +269,18 @@ def harvest_lab_rows(data) -> list[LabResult]:
 
 
 def _prepare_b64(source_path: Path) -> list[str]:
-    """PDF/изображение → список base64-JPEG (по странице) + лог объёма входа в VLM."""
+    """PDF/изображение → список base64-JPEG (по странице) + лог объёма/времени входа."""
+    t0 = time.perf_counter()
     b64_images = to_base64_jpegs(prepare_images(
         source_path,
         long_side=IMAGE_EXTRACT_LONG_SIDE,
         upscale=True, deskew=True, enhance=True,
     ))
+    prep_s = time.perf_counter() - t0
     total_b64 = sum(len(b) for b in b64_images)
     log.info(
-        "[EXTRACT_INPUT] Doc: '%s' | изображений: %d | base64 итого: %d Б (~%d KБ)",
-        source_path.name, len(b64_images), total_b64, total_b64 // 1024,
+        "[EXTRACT_INPUT] Doc: '%s' | изображений: %d | base64 итого: %d Б (~%d KБ) | препроцессинг: %.2fs",
+        source_path.name, len(b64_images), total_b64, total_b64 // 1024, prep_s,
     )
     if not b64_images:
         log.warning("[EXTRACT_INPUT] Doc: '%s' | НЕТ изображений после препроцессинга — VLM нечего анализировать", source_path.name)
@@ -333,10 +335,11 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
         elapsed = time.perf_counter() - t0
         usage = response._raw_response.usage
         n_parsed = _count_rows(response)
+        tok_s = usage.completion_tokens / elapsed if elapsed > 0 else 0.0
         log.info(
             "[SUCCESS_EXTRACT] Doc: '%s' | Type: '%s' | Elapsed: %.2fs | "
-            "Prompt: %d t | Completion: %d t | Распознано строк: %d",
-            doc_name, doc_type, elapsed, usage.prompt_tokens, usage.completion_tokens, n_parsed,
+            "Prompt: %d t | Completion: %d t | %.1f tok/s | Распознано строк: %d",
+            doc_name, doc_type, elapsed, usage.prompt_tokens, usage.completion_tokens, tok_s, n_parsed,
         )
         # Сырой ответ модели — на DEBUG (может быть объёмным). При n_parsed==0 поднимаем до WARNING:
         # это и есть «извлечение вернуло пусто» — самое нужное для диагностики место.
@@ -387,6 +390,18 @@ def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult]
     return rows, (len(tables) or tables_struct)
 
 
+def extraction_quality(items: list[LabResult]) -> dict:
+    """Сводка качества извлечения — для сравнения конфигов (полнота полей)."""
+    return {
+        "total": len(items),
+        "with_value_num": sum(1 for i in items if i.value_num is not None),
+        "with_value_text": sum(1 for i in items if i.value_text),
+        "with_ref": sum(1 for i in items if i.ref_low is not None
+                        or i.ref_high is not None or i.ref_text),
+        "with_unit": sum(1 for i in items if i.unit),
+    }
+
+
 def _row_key(r: LabResult):
     return (r.analyte_name.strip().lower(), r.value_num, r.value_text)
 
@@ -403,8 +418,10 @@ def _merge_dedup(base: list[LabResult], extra: list[LabResult]) -> list[LabResul
 
 
 def run_analysis(source_path: Path) -> list[LabResult]:
+    t0 = time.perf_counter()
     b64_images = _prepare_b64(source_path)
     rows, n_tables = _extract_once(b64_images, source_path.name)
+    n_calls = 1
 
     # Гибрид по страницам: один общий вызов; если неполно (исследований меньше страниц
     # или пусто) — добираем каждую страницу отдельным вызовом и объединяем с дедупом.
@@ -414,9 +431,21 @@ def run_analysis(source_path: Path) -> list[LabResult]:
                  source_path.name, n_tables, n_pages)
         for i, page in enumerate(b64_images):
             page_rows, _ = _extract_once([page], f"{source_path.name}#стр{i + 1}")
+            n_calls += 1
             rows = _merge_dedup(rows, page_rows)
 
-    log.info("[EXTRACT_MAPPED] Doc: '%s' | итого строк: %d", source_path.name, len(rows))
+    q = extraction_quality(rows)
+    total_s = time.perf_counter() - t0
+    log.info(
+        "[EXTRACT_MAPPED] Doc: '%s' | строк: %d | VLM-вызовов: %d | всего: %.2fs",
+        source_path.name, len(rows), n_calls, total_s,
+    )
+    log.info(
+        "[EXTRACT_QUALITY] Doc: '%s' | строк: %d | с числом: %d | с текстом: %d | "
+        "с нормой: %d | с единицей: %d",
+        source_path.name, q["total"], q["with_value_num"], q["with_value_text"],
+        q["with_ref"], q["with_unit"],
+    )
     return rows
 
 

@@ -129,7 +129,9 @@ def _pdf_pages(path: Path, long_side: int, upscale: bool, enhance: bool) -> list
             pix = page.get_pixmap(dpi=PDF_RENDER_DPI)
             img = Image.open(io.BytesIO(pix.tobytes("png")))
             jpeg = _process(img, long_side, upscale, deskew=False, enhance=enhance)
-            log.debug("[PDF] %s стр.%d: рендер %dx%d px → JPEG %d Б", path.name, index + 1, pix.width, pix.height, len(jpeg))
+            fw, fh = Image.open(io.BytesIO(jpeg)).size
+            log.info("[PDF] %s стр.%d: рендер %dx%d → итог %dx%d px, JPEG %d КБ",
+                     path.name, index + 1, pix.width, pix.height, fw, fh, len(jpeg) // 1024)
             out.append(jpeg)
     finally:
         doc.close()
@@ -153,7 +155,10 @@ def prepare_images(
         return _pdf_pages(path, limit, upscale, enhance)
 
     with Image.open(path) as img:
-        return [_process(img, limit, upscale, deskew, enhance)]
+        jpeg = _process(img, limit, upscale, deskew, enhance)
+    fw, fh = Image.open(io.BytesIO(jpeg)).size
+    log.info("[IMG] %s: итог %dx%d px, JPEG %d КБ", path.name, fw, fh, len(jpeg) // 1024)
+    return [jpeg]
 
 
 def to_base64_jpegs(images: list[bytes]) -> list[str]:
