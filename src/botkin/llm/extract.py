@@ -30,6 +30,13 @@ def _build_messages(system_prompt: str, instruction: str, source_path: Path) -> 
         long_side=IMAGE_EXTRACT_LONG_SIDE,
         upscale=True, deskew=True, enhance=True,
     ))
+    total_b64 = sum(len(b) for b in b64_images)
+    log.info(
+        "[EXTRACT_INPUT] Doc: '%s' | изображений в VLM: %d | base64 итого: %d Б (~%d KБ)",
+        source_path.name, len(b64_images), total_b64, total_b64 // 1024,
+    )
+    if not b64_images:
+        log.warning("[EXTRACT_INPUT] Doc: '%s' | НЕТ изображений после препроцессинга — VLM нечего анализировать", source_path.name)
     content: list[dict] = [{"type": "text", "text": instruction}]
     for b64 in b64_images:
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
@@ -37,6 +44,15 @@ def _build_messages(system_prompt: str, instruction: str, source_path: Path) -> 
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": content},
     ]
+
+
+def _raw_content(response: BaseModel) -> str:
+    """Сырой текст ответа модели до парсинга (для диагностики «тихого» []). '' если недоступен."""
+    try:
+        content = response._raw_response.choices[0].message.content
+    except (AttributeError, IndexError, TypeError):
+        return ""
+    return content if isinstance(content, str) else ""
 
 
 def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: str, doc_type: str) -> BaseModel:
@@ -54,10 +70,23 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
         )
         elapsed = time.perf_counter() - t0
         usage = response._raw_response.usage
+        parsed = getattr(response, "results", None)
+        n_parsed = len(parsed) if isinstance(parsed, list) else -1
         log.info(
-            "[SUCCESS_EXTRACT] Doc: '%s' | Type: '%s' | Elapsed: %.2fs | Prompt: %d t | Completion: %d t",
-            doc_name, doc_type, elapsed, usage.prompt_tokens, usage.completion_tokens,
+            "[SUCCESS_EXTRACT] Doc: '%s' | Type: '%s' | Elapsed: %.2fs | "
+            "Prompt: %d t | Completion: %d t | Распознано строк: %d",
+            doc_name, doc_type, elapsed, usage.prompt_tokens, usage.completion_tokens, n_parsed,
         )
+        # Сырой ответ модели — на DEBUG (может быть объёмным). При n_parsed==0 поднимаем до WARNING:
+        # это и есть «извлечение вернуло пусто» — самое нужное для диагностики место.
+        raw = _raw_content(response)
+        if n_parsed == 0:
+            log.warning(
+                "[EMPTY_EXTRACT] Doc: '%s' | модель вернула 0 строк. Сырой ответ (%d симв.): %s",
+                doc_name, len(raw), raw[:4000] or "<пусто/недоступно>",
+            )
+        else:
+            log.debug("[RAW_EXTRACT] Doc: '%s' | сырой ответ (%d симв.): %s", doc_name, len(raw), raw[:4000])
         return response
     except Exception as e:
         elapsed = time.perf_counter() - t0

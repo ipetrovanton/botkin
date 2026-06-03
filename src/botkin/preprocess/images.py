@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 from pathlib import Path
 
 import cv2
@@ -33,6 +34,8 @@ from botkin.config import (
     MAX_PAGES,
     PDF_RENDER_DPI,
 )
+
+log = logging.getLogger(__name__)
 
 
 def _resize(img: Image.Image, long_side: int, upscale: bool) -> Image.Image:
@@ -118,12 +121,16 @@ def _pdf_pages(path: Path, long_side: int, upscale: bool, enhance: bool) -> list
     out: list[bytes] = []
     doc = pymupdf.open(str(path))
     try:
+        log.info("[PDF] %s: страниц в документе=%d | рендер до %d @ %d dpi",
+                 path.name, doc.page_count, MAX_PAGES, PDF_RENDER_DPI)
         for index, page in enumerate(doc):
             if index >= MAX_PAGES:
                 break
             pix = page.get_pixmap(dpi=PDF_RENDER_DPI)
             img = Image.open(io.BytesIO(pix.tobytes("png")))
-            out.append(_process(img, long_side, upscale, deskew=False, enhance=enhance))
+            jpeg = _process(img, long_side, upscale, deskew=False, enhance=enhance)
+            log.debug("[PDF] %s стр.%d: рендер %dx%d px → JPEG %d Б", path.name, index + 1, pix.width, pix.height, len(jpeg))
+            out.append(jpeg)
     finally:
         doc.close()
     return out

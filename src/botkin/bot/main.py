@@ -9,6 +9,7 @@ from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 
 from botkin.bot.handlers import browse, dynamics, help, show, start, upload
+from botkin.log_config import setup_logging
 
 try:
     from dotenv import load_dotenv
@@ -17,10 +18,7 @@ try:
 except ImportError:
     pass
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+setup_logging()
 log = logging.getLogger("botkin.bot")
 
 

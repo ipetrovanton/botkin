@@ -5,10 +5,12 @@ from fastapi import FastAPI
 
 from botkin.db.connection import init_db
 from botkin.api.routes import upload
+from botkin.log_config import setup_logging
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_logging()
     init_db()
     yield
 

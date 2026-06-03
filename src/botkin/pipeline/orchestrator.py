@@ -101,6 +101,7 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
                 items: list[LabResult] = await asyncio.get_event_loop().run_in_executor(
                     None, extract.run_analysis, source_path,
                 )
+                log.info("Doc %d: извлечено строк анализов=%d", document_id, len(items))
                 _save_raw_extraction(document_id, items)
                 _persist_lab(document_id, user_id, items)
 
