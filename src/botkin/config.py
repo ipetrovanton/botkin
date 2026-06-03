@@ -65,6 +65,10 @@ _DEFAULTS: dict = {
         "max_edit_ratio": 0.40,
         "ratio_floor": 70,
     },
+    "analytes": {
+        "max_edit_ratio": 0.35,
+        "ratio_floor": 75,
+    },
 }
 
 
@@ -134,6 +138,11 @@ PHOTO_LOWRES_WARN = int(_get("image.lowres_warn", _DEFAULTS["image"]["lowres_war
 # cap = max(1, floor(len(имя) * DRUG_MAX_EDIT_RATIO)); фильтр fuzz.ratio ≥ DRUG_RATIO_FLOOR.
 DRUG_MAX_EDIT_RATIO = float(_get("drugs.max_edit_ratio", _DEFAULTS["drugs"]["max_edit_ratio"]))
 DRUG_RATIO_FLOOR = float(_get("drugs.ratio_floor", _DEFAULTS["drugs"]["ratio_floor"]))
+
+# ── Нормализация анализов (ФСЛИ) ──────────────────────────────────────────────
+# Аналогично препаратам: cap по дистанции Дамерау-Левенштейна + ratio-floor.
+ANALYTE_MAX_EDIT_RATIO = float(_get("analytes.max_edit_ratio", _DEFAULTS["analytes"]["max_edit_ratio"]))
+ANALYTE_RATIO_FLOOR = float(_get("analytes.ratio_floor", _DEFAULTS["analytes"]["ratio_floor"]))
 
 # ── База данных ───────────────────────────────────────────────────────────────
 SQLITE_PATH = str(_resolve_path(os.getenv("SQLITE_PATH", _get("database.sqlite_path", _DEFAULTS["database"]["sqlite_path"]))))
