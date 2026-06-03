@@ -127,15 +127,16 @@ uv run python -m scripts.build_drug_reference \
 > Заполненность кодов в самой ФСЛИ неполная: LOINC проставлен примерно у трети позиций, НМУ — чуть
 > больше трети, единица измерения — у ~78%. Поэтому обогащение этими полями опционально, а не гарантировано.
 
-Пересборка из официальной выгрузки ФСЛИ (один xlsx-лист «Справочник»):
+Пересборка из официальной выгрузки ФСЛИ (JSON-объект `{"records": [...]}`):
 
 ```bash
 uv run python -m scripts.build_analyte_reference \
-    --src "Справочник лабораторных тестов.xlsx" \
+    --src "справочник_лабораторных_тестов.json" \
     --out src/botkin/reference/analytes/registry.jsonl
 ```
 
-Сам xlsx в репозиторий не коммитится (он — вход скрипта).
+Сама выгрузка в репозиторий не коммитится (она — вход скрипта). Синонимы в ФСЛИ разделены
+смешанно (`;` и `,`) — скрипт бьёт по обоим разделителям.
 
 ## Конфигурация
 
@@ -175,7 +176,7 @@ botkin/
 │   ├── config.py            # Централизованная конфигурация
 │   └── exceptions.py        # Типизированные исключения
 ├── scripts/build_drug_reference.py     # Сборка registry.jsonl из выгрузки ГРЛС (openpyxl)
-├── scripts/build_analyte_reference.py  # Сборка registry.jsonl из выгрузки ФСЛИ (openpyxl)
+├── scripts/build_analyte_reference.py  # Сборка registry.jsonl из выгрузки ФСЛИ (JSON)
 ├── tests/                   # pytest (LLM мокается; модель в тестах не запускается)
 ├── config.json              # Детальные настройки
 ├── pyproject.toml           # Зависимости (uv)

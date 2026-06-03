@@ -1,9 +1,9 @@
-"""Сборка структурного справочника анализов из выгрузки ФСЛИ (xlsx).
+"""Сборка структурного справочника анализов из выгрузки ФСЛИ (JSON).
 
 Источник: «Справочник лабораторных тестов» ФСЛИ (OID 1.2.643.5.1.13.13.11.1080,
-портал НСИ Минздрава). Один лист «Справочник», шапка — строка 2 (1-based), данные с строки 3.
-Значимые колонки: LOINC, FULLNAME, ENGLISHNAME, SHORTNAME, SYNONYMS (через ';'),
-UNIT, GROUP, TESTSTATUS, NMU.
+портал НСИ Минздрава). JSON-выгрузка — объект {"records": [ {колонка: значение}, ... ]},
+ключи записи — машинные имена колонок: LOINC, FULLNAME, ENGLISHNAME, SHORTNAME,
+SYNONYMS (через ';' и/или ','), UNIT, GROUP, TESTSTATUS, NMU.
 
 Результат — registry.jsonl: по записи на тест с каноничным именем, краткой/английской формой,
 синонимами, LOINC, кодом НМУ, единицей, группой и статусом. Позволяет в рантайме фаззи-коррекцию
@@ -11,21 +11,19 @@ UNIT, GROUP, TESTSTATUS, NMU.
 
 Запуск (сеть НЕ требуется):
     uv run python -m scripts.build_analyte_reference \\
-        --src "Справочник лабораторных тестов.xlsx" \\
+        --src "справочник_лабораторных_тестов.json" \\
         --out src/botkin/reference/analytes/registry.jsonl
 """
 from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
-
-import openpyxl
 
 STATUS_MAP = {"Актуальный": "active", "Новый": "new", "Устаревший": "deprecated"}
 _MIN_NAME_LEN = 2
-_HEADER_ROW = 1       # 1-based: строка с машинными именами колонок (ID/LOINC/FULLNAME/…)
-_DATA_START_ROW = 3   # строка 2 — человекочитаемые описания колонок, пропускаем
+_SYNONYM_SEP = re.compile(r"[;,]")  # ФСЛИ смешивает разделители синонимов: ';' и ','
 
 
 def normalize_key(name: str) -> str:
@@ -43,11 +41,11 @@ def _clean(value) -> str | None:
 def _split_synonyms(value) -> list[str]:
     if value is None:
         return []
-    return [s.strip() for s in str(value).split(";") if s.strip()]
+    return [s.strip() for s in _SYNONYM_SEP.split(str(value)) if s.strip()]
 
 
 def row_to_record(row: dict) -> dict | None:
-    """Строка xlsx (dict по именам колонок) → запись реестра или None (если нет имени)."""
+    """Запись ФСЛИ (dict по именам колонок) → запись реестра или None (если нет имени)."""
     full = _clean(row.get("FULLNAME"))
     if not full or len(full) < _MIN_NAME_LEN:
         return None
@@ -69,27 +67,20 @@ def row_to_record(row: dict) -> dict | None:
     }
 
 
-def build_registry(xlsx_path: Path) -> list[dict]:
-    # ВАЖНО: НЕ read_only. Выгрузка ФСЛИ пишет битый размер листа (<dimension>A1:A1</>);
-    # в потоковом read_only режиме openpyxl обрезает iter_rows до этой одной ячейки
-    # (reset_dimensions потоковый парсер не переопределяет). Полная загрузка вычисляет
-    # реальные границы (A1:R20729). Скрипт офлайн-разовый — держать ~20k строк в памяти ок.
-    wb = openpyxl.load_workbook(xlsx_path, read_only=False)
-    ws = wb["Справочник"] if "Справочник" in wb.sheetnames else wb.active
-    if ws is None:
-        wb.close()
-        return []
+def build_registry(json_path: Path) -> list[dict]:
+    """Читает JSON-выгрузку ФСЛИ {"records": [...]} → дедуплицированный реестр.
 
-    header: list[str] | None = None
+    Дедуп по нормализованному имени (см. normalize_key) — первый победитель остаётся.
+    JSON-выгрузка плоская: ни битого <dimension>, ни строки описаний (засад xlsx) больше нет.
+    Скрипт офлайн-разовый — держать ~20k записей в памяти ок.
+    """
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    records_raw = data.get("records", data) if isinstance(data, dict) else data
+
     seen: set[str] = set()
     out: list[dict] = []
-    for i, row in enumerate(ws.iter_rows(values_only=True), start=1):
-        if i == _HEADER_ROW:
-            header = [str(c).strip() if c is not None else "" for c in row]
-            continue
-        if i < _DATA_START_ROW or header is None:
-            continue  # строка человекочитаемых описаний (стр. 2) и всё до данных
-        record = row_to_record(dict(zip(header, row)))
+    for row in records_raw:
+        record = row_to_record(row)
         if record is None:
             continue
         key = normalize_key(record["name"])
@@ -97,7 +88,6 @@ def build_registry(xlsx_path: Path) -> list[dict]:
             continue
         seen.add(key)
         out.append(record)
-    wb.close()
     return out
 
 
@@ -111,7 +101,7 @@ def write_registry(records: list[dict], out_path: Path, source_note: str) -> Non
 
 def main() -> None:  # pragma: no cover — ручной запуск с файлом выгрузки
     parser = argparse.ArgumentParser(description="Сборка справочника анализов botkin из ФСЛИ")
-    parser.add_argument("--src", type=Path, required=True, help="xlsx-выгрузка ФСЛИ")
+    parser.add_argument("--src", type=Path, required=True, help="JSON-выгрузка ФСЛИ")
     parser.add_argument("--out", type=Path, required=True, help="Путь к registry.jsonl")
     args = parser.parse_args()
 
