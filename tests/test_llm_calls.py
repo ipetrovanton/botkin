@@ -78,3 +78,32 @@ def test_extract_analysis_mocked(tmp_path):
     assert kwargs.get("upscale") is True
     assert kwargs.get("deskew") is True
     assert kwargs.get("enhance") is True
+
+
+def test_extract_analysis_falls_back_to_harvester(tmp_path):
+    """Если структурный разбор пуст (модель прислала чужую схему) — harvester по сырому JSON."""
+    import json
+    from botkin.llm import extract
+    from botkin.llm.extract import RawAnalysis
+
+    # Структурно RawAnalysis пуст (русские ключи не совпали со схемой), но сырой JSON есть.
+    raw = RawAnalysis.model_validate({})
+    ru_json = json.dumps({"": {"Исследование": "Клинический анализ крови", "Результат": [
+        {"Исследование": "Гемоглобин", "Результат": "13.7 г/дл", "Единицы": "г/дл", "Референс": "11.7 - 15.5"},
+        {"Исследование": "Базофилы, %", "Результат": "0.6%", "Единицы": "%", "Референс": "< 1.0"},
+    ]}}, ensure_ascii=False)
+    object.__setattr__(raw, "_raw_response", MagicMock(
+        usage=MagicMock(prompt_tokens=10, completion_tokens=5),
+        choices=[MagicMock(message=MagicMock(content=ru_json))],
+    ))
+
+    fake = MagicMock()
+    fake.chat.completions.create.return_value = raw
+
+    with patch("botkin.llm.extract.get_client", return_value=fake), \
+         patch("botkin.llm.extract.prepare_images", return_value=[b"\xff\xd8fakejpeg"]):
+        items = extract.run_analysis(_tiny_pdf(tmp_path))
+
+    assert [i.analyte_name for i in items] == ["Гемоглобин", "Базофилы, %"]
+    assert items[0].value_num == 13.7 and items[0].ref_low == 11.7
+    assert items[1].ref_operator == "<" and items[1].ref_high == 1.0

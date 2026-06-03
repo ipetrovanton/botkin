@@ -1,4 +1,5 @@
 """VLM-извлечение структурированных данных из медицинских документов."""
+import json
 import logging
 import re
 import time
@@ -65,7 +66,8 @@ def _to_float(s: str) -> float:
 def parse_lab_value(value) -> tuple[Optional[float], Optional[str]]:
     """Результат показателя → (value_num, value_text). Одно из них всегда None.
 
-    «40.8»/«217»/«5,4»→число; «44.6*» (флаг выхода за норму)→44.6; текст→value_text.
+    Берём ВЕДУЩЕЕ число: «40.8»/«217»/«5,4»→число; «44.6*» (флаг)→44.6;
+    «40.8%»/«9 мм/ч» (вклеенная единица)→число; нечисловой текст→value_text.
     """
     if value is None:
         return None, None
@@ -74,8 +76,10 @@ def parse_lab_value(value) -> tuple[Optional[float], Optional[str]]:
     s = str(value).strip()
     if not s:
         return None, None
-    # Число, возможно с хвостовым флагом (*, ↑, ↓, стрелки): берём ведущее число.
-    m = re.match(r"^(-?\d+(?:[.,]\d+)?)\s*[*↑↓▲▼+\-]?\s*$", s)
+    m = re.match(r"^[<>≤≥]", s)  # это оператор нормы, не результат — не число
+    if m:
+        return None, s
+    m = re.match(r"^(-?\d+(?:[.,]\d+)?)", s)  # ведущее число, хвост (флаг/единица) отбрасываем
     if m:
         return _to_float(m.group(1)), None
     return None, s
@@ -127,6 +131,140 @@ def rows_from_raw(raw: RawAnalysis) -> list[LabResult]:
             ref_text=ref_text,
             comments=r.comment,
         ))
+    return out
+
+
+# ── Harvester по содержимому (fallback к структурному разбору) ────────────────
+# qwen3-vl каждый прогон меняет имена ключей (англ/рус) и обёртку. Harvester
+# не полагается на фиксированные имена: распознаёт роль поля по алиасу ключа
+# (по подстроке, рус+англ), а при незнакомом ключе — по виду значения.
+
+_KEY_COMMENT = ("comment", "коммент", "примечан")
+_KEY_REF = ("reference", "range", "норма", "норматив", "диапазон", "ref", "norm")
+_KEY_UNIT = ("unit", "единиц", "ед.изм", "ед_изм", "размерност")
+_KEY_VALUE = ("value", "result", "результат", "значен")
+_KEY_NAME = ("parameter", "name", "analyte", "показател", "исследован", "параметр",
+             "наименован", "тест", "test")
+
+
+def _key_role(key: str) -> Optional[str]:
+    """Роль поля по имени ключа. Порядок важен: ref/unit/comment до value/name."""
+    k = " ".join(str(key).strip().lower().replace("ё", "е").split())
+    if not k:
+        return None
+    if any(t in k for t in _KEY_COMMENT):
+        return "comment"
+    if any(t in k for t in _KEY_REF):
+        return "ref"
+    if any(t in k for t in _KEY_UNIT):
+        return "unit"
+    if any(t in k for t in _KEY_VALUE):
+        return "value"
+    if any(t in k for t in _KEY_NAME):
+        return "name"
+    return None
+
+
+def _looks_like_ref(s: str) -> bool:
+    return bool(_RANGE_RE.match(s) or _LE_RE.match(s) or _GE_RE.match(s))
+
+
+def _looks_like_number(s: str) -> bool:
+    return bool(re.match(r"^-?\d", s.strip()))
+
+
+def _harvest_row(d: dict) -> Optional[LabResult]:
+    """Одна строка-показатель (dict с произвольными именами полей) → LabResult."""
+    scalars = [(str(k), str(v).strip()) for k, v in d.items()
+               if v is not None and not isinstance(v, (list, dict)) and str(v).strip()]
+    if not scalars:
+        return None
+
+    name = value_str = unit = ref = comment = None
+    taken: set[int] = set()
+    # 1) по ролям ключей
+    for i, (k, s) in enumerate(scalars):
+        role = _key_role(k)
+        if role == "name" and name is None:
+            name, _ = s, taken.add(i)
+        elif role == "value" and value_str is None:
+            value_str, _ = s, taken.add(i)
+        elif role == "unit" and unit is None:
+            unit, _ = s, taken.add(i)
+        elif role == "ref" and ref is None:
+            ref, _ = s, taken.add(i)
+        elif role == "comment" and comment is None:
+            comment, _ = s, taken.add(i)
+    # 2) добор по содержимому из незанятых полей
+    if ref is None:
+        for i, (k, s) in enumerate(scalars):
+            if i not in taken and _looks_like_ref(s):
+                ref, _ = s, taken.add(i)
+                break
+    if value_str is None:
+        for i, (k, s) in enumerate(scalars):
+            if i not in taken and _looks_like_number(s):
+                value_str, _ = s, taken.add(i)
+                break
+    if name is None:
+        cand = [(i, s) for i, (k, s) in enumerate(scalars)
+                if i not in taken and not _looks_like_number(s)]
+        if cand:
+            i, name = max(cand, key=lambda x: len(x[1]))
+            taken.add(i)
+    if not name:
+        return None
+
+    value_num, value_text = parse_lab_value(value_str)
+    ref_low, ref_high, ref_operator, ref_text = parse_reference_range(ref)
+    return LabResult(
+        analyte_name=name, value_num=value_num, value_text=value_text,
+        value_raw=value_str, unit=unit,
+        ref_low=ref_low, ref_high=ref_high, ref_operator=ref_operator, ref_text=ref_text,
+        comments=comment,
+    )
+
+
+def _is_row_dict(d) -> bool:
+    """dict «похож на строку показателя»: ≥2 скаляра и есть значение/норма (по виду или ключу)."""
+    if not isinstance(d, dict):
+        return False
+    scal = [(k, v) for k, v in d.items() if not isinstance(v, (list, dict))]
+    if len(scal) < 2:
+        return False
+    by_content = any(
+        v is not None and (_looks_like_number(str(v)) or _looks_like_ref(str(v)))
+        for k, v in scal
+    )
+    by_key = any(_key_role(str(k)) in ("value", "ref") for k, v in scal)
+    return by_content or by_key
+
+
+def _collect_tables(node, out: list) -> None:
+    """Рекурсивно ищет списки строк-показателей в произвольном JSON."""
+    if isinstance(node, list):
+        rows = [x for x in node if _is_row_dict(x)]
+        dicts = [x for x in node if isinstance(x, dict)]
+        if rows and len(rows) == len(dicts):
+            out.append(rows)
+        else:
+            for x in node:
+                _collect_tables(x, out)
+    elif isinstance(node, dict):
+        for v in node.values():
+            _collect_tables(v, out)
+
+
+def harvest_lab_rows(data) -> list[LabResult]:
+    """Сырой JSON ответа модели (любой структуры) → список LabResult по содержимому."""
+    tables: list = []
+    _collect_tables(data, tables)
+    out: list[LabResult] = []
+    for table in tables:
+        for item in table:
+            row = _harvest_row(item)
+            if row is not None:
+                out.append(row)
     return out
 
 
@@ -208,10 +346,29 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
         raise ExtractionError(f"Сбой извлечения ({doc_type}): {e}") from e
 
 
+def _loads_json(text: str):
+    """Толерантный json.loads сырого ответа модели. None, если не разобрать."""
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
 def run_analysis(source_path: Path) -> list[LabResult]:
     messages = _build_messages(ANALYSIS_VLM_SYSTEM, "Extract lab results from these document images.", source_path)
     raw = _call_vlm(messages, RawAnalysis, source_path.name, "analysis")
-    return rows_from_raw(raw)
+    rows = rows_from_raw(raw)
+    # Гибрид: структурный разбор не сработал (модель прислала схему с другими ключами) →
+    # harvester по сырому JSON, устойчивый к любым именам полей.
+    if not rows:
+        data = _loads_json(_raw_content(raw))
+        if data is not None:
+            rows = harvest_lab_rows(data)
+            log.info("[EXTRACT_FALLBACK] Doc: '%s' | harvester собрал строк: %d", source_path.name, len(rows))
+    log.info("[EXTRACT_MAPPED] Doc: '%s' | итого строк: %d", source_path.name, len(rows))
+    return rows
 
 
 def run_doctor_report(source_path: Path) -> list[DoctorReport]:

@@ -5,6 +5,7 @@ reference_range, а не плоский LabResults. Эти тесты фикси
 """
 from botkin.llm.extract import (
     RawAnalysis,
+    harvest_lab_rows,
     parse_lab_value,
     parse_reference_range,
     rows_from_raw,
@@ -24,6 +25,13 @@ def test_parse_value_integer():
 def test_parse_value_with_flag_star():
     # «44.6*» — число с маркером выхода за норму: число берём, текст не ставим
     assert parse_lab_value("44.6*") == (44.6, None)
+
+
+def test_parse_value_with_trailing_unit():
+    # модель иногда вклеивает единицу прямо в значение — берём ведущее число
+    assert parse_lab_value("40.8%") == (40.8, None)
+    assert parse_lab_value("9 мм/ч") == (9.0, None)
+    assert parse_lab_value("13.7 г/дл") == (13.7, None)
 
 
 def test_parse_value_comma_decimal():
@@ -130,3 +138,68 @@ def test_rows_from_raw_skips_rows_without_parameter():
     ]}]}
     rows = rows_from_raw(RawAnalysis.model_validate(payload))
     assert len(rows) == 1 and rows[0].analyte_name == "Гемоглобин"
+
+
+# ── harvester по содержимому: устойчив к ЛЮБЫМ именам ключей и вложенности ────
+# qwen3-vl каждый прогон меняет имена ключей (англ/рус) и обёртку — harvester
+# классифицирует поля по виду значения и алиасам ключей, имена ключей не фиксированы.
+
+# Реальный ответ модели, прогон №1 (английские ключи, обёртка tests):
+_REAL_EN = {
+    "patient_id": "881424164",
+    "tests": [{"test_name": "Клинический анализ крови", "results": [
+        {"parameter": "Гематокрит", "value": "40.8", "unit": "%", "reference_range": "35 - 45"},
+        {"parameter": "Нейтрофилы (общ. число), %", "value": "44.6*", "unit": "%",
+         "reference_range": "48 - 78", "comment": "патологических клеток не обнаружено"},
+        {"parameter": "Базофилы, %", "value": "0.6", "unit": "%", "reference_range": "< 1.0"},
+    ]}],
+}
+
+# Реальный ответ модели, прогон №2 (русские ключи, пустой верхний ключ):
+_REAL_RU = {
+    "": {"Исследование": "Клинический анализ крови", "Результат": [
+        {"Исследование": "Гематокрит", "Результат": "40.8%", "Единицы": "%", "Референс": "35 - 45"},
+        {"Исследование": "Нейтрофилы (общ. число), %", "Результат": "44.6%", "Единицы": "%",
+         "Референс": "48 - 78"},
+        {"Исследование": "Базофилы, %", "Результат": "0.6%", "Единицы": "%", "Референс": "< 1.0"},
+    ]},
+}
+
+
+def test_harvest_english_keys():
+    rows = harvest_lab_rows(_REAL_EN)
+    assert [r.analyte_name for r in rows] == ["Гематокрит", "Нейтрофилы (общ. число), %", "Базофилы, %"]
+    assert rows[0].value_num == 40.8 and rows[0].unit == "%"
+    assert rows[0].ref_low == 35.0 and rows[0].ref_high == 45.0
+    assert rows[2].ref_operator == "<" and rows[2].ref_high == 1.0
+
+
+def test_harvest_russian_keys_and_empty_wrapper():
+    rows = harvest_lab_rows(_REAL_RU)
+    # тот же результат, что и для английских ключей — имена ключей не важны
+    assert [r.analyte_name for r in rows] == ["Гематокрит", "Нейтрофилы (общ. число), %", "Базофилы, %"]
+    assert rows[0].value_num == 40.8 and rows[0].unit == "%"
+    assert rows[0].ref_low == 35.0 and rows[0].ref_high == 45.0
+    assert rows[2].ref_operator == "<" and rows[2].ref_high == 1.0
+
+
+def test_harvest_unit_glued_into_value():
+    # «9 мм/ч» с единицей в значении; имя короче единицы — ключ-алиас разрешает неоднозначность
+    data = {"data": [{"Показатель": "СОЭ", "Значение": "9 мм/ч", "Норма": "< 20"}]}
+    rows = harvest_lab_rows(data)
+    assert len(rows) == 1
+    assert rows[0].analyte_name == "СОЭ" and rows[0].value_num == 9.0
+    assert rows[0].ref_operator == "<" and rows[0].ref_high == 20.0
+
+
+def test_harvest_textual_value():
+    data = {"results": [{"name": "HBsAg", "result": "не обнаружено", "norm": "отрицательно"}]}
+    rows = harvest_lab_rows(data)
+    assert len(rows) == 1
+    assert rows[0].value_text == "не обнаружено" and rows[0].value_num is None
+    assert rows[0].ref_text == "отрицательно"
+
+
+def test_harvest_empty_on_garbage():
+    assert harvest_lab_rows({"foo": "bar", "n": 5}) == []
+    assert harvest_lab_rows([]) == []
