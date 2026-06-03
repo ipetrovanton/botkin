@@ -11,6 +11,7 @@ from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ClassificationError, ExtractionError
 from botkin.llm import classify, extract
 from botkin.normalize.drugs import DrugNormalizer, load_default
+from botkin.normalize.analytes import AnalyteNormalizer, load_default as load_analytes
 from botkin.normalize.units import canonical_unit
 from botkin.pipeline.notifications import (
     classify_failed, document_processed, extract_failed, notify_user, pipeline_failed,
@@ -29,6 +30,17 @@ def get_drug_normalizer() -> DrugNormalizer:
     if _DRUG_NORMALIZER is None:
         _DRUG_NORMALIZER = load_default()
     return _DRUG_NORMALIZER
+
+
+_ANALYTE_NORMALIZER: AnalyteNormalizer | None = None
+
+
+def get_analyte_normalizer() -> AnalyteNormalizer:
+    """Ленивый синглтон: справочник анализов ФСЛИ читается из registry.jsonl один раз."""
+    global _ANALYTE_NORMALIZER
+    if _ANALYTE_NORMALIZER is None:
+        _ANALYTE_NORMALIZER = load_analytes()
+    return _ANALYTE_NORMALIZER
 
 
 async def process_document(document_id: int, telegram_user_id: int) -> None:
@@ -139,20 +151,30 @@ def _save_raw_extraction(document_id: int, items: list) -> None:
 # ── Persist ────────────────────────────────────────────────────────────────────
 
 def _persist_lab(document_id: int, user_id: int, items: list[LabResult]) -> None:
+    normalizer = get_analyte_normalizer()
     with get_conn() as conn:
         for item in items:
             unit_canon, unit_raw = canonical_unit(item.unit)
+            match = normalizer.correct(item.analyte_name)
+            unit_mismatch = None
+            if match.status == "matched" and match.expected_unit and unit_canon:
+                exp_canon, _ = canonical_unit(match.expected_unit)
+                unit_mismatch = 1 if exp_canon != unit_canon else 0
             conn.execute(
                 """INSERT INTO lab_results(document_id, user_id, analyte_code, analyte_name,
-                   value_num, value_text, unit, ref_low, ref_high, taken_at, source_table_cell,
-                   value_raw, unit_raw, taken_at_raw)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   value_num, value_text, unit, ref_low, ref_high, ref_operator, ref_text,
+                   taken_at, source_table_cell, value_raw, unit_raw, taken_at_raw,
+                   analyte_canonical, loinc, nmu_code, analyte_group, match_status,
+                   unit_expected, unit_mismatch)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (document_id, user_id, item.analyte_code, item.analyte_name,
                  item.value_num, item.value_text, unit_canon,
-                 item.ref_low, item.ref_high,
+                 item.ref_low, item.ref_high, item.ref_operator, item.ref_text,
                  item.taken_at.isoformat() if item.taken_at else None,
                  item.source_table_cell,
-                 item.value_raw, unit_raw, item.taken_at_raw),
+                 item.value_raw, unit_raw, item.taken_at_raw,
+                 match.canonical, match.loinc, match.nmu, match.group,
+                 match.status, match.expected_unit, unit_mismatch),
             )
         conn.commit()
 
