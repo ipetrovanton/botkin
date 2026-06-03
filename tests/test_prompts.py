@@ -19,12 +19,13 @@ def test_core_prompts_present():
     assert not hasattr(prompts, "PRESCRIPTION_VLM_SYSTEM")   # рецепты сняты с поддержки
 
 
-def test_analysis_prompt_covers_one_sided_refs_and_value_text():
+def test_analysis_prompt_describes_nested_schema():
+    """Промпт согласован со схемой RawAnalysis: tests[].results[] c parameter/value/reference_range."""
     p = prompts.ANALYSIS_VLM_SYSTEM
-    assert "ref_operator" in p          # односторонние референсы описаны
-    assert "<5.0" in p or "<" in p
-    assert "value_text" in p
-    assert "ref_text" in p
+    assert "test_name" in p and "tests" in p   # вложенная группировка по исследованиям
+    assert "parameter" in p
+    assert "value" in p
+    assert "reference_range" in p
 
 
 def test_lab_result_ignores_extra_fields():

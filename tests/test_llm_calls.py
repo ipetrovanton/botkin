@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pymupdf
 
-from botkin.domain.models import ClassifyResult, LabResult
+from botkin.domain.models import ClassifyResult
 
 
 def test_keep_alive_exported():
@@ -51,19 +51,27 @@ def test_classify_uses_small_image_and_mocked_client(tmp_path):
 
 def test_extract_analysis_mocked(tmp_path):
     from botkin.llm import extract
+    from botkin.llm.extract import RawAnalysis
+
+    raw = RawAnalysis.model_validate({
+        "tests": [{"test_name": "Клинический анализ крови", "results": [
+            {"parameter": "Гемоглобин", "value": "145", "unit": "г/л", "reference_range": "120 - 160"},
+        ]}],
+    })
+    # instructor навешивает сырой ответ на возвращаемую модель — имитируем для логирования usage.
+    object.__setattr__(raw, "_raw_response",
+                       MagicMock(usage=MagicMock(prompt_tokens=10, completion_tokens=5)))
 
     fake = MagicMock()
-    resp = MagicMock()
-    resp.results = [LabResult(analyte_name="Гемоглобин", value_num=145.0, unit="г/л")]
-    resp._raw_response.usage.prompt_tokens = 10
-    resp._raw_response.usage.completion_tokens = 5
-    fake.chat.completions.create.return_value = resp
+    fake.chat.completions.create.return_value = raw
 
     with patch("botkin.llm.extract.get_client", return_value=fake), \
          patch("botkin.llm.extract.prepare_images", return_value=[b"\xff\xd8fakejpeg"]) as prep:
         items = extract.run_analysis(_tiny_pdf(tmp_path))
 
     assert items and items[0].analyte_name == "Гемоглобин"
+    assert items[0].value_num == 145.0
+    assert items[0].ref_low == 120.0 and items[0].ref_high == 160.0
     _, kwargs = prep.call_args
     from botkin.config import IMAGE_EXTRACT_LONG_SIDE
     assert kwargs.get("long_side") == IMAGE_EXTRACT_LONG_SIDE
