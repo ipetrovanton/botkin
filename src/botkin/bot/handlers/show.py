@@ -48,19 +48,49 @@ def _format_document(doc_id: int, doc: dict) -> str:
         )
 
 
+def _format_ref(r: dict) -> str:
+    """Текст нормы: двусторонняя / односторонняя с оператором / текстовая."""
+    if r.get("ref_low") is not None and r.get("ref_high") is not None:
+        return f"норма {r['ref_low']}–{r['ref_high']}"
+    op = r.get("ref_operator")
+    if op == "<" and r.get("ref_high") is not None:
+        return f"норма <{r['ref_high']}"
+    if op == ">" and r.get("ref_low") is not None:
+        return f"норма >{r['ref_low']}"
+    if r.get("ref_text"):
+        return f"норма: {r['ref_text']}"
+    return ""
+
+
+def _ref_marker(r: dict) -> str:
+    """⬆️/⬇️ по доступным границам (в т.ч. односторонним)."""
+    v = r.get("value_num")
+    if v is None:
+        return ""
+    low, high = r.get("ref_low"), r.get("ref_high")
+    if low is not None and v < low:
+        return " ⬇️"
+    if high is not None and v > high:
+        return " ⬆️"
+    return ""
+
+
 def _format_labs(rows: list[dict]) -> str:
     lines = []
     for r in rows:
-        marker = ""
-        if r["value_num"] is not None and r["ref_low"] is not None and r["ref_high"] is not None:
-            if r["value_num"] < r["ref_low"]:
-                marker = " ⬇️"
-            elif r["value_num"] > r["ref_high"]:
-                marker = " ⬆️"
-        ref = f" (норма {r['ref_low']}-{r['ref_high']})" if r["ref_low"] is not None else ""
-        name = html.escape(r["analyte_name"])
-        unit = html.escape(r["unit"]) if r["unit"] else ""
-        lines.append(f"• <b>{name}</b>: {r['value_num']} {unit}{ref}{marker}")
+        if r.get("value_num") is not None:
+            value = f"{r['value_num']}"
+        elif r.get("value_text"):
+            value = html.escape(r["value_text"])
+        else:
+            continue
+        name = html.escape(r.get("analyte_canonical") or r["analyte_name"])
+        unit = f" {html.escape(r['unit'])}" if r.get("unit") else ""
+        ref = _format_ref(r)
+        ref = f" ({ref})" if ref else ""
+        warn = " ⚠️" if r.get("unit_mismatch") else ""
+        marker = _ref_marker(r)
+        lines.append(f"• <b>{name}</b>: {value}{unit}{ref}{marker}{warn}")
     return "\n".join(lines) or "—"
 
 
