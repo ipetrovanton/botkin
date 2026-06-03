@@ -107,3 +107,50 @@ def test_extract_analysis_falls_back_to_harvester(tmp_path):
     assert [i.analyte_name for i in items] == ["Гемоглобин", "Базофилы, %"]
     assert items[0].value_num == 13.7 and items[0].ref_low == 11.7
     assert items[1].ref_operator == "<" and items[1].ref_high == 1.0
+
+
+def test_run_analysis_multipage_backfills_missing_page(tmp_path):
+    """Гибрид: общий вызов потерял страницу (исследований < страниц) → добор постранично + дедуп."""
+    import base64
+    from botkin.llm import extract
+    from botkin.domain.models import LabResult
+
+    oak = [LabResult(analyte_name="Гематокрит", value_num=40.8, unit="%"),
+           LabResult(analyte_name="Гемоглобин", value_num=13.7, unit="г/дл")]
+    srb = [LabResult(analyte_name="С-реактивный белок", value_num=1.8, unit="мг/л")]
+    page1 = base64.b64encode(b"PAGE1").decode()
+
+    def fake_once(b64_images, doc_name):
+        if len(b64_images) == 2:
+            return list(oak), 1            # общий: только ОАК (1 исследование) < 2 страниц
+        if b64_images == [page1]:
+            return list(srb), 1            # стр.1 — СРБ
+        return list(oak), 1                # стр.2 — снова ОАК (должен схлопнуться дедупом)
+
+    with patch("botkin.llm.extract._extract_once", side_effect=fake_once), \
+         patch("botkin.llm.extract.prepare_images", return_value=[b"PAGE1", b"PAGE2"]):
+        items = extract.run_analysis(_tiny_pdf(tmp_path))
+
+    names = [i.analyte_name for i in items]
+    assert "С-реактивный белок" in names           # потерянная страница добрана
+    assert "Гематокрит" in names and "Гемоглобин" in names
+    assert names.count("Гематокрит") == 1          # дедуп: ОАК не задвоился
+
+
+def test_run_analysis_singlepage_no_backfill(tmp_path):
+    """Одна страница — постраничный добор не запускается (экономия вызовов)."""
+    from botkin.llm import extract
+    from botkin.domain.models import LabResult
+
+    calls = []
+
+    def fake_once(b64_images, doc_name):
+        calls.append(len(b64_images))
+        return [LabResult(analyte_name="Глюкоза", value_num=5.4, unit="ммоль/л")], 1
+
+    with patch("botkin.llm.extract._extract_once", side_effect=fake_once), \
+         patch("botkin.llm.extract.prepare_images", return_value=[b"PAGE1"]):
+        items = extract.run_analysis(_tiny_pdf(tmp_path))
+
+    assert len(items) == 1 and items[0].analyte_name == "Глюкоза"
+    assert calls == [1]                            # ровно один вызов, без добора

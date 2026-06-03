@@ -268,7 +268,8 @@ def harvest_lab_rows(data) -> list[LabResult]:
     return out
 
 
-def _build_messages(system_prompt: str, instruction: str, source_path: Path) -> list[dict]:
+def _prepare_b64(source_path: Path) -> list[str]:
+    """PDF/изображение → список base64-JPEG (по странице) + лог объёма входа в VLM."""
     b64_images = to_base64_jpegs(prepare_images(
         source_path,
         long_side=IMAGE_EXTRACT_LONG_SIDE,
@@ -276,11 +277,15 @@ def _build_messages(system_prompt: str, instruction: str, source_path: Path) -> 
     ))
     total_b64 = sum(len(b) for b in b64_images)
     log.info(
-        "[EXTRACT_INPUT] Doc: '%s' | изображений в VLM: %d | base64 итого: %d Б (~%d KБ)",
+        "[EXTRACT_INPUT] Doc: '%s' | изображений: %d | base64 итого: %d Б (~%d KБ)",
         source_path.name, len(b64_images), total_b64, total_b64 // 1024,
     )
     if not b64_images:
         log.warning("[EXTRACT_INPUT] Doc: '%s' | НЕТ изображений после препроцессинга — VLM нечего анализировать", source_path.name)
+    return b64_images
+
+
+def _messages_from_images(system_prompt: str, instruction: str, b64_images: list[str]) -> list[dict]:
     content: list[dict] = [{"type": "text", "text": instruction}]
     for b64 in b64_images:
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
@@ -288,6 +293,10 @@ def _build_messages(system_prompt: str, instruction: str, source_path: Path) -> 
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": content},
     ]
+
+
+def _build_messages(system_prompt: str, instruction: str, source_path: Path) -> list[dict]:
+    return _messages_from_images(system_prompt, instruction, _prepare_b64(source_path))
 
 
 def _count_rows(response: BaseModel) -> int:
@@ -356,17 +365,57 @@ def _loads_json(text: str):
         return None
 
 
-def run_analysis(source_path: Path) -> list[LabResult]:
-    messages = _build_messages(ANALYSIS_VLM_SYSTEM, "Extract lab results from these document images.", source_path)
-    raw = _call_vlm(messages, RawAnalysis, source_path.name, "analysis")
+_ANALYSIS_INSTRUCTION = "Extract lab results from these document images."
+
+
+def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult], int]:
+    """Один VLM-вызов по набору изображений + гибридный разбор → (строки, число исследований)."""
+    messages = _messages_from_images(ANALYSIS_VLM_SYSTEM, _ANALYSIS_INSTRUCTION, b64_images)
+    raw = _call_vlm(messages, RawAnalysis, doc_name, "analysis")
     rows = rows_from_raw(raw)
-    # Гибрид: структурный разбор не сработал (модель прислала схему с другими ключами) →
-    # harvester по сырому JSON, устойчивый к любым именам полей.
-    if not rows:
-        data = _loads_json(_raw_content(raw))
-        if data is not None:
-            rows = harvest_lab_rows(data)
-            log.info("[EXTRACT_FALLBACK] Doc: '%s' | harvester собрал строк: %d", source_path.name, len(rows))
+    tables_struct = len(raw.tests) + (1 if raw.results else 0)
+    if rows:
+        return rows, tables_struct
+    # Структурный разбор пуст (чужие ключи) → harvester по сырому JSON.
+    data = _loads_json(_raw_content(raw))
+    if data is None:
+        return [], tables_struct
+    tables: list = []
+    _collect_tables(data, tables)
+    rows = harvest_lab_rows(data)
+    log.info("[EXTRACT_FALLBACK] Doc: '%s' | harvester собрал строк: %d (таблиц: %d)", doc_name, len(rows), len(tables))
+    return rows, (len(tables) or tables_struct)
+
+
+def _row_key(r: LabResult):
+    return (r.analyte_name.strip().lower(), r.value_num, r.value_text)
+
+
+def _merge_dedup(base: list[LabResult], extra: list[LabResult]) -> list[LabResult]:
+    seen = {_row_key(r) for r in base}
+    out = list(base)
+    for r in extra:
+        key = _row_key(r)
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
+def run_analysis(source_path: Path) -> list[LabResult]:
+    b64_images = _prepare_b64(source_path)
+    rows, n_tables = _extract_once(b64_images, source_path.name)
+
+    # Гибрид по страницам: один общий вызов; если неполно (исследований меньше страниц
+    # или пусто) — добираем каждую страницу отдельным вызовом и объединяем с дедупом.
+    n_pages = len(b64_images)
+    if n_pages > 1 and (not rows or n_tables < n_pages):
+        log.info("[MULTIPAGE] Doc: '%s' | неполно (исследований=%d, страниц=%d) — добор постранично",
+                 source_path.name, n_tables, n_pages)
+        for i, page in enumerate(b64_images):
+            page_rows, _ = _extract_once([page], f"{source_path.name}#стр{i + 1}")
+            rows = _merge_dedup(rows, page_rows)
+
     log.info("[EXTRACT_MAPPED] Doc: '%s' | итого строк: %d", source_path.name, len(rows))
     return rows
 
