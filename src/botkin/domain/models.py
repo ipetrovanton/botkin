@@ -34,7 +34,7 @@ def parse_ru_date(value: str | datetime | None) -> datetime | None:
 
 class LabResult(BaseModel):
     """Один показатель анализа."""
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     analyte_code: Optional[str] = None
     analyte_name: str
@@ -60,7 +60,7 @@ class LabResult(BaseModel):
 
 class DoctorReport(BaseModel):
     """Заключение врача."""
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     diagnosis: Optional[str] = None
     recommendations: list[str] = Field(default_factory=list)
