@@ -35,6 +35,49 @@ class AnalyteMatch:
     match_status: str | None   # статус теста в реестре: active | new | deprecated
     distance: int | None
     ratio: float
+    specimen: str | None = None   # биоматериал из ФСЛИ (Кровь/Моча/…) — для заголовка документа
+
+
+# ── Обобщённый заголовок документа по биоматериалу ───────────────────────────
+# Заголовок «С-реактивный белок» (по одному показателю) неинформативен. Обобщаем
+# по преобладающему биоматериалу нормализованных показателей: Кровь→«Анализ крови».
+
+_SPECIMEN_CATEGORIES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("кровь", "сыворотк", "плазм", "эритроцит"), "Анализ крови"),
+    (("моча", "мочи", "урин"), "Анализ мочи"),
+    (("кал", "фекал", "копролог"), "Анализ кала"),
+    (("слюн",), "Анализ слюны"),
+    (("ликвор", "спинномозг"), "Анализ ликвора"),
+    (("мазок", "соскоб", "отделяем"), "Исследование мазка"),
+)
+
+
+def specimen_category(specimen: str | None) -> str | None:
+    """Биоматериал ФСЛИ → обобщённая категория документа или None."""
+    if not specimen:
+        return None
+    s = specimen.strip().lower().replace("ё", "е")
+    for keys, label in _SPECIMEN_CATEGORIES:
+        if any(k in s for k in keys):
+            return label
+    return None
+
+
+def summary_title(
+    specimens: Iterable[str | None],
+    test_names: Iterable[str | None] = (),
+    fallback: str = "Лабораторные анализы",
+) -> str:
+    """Заголовок документа: преобладающий биоматериал → название исследования → fallback."""
+    from collections import Counter
+
+    cats = [c for sp in specimens if (c := specimen_category(sp))]
+    if cats:
+        return Counter(cats).most_common(1)[0][0]
+    names = [t.strip() for t in test_names if t and t.strip()]
+    if names:
+        return Counter(names).most_common(1)[0][0]
+    return fallback
 
 
 def _normalize_name(name: str) -> str:
@@ -44,7 +87,7 @@ def _normalize_name(name: str) -> str:
 def _unverified(raw: str, dist: int | None = None, ratio: float = 0.0) -> AnalyteMatch:
     return AnalyteMatch(raw=raw, canonical=None, loinc=None, nmu=None, group=None,
                         expected_unit=None, status="unverified", match_status=None,
-                        distance=dist, ratio=ratio)
+                        distance=dist, ratio=ratio, specimen=None)
 
 
 class AnalyteNormalizer:
@@ -83,6 +126,7 @@ class AnalyteNormalizer:
             match_status=record.get("status"),
             distance=dist,
             ratio=ratio,
+            specimen=record.get("specimen"),
         )
 
     def correct(self, raw_name: str) -> AnalyteMatch:

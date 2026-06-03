@@ -53,7 +53,7 @@ def test_persist_lab_normalizes_and_checks_unit(set_test_db, monkeypatch):
     fake = AnalyteNormalizer([
         {"name": "Глюкоза", "short": "GLU", "english": "Glucose", "synonyms": [],
          "loinc": "2345-7", "nmu": "B03.016.006", "unit": "ммоль/л",
-         "group": "Биохимические исследования", "status": "active"},
+         "group": "Биохимические исследования", "specimen": "Сыворотка крови", "status": "active"},
     ])
     monkeypatch.setattr(orchestrator, "_ANALYTE_NORMALIZER", fake)
 
@@ -64,7 +64,7 @@ def test_persist_lab_normalizes_and_checks_unit(set_test_db, monkeypatch):
     items = [
         LabResult(analyte_name="Глюкоэа", value_num=5.4, unit="г/л"),  # опечатка + неверная единица
     ]
-    orchestrator._persist_lab(did, uid, items)
+    matches = orchestrator._persist_lab(did, uid, items)
 
     with get_conn() as conn:
         row = conn.execute(
@@ -77,3 +77,8 @@ def test_persist_lab_normalizes_and_checks_unit(set_test_db, monkeypatch):
     assert row["match_status"] == "matched"
     assert row["unit_expected"] == "ммоль/л"
     assert row["unit_mismatch"] == 1                  # г/л ≠ ммоль/л
+
+    # _persist_lab возвращает matches с биоматериалом → обобщённый заголовок документа
+    from botkin.normalize.analytes import summary_title
+    assert matches[0].specimen == "Сыворотка крови"
+    assert summary_title([m.specimen for m in matches]) == "Анализ крови"
