@@ -24,7 +24,8 @@ import openpyxl
 
 STATUS_MAP = {"Актуальный": "active", "Новый": "new", "Устаревший": "deprecated"}
 _MIN_NAME_LEN = 2
-_HEADER_ROW = 2  # 1-based: строка с именами колонок
+_HEADER_ROW = 1       # 1-based: строка с машинными именами колонок (ID/LOINC/FULLNAME/…)
+_DATA_START_ROW = 3   # строка 2 — человекочитаемые описания колонок, пропускаем
 
 
 def normalize_key(name: str) -> str:
@@ -69,24 +70,25 @@ def row_to_record(row: dict) -> dict | None:
 
 
 def build_registry(xlsx_path: Path) -> list[dict]:
-    wb = openpyxl.load_workbook(xlsx_path, read_only=True)
+    # ВАЖНО: НЕ read_only. Выгрузка ФСЛИ пишет битый размер листа (<dimension>A1:A1</>);
+    # в потоковом read_only режиме openpyxl обрезает iter_rows до этой одной ячейки
+    # (reset_dimensions потоковый парсер не переопределяет). Полная загрузка вычисляет
+    # реальные границы (A1:R20729). Скрипт офлайн-разовый — держать ~20k строк в памяти ок.
+    wb = openpyxl.load_workbook(xlsx_path, read_only=False)
     ws = wb["Справочник"] if "Справочник" in wb.sheetnames else wb.active
     if ws is None:
         wb.close()
         return []
-    rows = ws.iter_rows(values_only=True)
-    header = None
-    for i, row in enumerate(rows, start=1):
-        if i == _HEADER_ROW:
-            header = [str(c).strip() if c is not None else "" for c in row]
-            break
-    if header is None:
-        wb.close()
-        return []
 
+    header: list[str] | None = None
     seen: set[str] = set()
     out: list[dict] = []
-    for row in rows:  # продолжаем с данных (после шапки)
+    for i, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        if i == _HEADER_ROW:
+            header = [str(c).strip() if c is not None else "" for c in row]
+            continue
+        if i < _DATA_START_ROW or header is None:
+            continue  # строка человекочитаемых описаний (стр. 2) и всё до данных
         record = row_to_record(dict(zip(header, row)))
         if record is None:
             continue
