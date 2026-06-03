@@ -149,7 +149,10 @@ def labs_in_period(user_id: int, start, end) -> list[dict]:
 def get_lab_results(document_id: int, limit: int = 20) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT analyte_name, value_num, unit, ref_low, ref_high "
+            "SELECT analyte_name, value_num, value_text, unit, "
+            "ref_low, ref_high, ref_operator, ref_text, "
+            "analyte_canonical, loinc, nmu_code, analyte_group, "
+            "match_status, unit_expected, unit_mismatch "
             "FROM lab_results WHERE document_id = ? LIMIT ?",
             (document_id, limit),
         ).fetchall()
