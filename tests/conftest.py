@@ -11,8 +11,10 @@ def _make_pdf(path, words, *, page_size=(595, 842)):
     """
     doc = pymupdf.open()
     page = doc.new_page(width=page_size[0], height=page_size[1])
+    # china-s (Droid Sans Fallback) — встроенный шрифт pymupdf с кириллицей;
+    # дефолтный Helvetica кириллицу не имеет и пишет «······» в текстовый слой.
     for x, y, text in words:
-        page.insert_text((x, y), text, fontsize=10)
+        page.insert_text((x, y), text, fontsize=10, fontname="china-s")
     doc.save(str(path))
     doc.close()
 
