@@ -461,6 +461,41 @@ def extraction_quality(items: list[LabResult]) -> dict:
     }
 
 
+_NUM_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
+
+
+def _num_tokens(*values) -> list[str]:
+    """Нормализованные числовые токены из значений (запятая→точка, без хвостовых .0)."""
+    out: list[str] = []
+    for v in values:
+        if v is None:
+            continue
+        for m in _NUM_RE.findall(str(v)):
+            s = m.replace(",", ".")
+            if s.endswith(".0"):
+                s = s[:-2]
+            out.append(s)
+    return out
+
+
+def _verbatim_guard(rows: list[LabResult], source_text: str):
+    """Делит строки на (kept, rejected): каждое число строки обязано быть в source_text.
+
+    Числа источника собираем в множество нормализованных токенов; строка проходит,
+    если ВСЕ её числа (value_raw + границы референса) присутствуют в источнике.
+    """
+    source_nums = set(_num_tokens(source_text))
+    kept: list[LabResult] = []
+    rejected: list[LabResult] = []
+    for r in rows:
+        tokens = _num_tokens(r.value_raw, r.ref_low, r.ref_high, r.ref_text)
+        if all(t in source_nums for t in tokens):
+            kept.append(r)
+        else:
+            rejected.append(r)
+    return kept, rejected
+
+
 def _row_key(r: LabResult):
     return (r.analyte_name.strip().lower(), r.value_num, r.value_text)
 
