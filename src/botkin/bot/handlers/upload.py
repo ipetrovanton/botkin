@@ -16,7 +16,7 @@ from botkin.db.queries import get_document, get_document_status, get_user_id
 from botkin.db.repos import DocumentRepo
 
 router = Router(name="upload")
-log = logging.getLogger("bot.upload")
+log = logging.getLogger("botkin.bot.upload")
 
 # Telegram сжимает «фото» (~1280px). Файлом сохраняется полное разрешение камеры.
 _FILE_HINT = (
@@ -68,24 +68,36 @@ def claim_delivery_for(doc_id: int, user_id: int) -> bool:
 
 async def run_progress_flow(tg_user_id: int, doc_id: int, edit) -> None:
     """Поллит статус и по завершении показывает карточку. `edit(text)` — корутина."""
-    user_id = get_user_id(tg_user_id)
-    if not user_id:
-        return
+    log.info("[FLOW_START] Doc %d | tg_user=%d", doc_id, tg_user_id)
+    try:
+        user_id = get_user_id(tg_user_id)
+        if not user_id:
+            log.warning("[FLOW_NO_USER] Doc %d | tg_user=%d не зарегистрирован", doc_id, tg_user_id)
+            return
 
-    async def _get_status():
-        return get_document_status(doc_id, user_id)
+        async def _get_status():
+            return get_document_status(doc_id, user_id)
 
-    final = await poll_until_done(
-        doc_id=doc_id, get_status=_get_status, edit=edit,
-        sleep=asyncio.sleep, now=time.monotonic,
-    )
-    if final == "extracted":
-        if claim_delivery_for(doc_id, user_id):
-            await edit(render_document_card(doc_id, user_id))
-    elif final == "failed":
-        await edit(f"❌ Документ #{doc_id}: обработка завершилась ошибкой.")
-    else:
-        await edit("⏳ Обработка затянулась. Загляните позже через /show.")
+        final = await poll_until_done(
+            doc_id=doc_id, get_status=_get_status, edit=edit,
+            sleep=asyncio.sleep, now=time.monotonic,
+        )
+        log.info("[FLOW_FINAL] Doc %d | final=%r", doc_id, final)
+        if final == "extracted":
+            claimed = claim_delivery_for(doc_id, user_id)
+            log.info("[FLOW_CLAIM] Doc %d | claimed=%s", doc_id, claimed)
+            if claimed:
+                await edit(render_document_card(doc_id, user_id))
+                log.info("[FLOW_CARD] Doc %d | карточка показана", doc_id)
+            else:
+                # Гонку забрал push-fallback pipeline: прогресс-бар иначе застынет на «Нормализую».
+                log.warning("[FLOW_LOST_RACE] Doc %d | доставку забрал pipeline-fallback", doc_id)
+        elif final == "failed":
+            await edit(f"❌ Документ #{doc_id}: обработка завершилась ошибкой.")
+        else:
+            await edit("⏳ Обработка затянулась. Загляните позже через /show.")
+    except Exception:
+        log.exception("[FLOW_ERROR] Doc %d | сбой в run_progress_flow", doc_id)
 
 
 @router.message(F.photo)
@@ -107,7 +119,10 @@ async def on_photo(message: Message) -> None:
             try:
                 await sent.edit_text(text)
             except Exception as e:  # noqa: BLE001 — "message is not modified" и пр.
-                log.debug("edit skipped: %s", e)
+                if "message is not modified" in str(e).lower():
+                    log.debug("edit skipped (not modified): %s", e)
+                else:
+                    log.warning("[EDIT_FAIL] Doc %d | %d симв. | %s", doc_id, len(text), e)
 
         asyncio.create_task(run_progress_flow(message.from_user.id, doc_id, _edit))
     except httpx.HTTPStatusError as e:
@@ -140,7 +155,10 @@ async def on_document(message: Message) -> None:
             try:
                 await sent.edit_text(text)
             except Exception as e:  # noqa: BLE001 — "message is not modified" и пр.
-                log.debug("edit skipped: %s", e)
+                if "message is not modified" in str(e).lower():
+                    log.debug("edit skipped (not modified): %s", e)
+                else:
+                    log.warning("[EDIT_FAIL] Doc %d | %d симв. | %s", doc_id, len(text), e)
 
         asyncio.create_task(run_progress_flow(message.from_user.id, doc_id, _edit))
     except httpx.HTTPStatusError as e:
