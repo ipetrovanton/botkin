@@ -507,25 +507,26 @@ def _merge_dedup(base: list[LabResult], extra: list[LabResult]) -> list[LabResul
 def run_analysis(source_path: Path) -> list[LabResult]:
     t0 = time.perf_counter()
     b64_images = _prepare_b64(source_path)
-    try:
-        rows, n_tables = _extract_once(b64_images, source_path.name)
-    except ExtractionError as e:
-        # Общий вызов рухнул без спасаемых строк — не валим документ: при многостраничном
-        # источнике добор постранично ниже ещё может извлечь данные.
-        log.warning("[EXTRACT_PRIMARY_FAILED] Doc: '%s' | общий вызов пуст: %s", source_path.name, e)
-        rows, n_tables = [], 0
-    n_calls = 1
-
-    # Гибрид по страницам: один общий вызов; если неполно (исследований меньше страниц
-    # или пусто) — добираем каждую страницу отдельным вызовом и объединяем с дедупом.
     n_pages = len(b64_images)
-    if n_pages > 1 and (not rows or n_tables < n_pages):
-        log.info("[MULTIPAGE] Doc: '%s' | неполно (исследований=%d, страниц=%d) — добор постранично",
-                 source_path.name, n_tables, n_pages)
+
+    if n_pages <= 1:
+        # Одностраничный документ — один вызов.
+        try:
+            rows, _ = _extract_once(b64_images, source_path.name)
+        except ExtractionError as e:
+            log.warning("[EXTRACT_FAILED] Doc: '%s' | извлечение пусто: %s", source_path.name, e)
+            rows = []
+        n_calls = 1
+    else:
+        # Многостраничный — извлекаем ПОСТРАНИЧНО: каждая страница читается ровно один раз.
+        # Раньше был общий вызов по всем страницам + добор каждой → страницы читались дважды
+        # (медленно) и модель смешивала/теряла содержимое. Постранично — модель фокусируется
+        # на одной странице. Сбой страницы не валит документ; объединяем дедупом по имени.
+        log.info("[MULTIPAGE] Doc: '%s' | страниц=%d — извлечение постранично", source_path.name, n_pages)
+        rows = []
+        n_calls = 0
         for i, page in enumerate(b64_images):
             n_calls += 1
-            # Сбой добора одной страницы (обрезанный JSON, таймаут VLM) не должен
-            # ронять весь документ — сохраняем уже извлечённое, продолжаем со следующей.
             try:
                 page_rows, _ = _extract_once([page], f"{source_path.name}#стр{i + 1}")
             except ExtractionError as e:

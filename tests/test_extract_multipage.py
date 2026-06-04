@@ -11,12 +11,25 @@ from botkin.domain.models import LabResult
 from botkin.exceptions import ExtractionError
 
 
+def test_multipage_reads_each_page_once_no_combined_call(monkeypatch):
+    # Многостраничный документ должен читаться ПОСТРАНИЧНО (каждая страница 1 раз),
+    # без общего вызова со всеми изображениями — иначе страницы читаются дважды.
+    monkeypatch.setattr(ex, "_prepare_b64", lambda p: ["img1", "img2"])
+    calls = []
+
+    def fake_extract_once(images, name):
+        calls.append(len(images))
+        return [LabResult(analyte_name=f"Показатель {name[-1]}", value_num=1.0)], 1
+
+    monkeypatch.setattr(ex, "_extract_once", fake_extract_once)
+    ex.run_analysis(Path("doc.pdf"))
+    assert calls == [1, 1]  # ровно два вызова по одной странице, нет вызова с 2 изображениями
+
+
 def test_page_failure_does_not_lose_document(monkeypatch):
     monkeypatch.setattr(ex, "_prepare_b64", lambda p: ["img1", "img2"])
 
     def fake_extract_once(images, name):
-        if len(images) == 2:  # общий вызов: неполно (1 таблица < 2 страниц) → запустит добор
-            return [LabResult(analyte_name="СРБ", value_num=1.8)], 1
         if name.endswith("#стр1"):
             return [LabResult(analyte_name="Гемоглобин", value_num=140.0)], 1
         raise ExtractionError("стр2: обрезанный JSON (EOF)")
@@ -25,9 +38,22 @@ def test_page_failure_does_not_lose_document(monkeypatch):
 
     rows = ex.run_analysis(Path("doc.pdf"))
     names = [r.analyte_name for r in rows]
-    # стр1 и общий вызов сохранены, несмотря на падение стр2
-    assert "СРБ" in names
+    # стр1 сохранена, несмотря на падение стр2
     assert "Гемоглобин" in names
+
+
+def test_single_page_uses_one_combined_call(monkeypatch):
+    # Одностраничный — один вызов (постраничный режим не нужен).
+    monkeypatch.setattr(ex, "_prepare_b64", lambda p: ["only"])
+    calls = []
+
+    def fake_extract_once(images, name):
+        calls.append(len(images))
+        return [LabResult(analyte_name="Глюкоза", value_num=5.0)], 1
+
+    monkeypatch.setattr(ex, "_extract_once", fake_extract_once)
+    ex.run_analysis(Path("doc.pdf"))
+    assert calls == [1]
 
 
 def test_salvage_json_objects_from_truncated():
