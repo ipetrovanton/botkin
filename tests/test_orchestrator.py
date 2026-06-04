@@ -51,9 +51,8 @@ def test_persist_lab_normalizes_and_checks_unit(set_test_db, monkeypatch):
 
     # Детерминированный нормализатор (не зависим от содержимого реального реестра).
     fake = AnalyteNormalizer([
-        {"name": "Глюкоза", "short": "GLU", "english": "Glucose", "synonyms": [],
-         "loinc": "2345-7", "nmu": "B03.016.006", "unit": "ммоль/л",
-         "group": "Биохимические исследования", "specimen": "Сыворотка крови", "status": "active"},
+        {"name": "Глюкоза", "synonyms": ["GLU", "Glucose"], "units": ["ммоль/л"],
+         "group": "Биохимические исследования"},
     ])
     monkeypatch.setattr(orchestrator, "_ANALYTE_NORMALIZER", fake)
 
@@ -78,7 +77,7 @@ def test_persist_lab_normalizes_and_checks_unit(set_test_db, monkeypatch):
     assert row["unit_expected"] == "ммоль/л"
     assert row["unit_mismatch"] == 1                  # г/л ≠ ммоль/л
 
-    # _persist_lab возвращает matches с биоматериалом → обобщённый заголовок документа
+    # _persist_lab возвращает matches с группой → обобщённый заголовок документа по группе
     from botkin.normalize.analytes import summary_title
-    assert matches[0].specimen == "Сыворотка крови"
-    assert summary_title([m.specimen for m in matches]) == "Анализ крови"
+    assert matches[0].canonical == "Глюкоза"
+    assert summary_title([m.group for m in matches]) == "Биохимические исследования"

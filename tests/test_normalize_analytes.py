@@ -1,21 +1,19 @@
 from botkin.normalize.analytes import AnalyteNormalizer
 
 
-def _rec(name, short=None, english=None, synonyms=(), loinc=None, nmu=None,
-         unit=None, group=None, status="active"):
-    return {"name": name, "short": short, "english": english,
-            "synonyms": list(synonyms), "loinc": loinc, "nmu": nmu,
-            "unit": unit, "group": group, "status": status}
+def _rec(name, synonyms=(), units=(), group=None):
+    """Запись дедуп-таблицы по ANALYTE: имя + синонимы + набор единиц (без биоматериала)."""
+    return {"name": name, "synonyms": list(synonyms), "units": list(units), "group": group}
 
 
 def _norm(records=None):
     records = records or [
-        _rec("Гемоглобин", short="HGB", synonyms=["Hb"], loinc="718-7",
-             nmu="B03.016.003", unit="г/л", group="Гематологические исследования"),
-        _rec("Глюкоза", short="GLU", english="Glucose", loinc="2345-7",
-             unit="ммоль/л", group="Биохимические исследования"),
-        _rec("С-реактивный белок", short="СРБ", synonyms=["CRP"], loinc="1988-5",
-             unit="мг/л", group="Биохимические исследования"),
+        _rec("Гемоглобин", synonyms=["HGB", "Hb"], units=["г/л"],
+             group="Гематологические исследования"),
+        _rec("Глюкоза", synonyms=["GLU", "Glucose"], units=["ммоль/л"],
+             group="Биохимические исследования"),
+        _rec("С-реактивный белок", synonyms=["СРБ", "CRP"], units=["мг/л"],
+             group="Биохимические исследования"),
     ]
     return AnalyteNormalizer(records)
 
@@ -23,7 +21,14 @@ def _norm(records=None):
 def test_exact_match():
     m = _norm().correct("Гемоглобин")
     assert m.canonical == "Гемоглобин" and m.status == "matched" and m.distance == 0
-    assert m.loinc == "718-7" and m.nmu == "B03.016.003" and m.expected_unit == "г/л"
+    assert "г/л" in m.expected_units and m.group == "Гематологические исследования"
+
+
+def test_canonical_is_clean_analyte_not_fullname():
+    # Имя из справочника — чистый ANALYTE, без биоматериала/метода.
+    m = _norm().correct("Гемоглобин")
+    assert m.canonical == "Гемоглобин"
+    assert "крови" not in m.canonical and "моче" not in m.canonical
 
 
 def test_ocr_typo_corrected():
@@ -40,9 +45,7 @@ def test_match_by_short_form():
 
 
 def test_short_abbreviation_requires_exact():
-    # «HGB» точно совпадает с короткой формой
     assert _norm().correct("HGB").canonical == "Гемоглобин"
-    # случайные 3 буквы не должны прилепляться к короткой форме
     assert _norm().correct("XYZ").status == "unverified"
 
 
@@ -56,9 +59,25 @@ def test_raw_preserved():
     assert _norm().correct("Глюкоэа").raw == "Глюкоэа"
 
 
-def test_status_carried():
-    n = _norm([_rec("Старый тест", status="deprecated")])
-    assert n.correct("Старый тест").match_status == "deprecated"
+def test_multiple_units_collected():
+    n = _norm([_rec("Гемоглобин", units=["г/л", "ммоль/л"])])
+    m = n.correct("Гемоглобин")
+    assert set(m.expected_units) == {"г/л", "ммоль/л"}
+
+
+def test_canonical_name_wins_over_other_synonym():
+    # «Тромбоциты» — точное имя одного показателя и синоним другого (CD31+клетки).
+    # Точное каноническое имя должно победить, даже если запись-вор идёт раньше.
+    n = AnalyteNormalizer([
+        {"name": "CD31+клетки", "synonyms": ["тромбоциты", "моноциты"], "units": ["%"]},
+        {"name": "Тромбоциты", "synonyms": [], "units": ["10^9/л"]},
+    ])
+    assert n.correct("Тромбоциты").canonical == "Тромбоциты"
+
+
+def test_real_registry_platelets_not_cd31():
+    from botkin.normalize.analytes import load_default
+    assert load_default().correct("Тромбоциты").canonical == "Тромбоциты"
 
 
 def test_loader_reads_packaged_registry():

@@ -17,16 +17,16 @@ def _make_doc():
     return uid, did
 
 
-def test_title_generalized_by_specimen(set_test_db, monkeypatch):
-    """Заголовок документа обобщается по биоматериалу (не «Биохимия» из classify), clinic сохраняется."""
+def test_title_generalized_by_group(set_test_db, monkeypatch):
+    """Заголовок документа обобщается по группе исследований (не «Биохимия» из classify), clinic сохраняется."""
     from botkin.pipeline import orchestrator
     from botkin.db.connection import get_conn
     from botkin.normalize.analytes import AnalyteNormalizer
     monkeypatch.setattr(orchestrator, "DELIVERY_FALLBACK_DELAY", 0.0)
-    # Детерминированный нормализатор: Глюкоза с биоматериалом «Сыворотка крови».
+    # Детерминированный нормализатор: Глюкоза из группы «Биохимические исследования».
     fake = AnalyteNormalizer([
-        {"name": "Глюкоза", "synonyms": [], "unit": "ммоль/л",
-         "specimen": "Сыворотка крови", "status": "active"},
+        {"name": "Глюкоза", "synonyms": [], "units": ["ммоль/л"],
+         "group": "Биохимические исследования"},
     ])
     monkeypatch.setattr(orchestrator, "_ANALYTE_NORMALIZER", fake)
     uid, did = _make_doc()
@@ -39,7 +39,7 @@ def test_title_generalized_by_specimen(set_test_db, monkeypatch):
         asyncio.run(orchestrator.process_document(did, 321))
     with get_conn() as conn:
         row = conn.execute("SELECT title, clinic, status FROM documents WHERE id=?", (did,)).fetchone()
-    assert row["title"] == "Анализ крови"     # обобщено по биоматериалу, не «Биохимия»
+    assert row["title"] == "Биохимические исследования"   # обобщено по группе, не «Биохимия»
     assert row["clinic"] == "Инвитро"          # клиника из classify сохранена
     assert row["status"] == "extracted"
 

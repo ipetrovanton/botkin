@@ -98,3 +98,41 @@ def test_build_registry_dedupes_by_name(tmp_path):
     records = build_registry(src)
     assert len(records) == 1
     assert records[0]["loinc"] == "718-7"  # первый победитель остаётся
+
+
+# ── Дедуп-таблица по ANALYTE (подсказка имени/единиц, без биоматериала) ───────
+
+def test_build_analyte_table_dedups_by_analyte(tmp_path):
+    """Записи с одним ANALYTE, но разным биоматериалом/методом → одна запись.
+
+    Имя = ANALYTE (без локуса), синонимы и единицы объединяются. FULLNAME/specimen
+    НЕ сохраняются — биоматериал не подмешиваем в карточку.
+    """
+    from scripts.build_analyte_reference import build_analyte_table
+
+    src = tmp_path / "fsli.json"
+    _write_fsli_json(src, [
+        dict(ANALYTE="Гемоглобин", SHORTNAME="Гемоглобин", SYNONYMS="Hb", UNIT="г/л",
+             FULLNAME="Гемоглобин в крови", SPECIMEN="Кровь", TESTSTATUS="Актуальный"),
+        dict(ANALYTE="Гемоглобин", SHORTNAME="Гемоглобин", SYNONYMS="HGB", UNIT="мг/л; мг/дл",
+             FULLNAME="Гемоглобин в моче", SPECIMEN="Моча", TESTSTATUS="Актуальный"),
+    ])
+    table = build_analyte_table(src)
+    assert len(table) == 1
+    rec = table[0]
+    assert rec["name"] == "Гемоглобин"
+    assert "Hb" in rec["synonyms"] and "HGB" in rec["synonyms"]
+    assert set(rec["units"]) >= {"г/л", "мг/л", "мг/дл"}  # UNIT расщепляется по ';'/','
+    assert "specimen" not in rec and "fullname" not in rec  # биоматериал не храним
+
+
+def test_build_analyte_table_skips_empty_analyte(tmp_path):
+    from scripts.build_analyte_reference import build_analyte_table
+
+    src = tmp_path / "fsli.json"
+    _write_fsli_json(src, [
+        dict(ANALYTE=None, FULLNAME="Что-то", TESTSTATUS="Актуальный"),
+        dict(ANALYTE="Глюкоза", UNIT="ммоль/л", TESTSTATUS="Актуальный"),
+    ])
+    table = build_analyte_table(src)
+    assert [r["name"] for r in table] == ["Глюкоза"]
