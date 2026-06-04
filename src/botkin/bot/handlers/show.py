@@ -92,7 +92,7 @@ def _format_labs(rows: list[dict]) -> str:
         ref = f" ({html.escape(ref)})" if ref else ""
         warn = " ⚠️" if r.get("unit_mismatch") else ""
         marker = _ref_marker(r)
-        lines.append(f"• <b>{name}</b>: {value}{unit}{ref}{marker}{warn}")
+        lines.append(f"{len(lines) + 1}. <b>{name}</b>: {value}{unit}{ref}{marker}{warn}")
     return "\n".join(lines) or "—"
 
 

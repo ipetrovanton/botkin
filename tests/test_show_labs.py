@@ -60,6 +60,27 @@ def test_empty_rows():
     assert _format_labs([]) == "—"
 
 
+def test_rows_numbered_not_bulleted():
+    out = _format_labs([
+        _row(analyte_name="Гемоглобин", value_num=140.0, unit="г/л"),
+        _row(analyte_name="Глюкоза", value_num=5.4, unit="ммоль/л"),
+    ])
+    lines = out.splitlines()
+    assert lines[0].startswith("1. ") and "Гемоглобин" in lines[0]
+    assert lines[1].startswith("2. ") and "Глюкоза" in lines[1]
+    assert "•" not in out
+
+
+def test_numbering_counts_only_shown_rows():
+    # строка без значения пропускается — нумерация идёт по реально показанным
+    out = _format_labs([
+        _row(analyte_name="Пусто"),                       # ни числа, ни текста → skip
+        _row(analyte_name="Гемоглобин", value_num=140.0),
+    ])
+    assert out.startswith("1. ") and "Гемоглобин" in out
+    assert "2." not in out
+
+
 def test_format_ref_helper():
     assert _format_ref(_row(ref_low=3.9, ref_high=6.1)) == "норма 3.9–6.1"
     assert _format_ref(_row(ref_operator="<", ref_high=5.0)) == "норма <5.0"
