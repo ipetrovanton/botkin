@@ -116,6 +116,17 @@ VLM_REPEAT_PENALTY = float(os.getenv("VLM_REPEAT_PENALTY", _get("vlm.repeat_pena
 # минутами — по таймауту прерываем, страница пропускается, документ сохраняет остальное.
 VLM_REQUEST_TIMEOUT = float(os.getenv("VLM_REQUEST_TIMEOUT", "120"))
 
+# ── Текстовый слой PDF (детерминированное извлечение без VLM) ────────────────
+# Минимум символов на страницу, чтобы считать слой годным (отсекает PDF-сканы
+# с пустым/мусорным текстовым слоем).
+TEXT_LAYER_MIN_CHARS_PER_PAGE = int(os.getenv("TEXT_LAYER_MIN_CHARS_PER_PAGE", "50"))
+# Толеранция по Y (в пунктах) при кластеризации слов в физические строки:
+# значение часто сидит на 1px ниже имени, наивное округление разрывает строку.
+TEXT_LAYER_Y_TOLERANCE = float(os.getenv("TEXT_LAYER_Y_TOLERANCE", "3.0"))
+# Доля забракованных verbatim-стражем чисел, выше которой результат считается
+# недостоверным → фолбэк на VLM.
+VERBATIM_MAX_REJECT_RATIO = float(os.getenv("VERBATIM_MAX_REJECT_RATIO", "0.5"))
+
 # ── Ollama ────────────────────────────────────────────────────────────────────
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 # keep_alive держит модель в VRAM между вызовами — нет перезагрузки весов 6 ГБ
