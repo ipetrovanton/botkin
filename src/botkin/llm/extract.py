@@ -13,7 +13,7 @@ from botkin.config import VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_EXTR
 from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ExtractionError
 from botkin.llm.client import get_client, default_options
-from botkin.llm.prompts import ANALYSIS_VLM_SYSTEM, DOCTOR_REPORT_VLM_SYSTEM
+from botkin.llm.prompts import ANALYSIS_VLM_SYSTEM, DOCTOR_REPORT_VLM_SYSTEM, ANALYSIS_TEXT_SYSTEM
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
 
 log = logging.getLogger(__name__)
@@ -319,7 +319,8 @@ def _raw_content(response: BaseModel) -> str:
     return content if isinstance(content, str) else ""
 
 
-def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: str, doc_type: str) -> BaseModel:
+def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: str,
+              doc_type: str, options: dict | None = None) -> BaseModel:
     t0 = time.perf_counter()
     log.info("[START_EXTRACT] Doc: '%s' | Type: '%s' | Model: %s", doc_name, doc_type, VLM_MODEL)
     client = get_client(temperature=VLM_TEMPERATURE, mode=instructor.Mode.JSON)
@@ -330,7 +331,7 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
             response_model=response_model,
             max_retries=2,
             max_tokens=VLM_MAX_TOKENS,
-            extra_body={"options": default_options()},
+            extra_body={"options": options or default_options()},
         )
         elapsed = time.perf_counter() - t0
         usage = response._raw_response.usage
@@ -447,6 +448,38 @@ def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult]
     rows = harvest_lab_rows(data)
     log.info("[EXTRACT_FALLBACK] Doc: '%s' | harvester собрал строк: %d (таблиц: %d)", doc_name, len(rows), len(tables))
     return rows, (len(tables) or tables_struct)
+
+
+_TEXT_INSTRUCTION = "Размести эти строки лабораторного бланка по колонкам."
+
+
+def _messages_from_text(system_prompt: str, instruction: str, text: str) -> list[dict]:
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"{instruction}\n\n{text}"},
+    ]
+
+
+def _call_text(messages: list[dict], doc_name: str) -> RawAnalysis:
+    """Детерминированный (temp=0) text-only вызов структурирования."""
+    options = {**default_options(), "temperature": 0.0}
+    return _call_vlm(messages, RawAnalysis, doc_name, "analysis-text", options=options)
+
+
+def _structure_text(lines: list[str], doc_name: str) -> list[LabResult]:
+    """Координатные строки → LabResult через text-only LLM (temp=0) + маппинг."""
+    text = "\n".join(lines)
+    messages = _messages_from_text(ANALYSIS_TEXT_SYSTEM, _TEXT_INSTRUCTION, text)
+    try:
+        raw = _call_text(messages, doc_name)
+    except ExtractionError as e:
+        objs = _salvage_json_objects(_raw_text_from_exc(e))
+        return harvest_lab_rows(objs) if objs else []
+    rows = rows_from_raw(raw)
+    if rows:
+        return rows
+    data = _loads_json(_raw_content(raw))
+    return harvest_lab_rows(data) if data is not None else []
 
 
 def extraction_quality(items: list[LabResult]) -> dict:
