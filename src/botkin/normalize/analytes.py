@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -63,6 +64,22 @@ def _normalize_name(name: str) -> str:
     return " ".join(name.strip().lower().replace("ё", "е").split())
 
 
+# Квалификаторы, которые модель/бланк дописывают к названию показателя и которые сбивают
+# матч: скобочные пояснения «(общ.число)» и хвосты «, %» / «, абс.» / «, отн.».
+_PARENS_RE = re.compile(r"\([^)]*\)")
+_TAIL_QUALIFIER_RE = re.compile(r"[\s,]+(?:%|абс\.?|отн\.?)\s*$")
+
+
+def _strip_qualifiers(query: str) -> str:
+    """Убирает скобочные пояснения и хвостовые «, %»/«, абс.» из нормализованного имени."""
+    s = _PARENS_RE.sub(" ", query)
+    prev = None
+    while prev != s:                       # хвостов может быть несколько: «…, абс., %»
+        prev = s
+        s = _TAIL_QUALIFIER_RE.sub("", s)
+    return " ".join(s.split()).strip(" ,")
+
+
 def _unverified(raw: str, dist: int | None = None, ratio: float = 0.0) -> AnalyteMatch:
     return AnalyteMatch(raw=raw, canonical=None, loinc=None, nmu=None, group=None,
                         expected_units=(), status="unverified", match_status=None,
@@ -113,6 +130,12 @@ class AnalyteNormalizer:
 
     def correct(self, raw_name: str) -> AnalyteMatch:
         query = _normalize_name(raw_name)
+        # Отсекаем квалификаторы («, %», «, абс.», «(...)») — модель часто их дописывает.
+        # Но если в остатке лишь аббревиатура (≤3), откатываемся к оригиналу: голый «mcv»
+        # точно совпал бы со случайным синонимом, а полная строка честно уйдёт в unverified.
+        stripped = _strip_qualifiers(query)
+        if len(stripped) > _SHORT_KEY_LEN:
+            query = stripped
         if not query or not self._choices:
             return _unverified(raw_name)
 

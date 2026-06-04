@@ -65,6 +65,30 @@ def test_multiple_units_collected():
     assert set(m.expected_units) == {"г/л", "ммоль/л"}
 
 
+def test_qualifiers_stripped_percent():
+    # модель пишет «Базофилы, %» / «Лимфоциты, %» — хвост «, %» не должен ломать матч
+    n = _norm([_rec("Базофилы", units=["%"]), _rec("Лимфоциты", units=["%"])])
+    assert n.correct("Базофилы, %").canonical == "Базофилы"
+    assert n.correct("Лимфоциты, %").canonical == "Лимфоциты"
+
+
+def test_qualifiers_stripped_abs():
+    n = _norm([_rec("Эозинофилы", units=["10^9/л"])])
+    assert n.correct("Эозинофилы, абс.").canonical == "Эозинофилы"
+
+
+def test_qualifiers_stripped_parens():
+    n = _norm([_rec("Нейтрофилы", units=["%"])])
+    assert n.correct("Нейтрофилы (общ.число), %").canonical == "Нейтрофилы"
+
+
+def test_abbreviation_after_strip_does_not_false_match():
+    # «MCV (ср. объем эритр.)» → после отсечения скобок осталась бы аббревиатура «MCV»;
+    # откатываемся к оригиналу, чтобы короткий ключ не схватил случайную запись.
+    n = _norm([_rec("Гемоглобин", synonyms=["MCV"], units=["г/л"])])
+    assert n.correct("MCV (ср. объем эритр.)").status == "unverified"
+
+
 def test_canonical_name_wins_over_other_synonym():
     # «Тромбоциты» — точное имя одного показателя и синоним другого (CD31+клетки).
     # Точное каноническое имя должно победить, даже если запись-вор идёт раньше.
