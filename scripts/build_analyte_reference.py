@@ -111,6 +111,10 @@ def build_analyte_table(json_path: Path) -> list[dict]:
         analyte = _clean(row.get("ANALYTE"))
         if not analyte or len(analyte) < _MIN_NAME_LEN:
             continue
+        # Составные имена ФСЛИ («Альбумин; креатинин») — несколько аналитов в одной записи;
+        # для карточки это мусор (коверкает имя), а чистые показатели покрывают их отдельно.
+        if ";" in analyte:
+            continue
         key = normalize_key(analyte)
         if key not in groups:
             groups[key] = {"name": analyte, "_syn": set(), "_units": set(),

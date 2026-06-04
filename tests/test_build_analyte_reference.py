@@ -126,6 +126,23 @@ def test_build_analyte_table_dedups_by_analyte(tmp_path):
     assert "specimen" not in rec and "fullname" not in rec  # биоматериал не храним
 
 
+def test_build_analyte_table_skips_compound_analyte(tmp_path):
+    """ANALYTE с ';' (несколько аналитов в одной записи ФСЛИ) — мусор для карточки.
+
+    «Альбумин; креатинин» перехватывал матч «Albumin» у чистого «Альбумин». Отбрасываем —
+    чистые отдельные показатели покрывают, имя в карточке не коверкается.
+    """
+    from scripts.build_analyte_reference import build_analyte_table
+
+    src = tmp_path / "fsli.json"
+    _write_fsli_json(src, [
+        dict(ANALYTE="Альбумин; креатинин", UNIT="г/л", TESTSTATUS="Актуальный"),
+        dict(ANALYTE="Альбумин", UNIT="г/л", TESTSTATUS="Актуальный"),
+    ])
+    names = [r["name"] for r in build_analyte_table(src)]
+    assert names == ["Альбумин"]
+
+
 def test_build_analyte_table_skips_empty_analyte(tmp_path):
     from scripts.build_analyte_reference import build_analyte_table
 
