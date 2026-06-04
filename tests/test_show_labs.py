@@ -19,7 +19,16 @@ def test_text_result_rendered_not_none():
 def test_one_sided_ref_shown():
     out = _format_labs([_row(analyte_name="СРБ", value_num=1.8, unit="мг/л",
                              ref_operator="<", ref_high=5.0)])
-    assert "1.8" in out and "<5.0" in out
+    assert "1.8" in out and "&lt;5.0" in out
+
+
+def test_ref_operator_html_escaped():
+    # «< 1.0» (базофилы) ломал Telegram parse_mode=HTML: '<1.0' читался как тег.
+    # Вывод не должен содержать сырой '<' от оператора нормы — только &lt;.
+    out = _format_labs([_row(analyte_name="Базофилы", value_num=0.6, unit="%",
+                             ref_operator="<", ref_high=1.0)])
+    assert "&lt;1.0" in out
+    assert "<1.0" not in out
 
 
 def test_two_sided_ref_and_high_marker():

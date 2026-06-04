@@ -86,8 +86,10 @@ def _format_labs(rows: list[dict]) -> str:
             continue
         name = html.escape(r.get("analyte_canonical") or r["analyte_name"])
         unit = f" {html.escape(r['unit'])}" if r.get("unit") else ""
+        # _format_ref — текстовый helper; экранируем на границе HTML:
+        # операторы «<»/«>» и свободный ref_text иначе ломают parse_mode=HTML.
         ref = _format_ref(r)
-        ref = f" ({ref})" if ref else ""
+        ref = f" ({html.escape(ref)})" if ref else ""
         warn = " ⚠️" if r.get("unit_mismatch") else ""
         marker = _ref_marker(r)
         lines.append(f"• <b>{name}</b>: {value}{unit}{ref}{marker}{warn}")
