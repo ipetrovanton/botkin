@@ -9,12 +9,18 @@ from typing import Optional, Union
 import instructor
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-from botkin.config import VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_EXTRACT_LONG_SIDE
+from botkin.config import (
+    VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_EXTRACT_LONG_SIDE,
+    VERBATIM_MAX_REJECT_RATIO,
+)
 from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ExtractionError
 from botkin.llm.client import get_client, default_options
 from botkin.llm.prompts import ANALYSIS_VLM_SYSTEM, DOCTOR_REPORT_VLM_SYSTEM, ANALYSIS_TEXT_SYSTEM
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
+from botkin.preprocess.pdf_text import (
+    has_usable_text_layer, reconstruct_lines, source_text,
+)
 
 log = logging.getLogger(__name__)
 
@@ -572,8 +578,62 @@ def _merge_dedup(base: list[LabResult], extra: list[LabResult]) -> list[LabResul
     return out
 
 
+def _should_use_text_layer(source_path: Path) -> bool:
+    return source_path.suffix.lower() == ".pdf" and has_usable_text_layer(source_path)
+
+
+def _extract_from_text_layer(source_path: Path) -> list[LabResult] | None:
+    """Извлечение из текстового слоя. None → результат слабый, нужен VLM-фолбэк."""
+    lines = reconstruct_lines(source_path)
+    src = source_text(source_path)
+    log.info(
+        "[TEXTLAYER_QUALITY] Doc: '%s' | символов=%d | строк-реконструкции=%d",
+        source_path.name, len(src), len(lines),
+    )
+    if not lines:
+        return None
+    rows = _structure_text(lines, source_path.name)
+    if not rows:
+        return None
+    kept, rejected = _verbatim_guard(rows, src)
+    total = len(kept) + len(rejected)
+    log.info(
+        "[VERBATIM_GUARD] Doc: '%s' | принято=%d забраковано=%d",
+        source_path.name, len(kept), len(rejected),
+    )
+    if total and len(rejected) / total > VERBATIM_MAX_REJECT_RATIO:
+        return None
+    return kept or None
+
+
+def _finish(rows: list[LabResult], doc_name: str, t0: float, n_calls: int) -> list[LabResult]:
+    """Финальное логирование качества (DRY: общий хвост текстового и VLM путей)."""
+    q = extraction_quality(rows)
+    total_s = time.perf_counter() - t0
+    log.info(
+        "[EXTRACT_MAPPED] Doc: '%s' | строк: %d | VLM-вызовов: %d | всего: %.2fs",
+        doc_name, len(rows), n_calls, total_s,
+    )
+    log.info(
+        "[EXTRACT_QUALITY] Doc: '%s' | строк: %d | с числом: %d | с текстом: %d | "
+        "с нормой: %d | с единицей: %d",
+        doc_name, q["total"], q["with_value_num"], q["with_value_text"],
+        q["with_ref"], q["with_unit"],
+    )
+    return rows
+
+
 def run_analysis(source_path: Path) -> list[LabResult]:
     t0 = time.perf_counter()
+
+    # Текстовый слой (цифровые PDF): детерминированно, без галлюцинаций VLM.
+    if _should_use_text_layer(source_path):
+        rows = _extract_from_text_layer(source_path)
+        if rows is not None:
+            log.info("[EXTRACT_PATH] Doc: '%s' | путь: text_layer", source_path.name)
+            return _finish(rows, source_path.name, t0, n_calls=0)
+    log.info("[EXTRACT_PATH] Doc: '%s' | путь: vlm", source_path.name)
+
     b64_images = _prepare_b64(source_path)
     n_pages = len(b64_images)
 
@@ -605,19 +665,7 @@ def run_analysis(source_path: Path) -> list[LabResult]:
                 continue
             rows = _merge_dedup(rows, page_rows)
 
-    q = extraction_quality(rows)
-    total_s = time.perf_counter() - t0
-    log.info(
-        "[EXTRACT_MAPPED] Doc: '%s' | строк: %d | VLM-вызовов: %d | всего: %.2fs",
-        source_path.name, len(rows), n_calls, total_s,
-    )
-    log.info(
-        "[EXTRACT_QUALITY] Doc: '%s' | строк: %d | с числом: %d | с текстом: %d | "
-        "с нормой: %d | с единицей: %d",
-        source_path.name, q["total"], q["with_value_num"], q["with_value_text"],
-        q["with_ref"], q["with_unit"],
-    )
-    return rows
+    return _finish(rows, source_path.name, t0, n_calls)
 
 
 def run_doctor_report(source_path: Path) -> list[DoctorReport]:
