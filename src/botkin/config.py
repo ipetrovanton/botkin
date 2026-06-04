@@ -112,6 +112,9 @@ VLM_NUM_CTX = int(os.getenv("VLM_NUM_CTX", _get("vlm.num_ctx", _DEFAULTS["vlm"][
 VLM_MAX_TOKENS = int(os.getenv("VLM_MAX_TOKENS", _get("vlm.max_tokens", _DEFAULTS["vlm"]["max_tokens"])))
 VLM_NUM_PREDICT = int(os.getenv("VLM_NUM_PREDICT", _get("vlm.num_predict", _DEFAULTS["vlm"]["num_predict"])))
 VLM_REPEAT_PENALTY = float(os.getenv("VLM_REPEAT_PENALTY", _get("vlm.repeat_penalty", _DEFAULTS["vlm"]["repeat_penalty"])))
+# Потолок одного VLM-вызова. Деградировавший вызов (генерация дублей) не должен висеть
+# минутами — по таймауту прерываем, страница пропускается, документ сохраняет остальное.
+VLM_REQUEST_TIMEOUT = float(os.getenv("VLM_REQUEST_TIMEOUT", "120"))
 
 # ── Ollama ────────────────────────────────────────────────────────────────────
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
@@ -150,6 +153,10 @@ SQLITE_PATH = str(_resolve_path(os.getenv("SQLITE_PATH", _get("database.sqlite_p
 # ── Telegram бот ──────────────────────────────────────────────────────────────
 BOT_POLLING_TIMEOUT = int(_get("bot.polling_timeout", _DEFAULTS["bot"]["polling_timeout"]))
 BOT_API_URL = os.getenv("API_URL", _get("bot.api_url", _DEFAULTS["bot"]["api_url"]))
+# Потолок поллинга прогресса документа в боте. Увязан с потолком обработки на бэкенде:
+# classify + общий extract + добор страниц, каждый VLM-вызов ограничен VLM_REQUEST_TIMEOUT.
+# Иначе бот сдаётся раньше, чем бэкенд закончит (см. инцидент с D3).
+BOT_PROGRESS_TIMEOUT = float(os.getenv("BOT_PROGRESS_TIMEOUT", str(30 + 3 * VLM_REQUEST_TIMEOUT)))
 
 # ── Загрузка файлов ───────────────────────────────────────────────────────────
 UPLOAD_MAX_BYTES = int(_get("upload.max_bytes", _DEFAULTS["upload"]["max_bytes"]))

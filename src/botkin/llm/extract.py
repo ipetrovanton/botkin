@@ -131,7 +131,7 @@ def rows_from_raw(raw: RawAnalysis) -> list[LabResult]:
             ref_text=ref_text,
             comments=r.comment,
         ))
-    return out
+    return _dedup_rows(out)
 
 
 # ── Harvester по содержимому (fallback к структурному разбору) ────────────────
@@ -265,7 +265,7 @@ def harvest_lab_rows(data) -> list[LabResult]:
             row = _harvest_row(item)
             if row is not None:
                 out.append(row)
-    return out
+    return _dedup_rows(out)
 
 
 def _prepare_b64(source_path: Path) -> list[str]:
@@ -355,7 +355,9 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
     except Exception as e:
         elapsed = time.perf_counter() - t0
         log.error("[FAILED_EXTRACT] Doc: '%s' | Type: '%s' | Elapsed: %.2fs | Error: %s", doc_name, doc_type, elapsed, e)
-        raise ExtractionError(f"Сбой извлечения ({doc_type}): {e}") from e
+        err = ExtractionError(f"Сбой извлечения ({doc_type}): {e}")
+        err.raw_text = _raw_text_from_exc(e)  # сырой ответ для возможного salvage обрезанного JSON
+        raise err from e
 
 
 def _loads_json(text: str):
@@ -368,13 +370,70 @@ def _loads_json(text: str):
         return None
 
 
+def _salvage_json_objects(text: str) -> list[dict]:
+    """Извлекает все сбалансированные {...}-объекты из (возможно оборванного) текста.
+
+    qwen3-vl при зацикливании упирается в num_predict и обрывает JSON на полуслове —
+    весь ответ невалиден, json.loads падает. Но полные объекты-строки ДО обрыва
+    валидны: сканируем по балансу скобок (учитывая строки/escape), парсим каждый
+    закрытый объект отдельно. harvester затем соберёт из них показатели.
+    """
+    objs: list[dict] = []
+    stack: list[int] = []
+    in_str = esc = False
+    for i, ch in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            stack.append(i)
+        elif ch == "}" and stack:
+            start = stack.pop()
+            try:
+                obj = json.loads(text[start:i + 1])
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if isinstance(obj, dict):
+                objs.append(obj)
+    return objs
+
+
+def _raw_text_from_exc(exc: Exception) -> str:
+    """Сырой текст последнего ответа модели из instructor-исключения (для salvage)."""
+    raw = getattr(exc, "raw_text", None)
+    if isinstance(raw, str) and raw:
+        return raw
+    comp = getattr(exc, "last_completion", None) or getattr(exc.__cause__, "last_completion", None)
+    try:
+        content = comp.choices[0].message.content
+        return content if isinstance(content, str) else ""
+    except (AttributeError, IndexError, TypeError):
+        return ""
+
+
 _ANALYSIS_INSTRUCTION = "Extract lab results from these document images."
 
 
 def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult], int]:
     """Один VLM-вызов по набору изображений + гибридный разбор → (строки, число исследований)."""
     messages = _messages_from_images(ANALYSIS_VLM_SYSTEM, _ANALYSIS_INSTRUCTION, b64_images)
-    raw = _call_vlm(messages, RawAnalysis, doc_name, "analysis")
+    try:
+        raw = _call_vlm(messages, RawAnalysis, doc_name, "analysis")
+    except ExtractionError as e:
+        # Обрезанный JSON/таймаут: спасаем полные объекты-строки из сырого ответа.
+        objs = _salvage_json_objects(_raw_text_from_exc(e))
+        rows = harvest_lab_rows(objs) if objs else []
+        if rows:
+            log.info("[EXTRACT_SALVAGED] Doc: '%s' | из обрезанного ответа спасено строк: %d", doc_name, len(rows))
+            return rows, 1
+        raise
     rows = rows_from_raw(raw)
     tables_struct = len(raw.tests) + (1 if raw.results else 0)
     if rows:
@@ -406,6 +465,22 @@ def _row_key(r: LabResult):
     return (r.analyte_name.strip().lower(), r.value_num, r.value_text)
 
 
+def _dedup_rows(rows: list[LabResult]) -> list[LabResult]:
+    """Схлопывает одинаковые (имя, значение) строки, сохраняя порядок первого вхождения.
+
+    qwen3-vl при зацикливании повторяет показатели (MCV/MCH/MCHC/RDW дважды) — это
+    раздувает ответ до num_predict и грозит обрывом JSON. Дедуп на выходе разбора.
+    """
+    seen: set = set()
+    out: list[LabResult] = []
+    for r in rows:
+        key = _row_key(r)
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
 def _merge_dedup(base: list[LabResult], extra: list[LabResult]) -> list[LabResult]:
     seen = {_row_key(r) for r in base}
     out = list(base)
@@ -420,7 +495,13 @@ def _merge_dedup(base: list[LabResult], extra: list[LabResult]) -> list[LabResul
 def run_analysis(source_path: Path) -> list[LabResult]:
     t0 = time.perf_counter()
     b64_images = _prepare_b64(source_path)
-    rows, n_tables = _extract_once(b64_images, source_path.name)
+    try:
+        rows, n_tables = _extract_once(b64_images, source_path.name)
+    except ExtractionError as e:
+        # Общий вызов рухнул без спасаемых строк — не валим документ: при многостраничном
+        # источнике добор постранично ниже ещё может извлечь данные.
+        log.warning("[EXTRACT_PRIMARY_FAILED] Doc: '%s' | общий вызов пуст: %s", source_path.name, e)
+        rows, n_tables = [], 0
     n_calls = 1
 
     # Гибрид по страницам: один общий вызов; если неполно (исследований меньше страниц
@@ -430,8 +511,17 @@ def run_analysis(source_path: Path) -> list[LabResult]:
         log.info("[MULTIPAGE] Doc: '%s' | неполно (исследований=%d, страниц=%d) — добор постранично",
                  source_path.name, n_tables, n_pages)
         for i, page in enumerate(b64_images):
-            page_rows, _ = _extract_once([page], f"{source_path.name}#стр{i + 1}")
             n_calls += 1
+            # Сбой добора одной страницы (обрезанный JSON, таймаут VLM) не должен
+            # ронять весь документ — сохраняем уже извлечённое, продолжаем со следующей.
+            try:
+                page_rows, _ = _extract_once([page], f"{source_path.name}#стр{i + 1}")
+            except ExtractionError as e:
+                log.warning(
+                    "[MULTIPAGE_PAGE_FAILED] Doc: '%s' стр.%d пропущена: %s",
+                    source_path.name, i + 1, e,
+                )
+                continue
             rows = _merge_dedup(rows, page_rows)
 
     q = extraction_quality(rows)

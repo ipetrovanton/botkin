@@ -10,6 +10,7 @@ from openai import OpenAI
 import instructor
 from botkin.config import (
     OLLAMA_URL, OLLAMA_KEEP_ALIVE, VLM_NUM_CTX, VLM_REPEAT_PENALTY, VLM_NUM_PREDICT,
+    VLM_REQUEST_TIMEOUT,
 )
 
 log = logging.getLogger(__name__)
@@ -64,11 +65,11 @@ def _detect_ollama_url() -> str:
     return url
 
 
-def get_raw_client(timeout: float = 600.0) -> OpenAI:
+def get_raw_client(timeout: float | None = None) -> OpenAI:
     return OpenAI(
         base_url=f"{_detect_ollama_url()}/v1",
         api_key="ollama",
-        timeout=timeout,
+        timeout=VLM_REQUEST_TIMEOUT if timeout is None else timeout,
     )
 
 

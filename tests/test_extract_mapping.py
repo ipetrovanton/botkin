@@ -207,6 +207,28 @@ def test_harvest_empty_on_garbage():
     assert harvest_lab_rows([]) == []
 
 
+def test_harvest_dedups_repeated_rows():
+    # qwen3-vl зацикливается на повторах (MCV/MCH дублируются до num_predict) —
+    # одинаковые (имя, значение) схлопываем, разные показатели сохраняем.
+    data = {"results": [
+        {"parameter": "MCV", "value": "87.9", "unit": "фл", "reference_range": "81 - 100"},
+        {"parameter": "MCV", "value": "87.9", "unit": "фл", "reference_range": "81 - 100"},
+        {"parameter": "MCH", "value": "29.5", "unit": "пг", "reference_range": "27 - 34"},
+    ]}
+    names = [r.analyte_name for r in harvest_lab_rows(data)]
+    assert names.count("MCV") == 1
+    assert names == ["MCV", "MCH"]
+
+
+def test_rows_from_raw_dedups_repeated_rows():
+    payload = {"tests": [{"test_name": "ОАК", "results": [
+        {"parameter": "Гемоглобin", "value": "146", "unit": "г/л"},
+        {"parameter": "Гемоглобin", "value": "146", "unit": "г/л"},
+    ]}]}
+    rows = rows_from_raw(RawAnalysis.model_validate(payload))
+    assert len(rows) == 1
+
+
 # ── метрики качества извлечения (для сравнения конфигов) ──────────────────────
 
 def test_extraction_quality_counts():

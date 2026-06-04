@@ -10,7 +10,7 @@ from aiogram.types import Message
 
 from botkin.bot.cards import format_card_header
 from botkin.bot.progress import poll_until_done, render_progress
-from botkin.config import BOT_API_URL, PHOTO_LOWRES_WARN, UPLOAD_MAX_BYTES
+from botkin.config import BOT_API_URL, BOT_PROGRESS_TIMEOUT, PHOTO_LOWRES_WARN, UPLOAD_MAX_BYTES
 from botkin.db.connection import get_conn
 from botkin.db.queries import get_document, get_document_status, get_user_id
 from botkin.db.repos import DocumentRepo
@@ -80,7 +80,7 @@ async def run_progress_flow(tg_user_id: int, doc_id: int, edit) -> None:
 
         final = await poll_until_done(
             doc_id=doc_id, get_status=_get_status, edit=edit,
-            sleep=asyncio.sleep, now=time.monotonic,
+            sleep=asyncio.sleep, now=time.monotonic, timeout=BOT_PROGRESS_TIMEOUT,
         )
         log.info("[FLOW_FINAL] Doc %d | final=%r", doc_id, final)
         if final == "extracted":

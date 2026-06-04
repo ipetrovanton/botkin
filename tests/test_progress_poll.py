@@ -1,6 +1,8 @@
 import asyncio
 
+import botkin.bot.handlers.upload as up
 from botkin.bot.progress import poll_until_done
+from botkin.config import BOT_PROGRESS_TIMEOUT
 
 
 def _clock(values):
@@ -46,3 +48,26 @@ def test_poll_timeout_returns_none():
         sleep=fast_sleep, interval=0.0, timeout=5.0, now=_clock([0, 2, 4, 6]),
     ))
     assert final is None
+
+
+def test_progress_timeout_covers_multipage_ceiling():
+    # Потолок UI-поллинга должен покрывать classify + несколько VLM-вызовов
+    # (общий + добор страниц), иначе бот сдаётся раньше бэкенда.
+    assert BOT_PROGRESS_TIMEOUT >= 300
+
+
+def test_run_progress_flow_uses_config_timeout(monkeypatch):
+    captured = {}
+
+    async def fake_poll(**kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(up, "get_user_id", lambda t: 1)
+    monkeypatch.setattr(up, "poll_until_done", fake_poll)
+
+    async def edit(_):
+        return None
+
+    asyncio.run(up.run_progress_flow(123, 7, edit))
+    assert captured["timeout"] == BOT_PROGRESS_TIMEOUT
