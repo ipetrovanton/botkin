@@ -481,11 +481,23 @@ def _dedup_rows(rows: list[LabResult]) -> list[LabResult]:
     return out
 
 
+def _name_key(r: LabResult) -> str:
+    """Ключ показателя по имени (без значения): lower, ё→е, схлопывание пробелов."""
+    return " ".join(r.analyte_name.strip().lower().replace("ё", "е").split())
+
+
 def _merge_dedup(base: list[LabResult], extra: list[LabResult]) -> list[LabResult]:
-    seen = {_row_key(r) for r in base}
+    """Сливает добор постранично с общим вызовом, дедуп по ИМЕНИ показателя.
+
+    Модель недетерминирована в значениях: один показатель в общем вызове и в доборе
+    может иметь разные числа (Гемоглобин 13.7 г/дл vs 143 г/л). Дедуп по (имя,значение)
+    оставлял бы оба — дубли с противоречием. Ключ по имени: повтор отбрасываем (доверяем
+    первому/общему проходу), добавляем только реально новые показатели (потерянная страница).
+    """
+    seen = {_name_key(r) for r in base}
     out = list(base)
     for r in extra:
-        key = _row_key(r)
+        key = _name_key(r)
         if key not in seen:
             seen.add(key)
             out.append(r)

@@ -59,3 +59,26 @@ def test_extract_once_salvages_rows_from_truncated_response(monkeypatch):
     monkeypatch.setattr(ex, "_call_vlm", boom)
     rows, n = ex._extract_once(["img"], "doc.pdf#стр2")
     assert [r.analyte_name for r in rows] == ["СОЭ"]
+
+
+def test_merge_dedup_by_name_drops_conflicting_value():
+    # Между общим вызовом и постраничным добором модель даёт РАЗНЫЕ числа для одного
+    # показателя (Гемоглобин 13.7 г/дл vs 143 г/л). Слияние по имени: дубль отбрасываем,
+    # доверяем первому (общему) проходу; реально новый показатель добавляем.
+    base = [ex.LabResult(analyte_name="Гемоглобин", value_num=13.7, unit="г/дл")]
+    extra = [
+        ex.LabResult(analyte_name="Гемоглобин", value_num=143.0, unit="г/л"),  # дубль по имени
+        ex.LabResult(analyte_name="СОЭ", value_num=9.0, unit="мм/ч"),          # новый показатель
+    ]
+    merged = ex._merge_dedup(base, extra)
+    names = [r.analyte_name for r in merged]
+    assert names.count("Гемоглобин") == 1     # конфликтующий дубль отброшен
+    assert merged[0].value_num == 13.7        # значение общего (первого) прохода сохранено
+    assert "СОЭ" in names                      # реально новый показатель добавлен
+
+
+def test_merge_dedup_name_normalized():
+    # Регистр и ё/е не должны плодить дубли при слиянии.
+    base = [ex.LabResult(analyte_name="Гемоглобин", value_num=140.0)]
+    extra = [ex.LabResult(analyte_name="гемоглобин", value_num=140.0)]
+    assert len(ex._merge_dedup(base, extra)) == 1
