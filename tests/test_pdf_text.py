@@ -1,5 +1,9 @@
 """Текстовый слой PDF: координатная сборка строк, годность, плоский текст."""
-from botkin.preprocess.pdf_text import reconstruct_lines
+from botkin.preprocess.pdf_text import (
+    has_usable_text_layer,
+    reconstruct_lines,
+    source_text,
+)
 
 
 def test_reconstruct_merges_value_offset_by_one_px(make_pdf, tmp_path):
@@ -22,3 +26,29 @@ def test_reconstruct_merges_value_offset_by_one_px(make_pdf, tmp_path):
     assert "13.7" in hb[0] and "г/дл" in hb[0] and "11.7" in hb[0] and "15.5" in hb[0]
     # Одна физическая строка показателя Эритроциты.
     assert sum(1 for ln in lines if "Эритроциты" in ln) == 1
+
+
+def test_usable_true_for_text_pdf(make_pdf, tmp_path):
+    pdf = tmp_path / "t.pdf"
+    rows = [("Гемоглобин", "13.7", "г/дл"), ("Эритроциты", "4.64", "млн/мкл"),
+            ("Лейкоциты", "5.15", "тыс/мкл"), ("Тромбоциты", "217", "тыс/мкл"),
+            ("Гематокрит", "40.8", "%"), ("Нейтрофилы", "44.6", "%")]
+    words = []
+    for i, (name, val, unit) in enumerate(rows):
+        y = 100 + i * 30
+        words += [(50, y, name), (200, y, val), (260, y, unit)]
+    make_pdf(pdf, words)
+    assert has_usable_text_layer(pdf) is True
+
+
+def test_usable_false_for_blank_pdf(make_pdf, tmp_path):
+    pdf = tmp_path / "blank.pdf"
+    make_pdf(pdf, [])  # страница без текстового слоя (скан-подобный)
+    assert has_usable_text_layer(pdf) is False
+
+
+def test_source_text_is_flat_and_normalized(make_pdf, tmp_path):
+    pdf = tmp_path / "t.pdf"
+    make_pdf(pdf, [(50, 100, "Гемоглобин"), (200, 100, "13.7")])
+    txt = source_text(pdf)
+    assert "Гемоглобин" in txt and "13.7" in txt

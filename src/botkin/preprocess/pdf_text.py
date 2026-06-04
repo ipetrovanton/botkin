@@ -45,3 +45,26 @@ def reconstruct_lines(path: Path, y_tol: float | None = None) -> list[str]:
         for page in doc:
             out.extend(_page_lines(page, tol))
     return out
+
+
+def source_text(path: Path) -> str:
+    """Плоский текст слоя всех страниц (для verbatim-стража)."""
+    parts: list[str] = []
+    with pymupdf.open(str(path)) as doc:
+        for page in doc:
+            parts.append(page.get_text("text"))
+    return "\n".join(parts)
+
+
+def has_usable_text_layer(path: Path) -> bool:
+    """True, если у PDF годный текстовый слой: символов/стр ≥ порога и есть цифры."""
+    try:
+        with pymupdf.open(str(path)) as doc:
+            n_pages = doc.page_count or 1
+            text = "".join(page.get_text("text") for page in doc)
+    except Exception as e:  # pragma: no cover — битый PDF → не годен, упадём в VLM
+        log.warning("[TEXTLAYER] не удалось открыть '%s': %s", path.name, e)
+        return False
+    chars_per_page = len(text.strip()) / n_pages
+    has_digit = any(ch.isdigit() for ch in text)
+    return chars_per_page >= TEXT_LAYER_MIN_CHARS_PER_PAGE and has_digit
