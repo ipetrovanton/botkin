@@ -14,7 +14,14 @@ from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ClassificationError, ExtractionError
 from botkin.llm import classify, extract
 from botkin.normalize.drugs import DrugNormalizer, load_default
-from botkin.normalize.analytes import AnalyteNormalizer, load_default as load_analytes, summary_title
+from botkin.normalize.analytes import (
+    HEMATOLOGY_GROUP,
+    AnalyteNormalizer,
+    is_cbc_analyte,
+    is_cbc_panel,
+    summary_title,
+)
+from botkin.normalize.analytes import load_default as load_analytes
 from botkin.normalize.units import canonical_unit
 from botkin.pipeline.notifications import (
     classify_failed, document_processed, extract_failed, notify_user, pipeline_failed,
@@ -180,11 +187,16 @@ def _persist_lab(document_id: int, user_id: int, items: list[LabResult]) -> list
     """Нормализует и сохраняет показатели; возвращает список AnalyteMatch (для заголовка)."""
     normalizer = get_analyte_normalizer()
     matches = []
+    # Клиническую группу для ОАК задаёт состав панели, а не ФСЛИ-группа отдельного
+    # показателя (Гемоглобин/Эритроциты числятся «Химико-микроскопическими»). Опознаём
+    # панель один раз по всему документу и проставляем строкам гематологию.
+    is_cbc = is_cbc_panel([item.analyte_name for item in items])
     with get_conn() as conn:
         for item in items:
             unit_canon, unit_raw = canonical_unit(item.unit)
             match = normalizer.correct(item.analyte_name)
             matches.append(match)
+            group = HEMATOLOGY_GROUP if (is_cbc and is_cbc_analyte(item.analyte_name)) else match.group
             # Единица из документа сверяется с НАБОРОМ известных единиц показателя:
             # совпадение хотя бы с одной канонической формой → ок (нет ложных ⚠️).
             unit_mismatch = None
@@ -205,7 +217,7 @@ def _persist_lab(document_id: int, user_id: int, items: list[LabResult]) -> list
                  item.taken_at.isoformat() if item.taken_at else None,
                  item.source_table_cell,
                  item.value_raw, unit_raw, item.taken_at_raw,
-                 match.canonical, match.loinc, match.nmu, match.group,
+                 match.canonical, match.loinc, match.nmu, group,
                  match.status, unit_expected, unit_mismatch),
             )
         conn.commit()

@@ -81,3 +81,40 @@ def test_persist_lab_normalizes_and_checks_unit(set_test_db, monkeypatch):
     from botkin.normalize.analytes import summary_title
     assert matches[0].canonical == "Глюкоза"
     assert summary_title([m.group for m in matches]) == "Биохимические исследования"
+
+
+def test_persist_lab_overrides_cbc_group(set_test_db, monkeypatch):
+    """Документ ОАК: мусорная ФСЛИ-группа показателей перезаписывается на гематологию."""
+    from botkin.db.connection import get_conn
+    from botkin.db.repos import DocumentRepo, UserRepo
+    from botkin.domain.models import LabResult
+    from botkin.normalize.analytes import AnalyteNormalizer
+    from botkin.pipeline import orchestrator
+
+    # В реестре ФСЛИ Гемоглобин/Эритроциты/Лейкоциты помечены «Химико-микроскопическими».
+    fake = AnalyteNormalizer([
+        {"name": "Гемоглобин", "units": ["г/л"], "group": "Химико-микроскопические исследования"},
+        {"name": "Эритроциты", "units": ["10^12/л"], "group": "Химико-микроскопические исследования"},
+        {"name": "Лейкоциты", "units": ["10^9/л"], "group": "Химико-микроскопические исследования"},
+        {"name": "Тромбоциты", "units": ["10^9/л"], "group": "Гематологические исследования"},
+    ])
+    monkeypatch.setattr(orchestrator, "_ANALYTE_NORMALIZER", fake)
+
+    with get_conn() as conn:
+        uid = UserRepo(conn).get_or_create(9200)
+        did = DocumentRepo(conn, uid).create(source_path="/tmp/cbc.jpg")
+
+    items = [
+        LabResult(analyte_name="Гемоглобин", value_num=137, unit="г/л"),
+        LabResult(analyte_name="Эритроциты", value_num=4.6, unit="10^12/л"),
+        LabResult(analyte_name="Лейкоциты", value_num=5.1, unit="10^9/л"),
+        LabResult(analyte_name="Тромбоциты", value_num=217, unit="10^9/л"),
+    ]
+    orchestrator._persist_lab(did, uid, items)
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT analyte_group FROM lab_results WHERE document_id=? ORDER BY id", (did,),
+        ).fetchall()
+    # Состав опознан как ОАК → все строки в гематологии, мусорная химмикро-группа исправлена.
+    assert [r["analyte_group"] for r in rows] == ["Гематологические исследования"] * 4
