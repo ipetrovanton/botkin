@@ -146,16 +146,23 @@ def labs_in_period(user_id: int, start, end) -> list[dict]:
     return list(groups.values())
 
 
-def get_lab_results(document_id: int, limit: int = 20) -> list[dict]:
+def get_lab_results(document_id: int, limit: int | None = None) -> list[dict]:
+    # Карточка документа показывает ВСЕ строки панели в порядке документа.
+    # Дефолтного LIMIT нет: панель ОАК+СРБ (21 строка) обрезалась на LIMIT 20.
+    # ORDER BY id ASC сохраняет порядок вставки (= порядок в документе).
+    sql = (
+        "SELECT analyte_name, value_num, value_text, unit, "
+        "ref_low, ref_high, ref_operator, ref_text, "
+        "analyte_canonical, loinc, nmu_code, analyte_group, "
+        "match_status, unit_expected, unit_mismatch "
+        "FROM lab_results WHERE document_id = ? ORDER BY id ASC"
+    )
+    params: tuple = (document_id,)
+    if limit is not None:
+        sql += " LIMIT ?"
+        params = (document_id, limit)
     with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT analyte_name, value_num, value_text, unit, "
-            "ref_low, ref_high, ref_operator, ref_text, "
-            "analyte_canonical, loinc, nmu_code, analyte_group, "
-            "match_status, unit_expected, unit_mismatch "
-            "FROM lab_results WHERE document_id = ? LIMIT ?",
-            (document_id, limit),
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()
     return [dict(r) for r in rows]
 
 

@@ -106,3 +106,26 @@ def test_get_lab_results_returns_extended_fields(set_test_db):
     assert r["analyte_canonical"] == "С-реактивный белок"
     assert r["loinc"] == "1988-5" and r["match_status"] == "matched"
     assert r["unit_expected"] == "мг/л" and r["unit_mismatch"] == 0
+
+
+def test_get_lab_results_returns_all_rows_in_insertion_order(set_test_db):
+    # Регресс: панель из 21 показателя (ОАК+СРБ) обрезалась дефолтным LIMIT 20, и
+    # без ORDER BY терялась последняя вставленная строка (СОЭ). Карточка обязана
+    # показывать ВСЕ строки документа в порядке документа.
+    from botkin.db.connection import get_conn
+    from botkin.db.queries import get_lab_results
+    from botkin.db.repos import DocumentRepo, UserRepo
+    with get_conn() as conn:
+        uid = UserRepo(conn).get_or_create(7002)
+        did = DocumentRepo(conn, uid).create(source_path="/tmp/b.pdf")
+        for i in range(21):
+            conn.execute(
+                "INSERT INTO lab_results(document_id, user_id, analyte_name, value_num) "
+                "VALUES (?,?,?,?)",
+                (did, uid, f"Показатель {i:02d}", float(i)),
+            )
+    rows = get_lab_results(did)
+    assert len(rows) == 21
+    # Порядок вставки сохранён: первая и последняя строки на своих местах.
+    assert rows[0]["analyte_name"] == "Показатель 00"
+    assert rows[-1]["analyte_name"] == "Показатель 20"
