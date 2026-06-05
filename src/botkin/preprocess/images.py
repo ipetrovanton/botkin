@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 from pathlib import Path
 
 import cv2
@@ -33,6 +34,8 @@ from botkin.config import (
     MAX_PAGES,
     PDF_RENDER_DPI,
 )
+
+log = logging.getLogger(__name__)
 
 
 def _resize(img: Image.Image, long_side: int, upscale: bool) -> Image.Image:
@@ -118,12 +121,18 @@ def _pdf_pages(path: Path, long_side: int, upscale: bool, enhance: bool) -> list
     out: list[bytes] = []
     doc = pymupdf.open(str(path))
     try:
+        log.info("[PDF] %s: страниц в документе=%d | рендер до %d @ %d dpi",
+                 path.name, doc.page_count, MAX_PAGES, PDF_RENDER_DPI)
         for index, page in enumerate(doc):
             if index >= MAX_PAGES:
                 break
             pix = page.get_pixmap(dpi=PDF_RENDER_DPI)
             img = Image.open(io.BytesIO(pix.tobytes("png")))
-            out.append(_process(img, long_side, upscale, deskew=False, enhance=enhance))
+            jpeg = _process(img, long_side, upscale, deskew=False, enhance=enhance)
+            fw, fh = Image.open(io.BytesIO(jpeg)).size
+            log.info("[PDF] %s стр.%d: рендер %dx%d → итог %dx%d px, JPEG %d КБ",
+                     path.name, index + 1, pix.width, pix.height, fw, fh, len(jpeg) // 1024)
+            out.append(jpeg)
     finally:
         doc.close()
     return out
@@ -146,7 +155,10 @@ def prepare_images(
         return _pdf_pages(path, limit, upscale, enhance)
 
     with Image.open(path) as img:
-        return [_process(img, limit, upscale, deskew, enhance)]
+        jpeg = _process(img, limit, upscale, deskew, enhance)
+    fw, fh = Image.open(io.BytesIO(jpeg)).size
+    log.info("[IMG] %s: итог %dx%d px, JPEG %d КБ", path.name, fw, fh, len(jpeg) // 1024)
+    return [jpeg]
 
 
 def to_base64_jpegs(images: list[bytes]) -> list[str]:

@@ -131,3 +131,15 @@ def test_legacy_prescription_doc_remapped_to_unknown(tmp_path, monkeypatch):
     assert doc_type == "unknown"                  # рецепт переразмечен
     assert "prescriptions" not in tables          # таблица удалена
     assert "prescription" not in sql              # CHECK без prescription
+
+
+def test_lab_results_normalization_columns(set_test_db):
+    """Колонки нормализации ФСЛИ и расширенных референсов добавлены в lab_results."""
+    from botkin.db.connection import get_conn
+    with get_conn() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(lab_results)").fetchall()}
+    assert {
+        "analyte_canonical", "loinc", "nmu_code", "analyte_group",
+        "match_status", "unit_expected", "unit_mismatch",
+        "ref_operator", "ref_text",
+    } <= cols

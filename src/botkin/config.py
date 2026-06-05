@@ -65,6 +65,10 @@ _DEFAULTS: dict = {
         "max_edit_ratio": 0.40,
         "ratio_floor": 70,
     },
+    "analytes": {
+        "max_edit_ratio": 0.35,
+        "ratio_floor": 75,
+    },
 }
 
 
@@ -108,6 +112,20 @@ VLM_NUM_CTX = int(os.getenv("VLM_NUM_CTX", _get("vlm.num_ctx", _DEFAULTS["vlm"][
 VLM_MAX_TOKENS = int(os.getenv("VLM_MAX_TOKENS", _get("vlm.max_tokens", _DEFAULTS["vlm"]["max_tokens"])))
 VLM_NUM_PREDICT = int(os.getenv("VLM_NUM_PREDICT", _get("vlm.num_predict", _DEFAULTS["vlm"]["num_predict"])))
 VLM_REPEAT_PENALTY = float(os.getenv("VLM_REPEAT_PENALTY", _get("vlm.repeat_penalty", _DEFAULTS["vlm"]["repeat_penalty"])))
+# Потолок одного VLM-вызова. Деградировавший вызов (генерация дублей) не должен висеть
+# минутами — по таймауту прерываем, страница пропускается, документ сохраняет остальное.
+VLM_REQUEST_TIMEOUT = float(os.getenv("VLM_REQUEST_TIMEOUT", "120"))
+
+# ── Текстовый слой PDF (детерминированное извлечение без VLM) ────────────────
+# Минимум символов на страницу, чтобы считать слой годным (отсекает PDF-сканы
+# с пустым/мусорным текстовым слоем).
+TEXT_LAYER_MIN_CHARS_PER_PAGE = int(os.getenv("TEXT_LAYER_MIN_CHARS_PER_PAGE", "50"))
+# Толеранция по Y (в пунктах) при кластеризации слов в физические строки:
+# значение часто сидит на 1px ниже имени, наивное округление разрывает строку.
+TEXT_LAYER_Y_TOLERANCE = float(os.getenv("TEXT_LAYER_Y_TOLERANCE", "3.0"))
+# Доля забракованных verbatim-стражем чисел, выше которой результат считается
+# недостоверным → фолбэк на VLM.
+VERBATIM_MAX_REJECT_RATIO = float(os.getenv("VERBATIM_MAX_REJECT_RATIO", "0.5"))
 
 # ── Ollama ────────────────────────────────────────────────────────────────────
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
@@ -135,12 +153,21 @@ PHOTO_LOWRES_WARN = int(_get("image.lowres_warn", _DEFAULTS["image"]["lowres_war
 DRUG_MAX_EDIT_RATIO = float(_get("drugs.max_edit_ratio", _DEFAULTS["drugs"]["max_edit_ratio"]))
 DRUG_RATIO_FLOOR = float(_get("drugs.ratio_floor", _DEFAULTS["drugs"]["ratio_floor"]))
 
+# ── Нормализация анализов (ФСЛИ) ──────────────────────────────────────────────
+# Аналогично препаратам: cap по дистанции Дамерау-Левенштейна + ratio-floor.
+ANALYTE_MAX_EDIT_RATIO = float(_get("analytes.max_edit_ratio", _DEFAULTS["analytes"]["max_edit_ratio"]))
+ANALYTE_RATIO_FLOOR = float(_get("analytes.ratio_floor", _DEFAULTS["analytes"]["ratio_floor"]))
+
 # ── База данных ───────────────────────────────────────────────────────────────
 SQLITE_PATH = str(_resolve_path(os.getenv("SQLITE_PATH", _get("database.sqlite_path", _DEFAULTS["database"]["sqlite_path"]))))
 
 # ── Telegram бот ──────────────────────────────────────────────────────────────
 BOT_POLLING_TIMEOUT = int(_get("bot.polling_timeout", _DEFAULTS["bot"]["polling_timeout"]))
 BOT_API_URL = os.getenv("API_URL", _get("bot.api_url", _DEFAULTS["bot"]["api_url"]))
+# Потолок поллинга прогресса документа в боте. Увязан с потолком обработки на бэкенде:
+# classify + общий extract + добор страниц, каждый VLM-вызов ограничен VLM_REQUEST_TIMEOUT.
+# Иначе бот сдаётся раньше, чем бэкенд закончит (см. инцидент с D3).
+BOT_PROGRESS_TIMEOUT = float(os.getenv("BOT_PROGRESS_TIMEOUT", str(30 + 3 * VLM_REQUEST_TIMEOUT)))
 
 # ── Загрузка файлов ───────────────────────────────────────────────────────────
 UPLOAD_MAX_BYTES = int(_get("upload.max_bytes", _DEFAULTS["upload"]["max_bytes"]))

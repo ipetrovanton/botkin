@@ -83,3 +83,26 @@ def test_labs_in_period_grouped(set_test_db):
     by_name = {g["analyte_name"]: g["points"] for g in groups}
     assert [p["value_num"] for p in by_name["Глюкоза"]] == [5.4, 4.9]  # по времени
     assert len(by_name["Гемоглобин"]) == 1
+
+
+def test_get_lab_results_returns_extended_fields(set_test_db):
+    from botkin.db.connection import get_conn
+    from botkin.db.queries import get_lab_results
+    from botkin.db.repos import DocumentRepo, UserRepo
+    with get_conn() as conn:
+        uid = UserRepo(conn).get_or_create(7001)
+        did = DocumentRepo(conn, uid).create(source_path="/tmp/a.jpg")
+        conn.execute(
+            "INSERT INTO lab_results(document_id, user_id, analyte_name, value_text, "
+            "ref_operator, ref_high, ref_text, analyte_canonical, loinc, match_status, "
+            "unit_expected, unit_mismatch) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (did, uid, "СРБ", None, "<", 5.0, None, "С-реактивный белок",
+             "1988-5", "matched", "мг/л", 0),
+        )
+    rows = get_lab_results(did)
+    r = rows[0]
+    assert r["value_text"] is None and r["ref_operator"] == "<"
+    assert r["analyte_canonical"] == "С-реактивный белок"
+    assert r["loinc"] == "1988-5" and r["match_status"] == "matched"
+    assert r["unit_expected"] == "мг/л" and r["unit_mismatch"] == 0

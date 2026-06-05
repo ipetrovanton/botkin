@@ -40,3 +40,44 @@ def test_unknown_doc_saved_without_extraction(set_test_db, monkeypatch):
     assert doc["status"] == "extracted"          # документ обработан и доставлен
     assert doc["raw_extraction"] is None          # деталей не извлекали
     assert labs["c"] == 0 and reports["c"] == 0   # никаких записей деталей
+
+
+def test_persist_lab_normalizes_and_checks_unit(set_test_db, monkeypatch):
+    from botkin.db.connection import get_conn
+    from botkin.db.repos import DocumentRepo, UserRepo
+    from botkin.domain.models import LabResult
+    from botkin.normalize.analytes import AnalyteNormalizer
+    from botkin.pipeline import orchestrator
+
+    # Детерминированный нормализатор (не зависим от содержимого реального реестра).
+    fake = AnalyteNormalizer([
+        {"name": "Глюкоза", "synonyms": ["GLU", "Glucose"], "units": ["ммоль/л"],
+         "group": "Биохимические исследования"},
+    ])
+    monkeypatch.setattr(orchestrator, "_ANALYTE_NORMALIZER", fake)
+
+    with get_conn() as conn:
+        uid = UserRepo(conn).get_or_create(9100)
+        did = DocumentRepo(conn, uid).create(source_path="/tmp/a.jpg")
+
+    items = [
+        LabResult(analyte_name="Глюкоэа", value_num=5.4, unit="г/л"),  # опечатка + неверная единица
+    ]
+    matches = orchestrator._persist_lab(did, uid, items)
+
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT analyte_name, analyte_canonical, match_status, loinc, "
+            "unit_expected, unit_mismatch FROM lab_results WHERE document_id=?",
+            (did,),
+        ).fetchone()
+    assert row["analyte_name"] == "Глюкоэа"          # исходное имя не перезаписано
+    assert row["analyte_canonical"] == "Глюкоза"      # нормализовано
+    assert row["match_status"] == "matched"
+    assert row["unit_expected"] == "ммоль/л"
+    assert row["unit_mismatch"] == 1                  # г/л ≠ ммоль/л
+
+    # _persist_lab возвращает matches с группой → обобщённый заголовок документа по группе
+    from botkin.normalize.analytes import summary_title
+    assert matches[0].canonical == "Глюкоза"
+    assert summary_title([m.group for m in matches]) == "Биохимические исследования"

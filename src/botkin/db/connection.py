@@ -18,7 +18,18 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "clinic": "TEXT",
         "delivered_at": "TIMESTAMP",
     },
-    "lab_results": {"value_raw": "TEXT", "unit_raw": "TEXT", "taken_at_raw": "TEXT"},
+    "lab_results": {
+        "value_raw": "TEXT", "unit_raw": "TEXT", "taken_at_raw": "TEXT",
+        "ref_operator": "TEXT",
+        "ref_text": "TEXT",
+        "analyte_canonical": "TEXT",
+        "loinc": "TEXT",
+        "nmu_code": "TEXT",
+        "analyte_group": "TEXT",
+        "match_status": "TEXT",
+        "unit_expected": "TEXT",
+        "unit_mismatch": "INTEGER",
+    },
     "doctor_reports": {"medications_normalized_json": "TEXT"},
 }
 
