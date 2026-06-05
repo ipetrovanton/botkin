@@ -22,9 +22,49 @@ def test_structure_text_maps_raw_to_rows(monkeypatch):
     assert rows[0].unit == "г/дл" and rows[0].value_num == 13.7
 
 
+def test_text_layer_extracts_each_page_so_lone_result_survives(monkeypatch):
+    # Регресс doc#28: одинокий результат на стр.1 (С-реактивный белок) терялся при
+    # едином вызове по всем страницам. Постранично — модель видит каждую страницу.
+    pages = [["С-реактивный белок 1.8 мг/л <5.0"],
+             ["Гемоглобин 13.7 г/дл 11.7 - 15.5"]]
+    monkeypatch.setattr(ex, "reconstruct_pages", lambda p: pages)
+    monkeypatch.setattr(ex, "source_text", lambda p: "\n".join(ln for pg in pages for ln in pg))
+
+    def fake_structure(lines, name):
+        # Имитация фокуса модели: видит ТОЛЬКО строки переданной страницы.
+        if any("С-реактивный" in ln for ln in lines):
+            return [LabResult(analyte_name="С-реактивный белок", value_num=1.8, value_raw="1.8",
+                              ref_high=5.0, ref_operator="<")]
+        return [LabResult(analyte_name="Гемоглобин", value_num=13.7, value_raw="13.7",
+                          ref_low=11.7, ref_high=15.5)]
+
+    monkeypatch.setattr(ex, "_structure_text", fake_structure)
+    rows = ex._extract_from_text_layer(Path("doc.pdf"))
+    names = [r.analyte_name for r in rows]
+    assert "С-реактивный белок" in names
+    assert "Гемоглобин" in names
+
+
+def test_text_layer_completeness_recovers_dropped_line(monkeypatch):
+    # Вторая защита: даже на одной странице, если LLM пропустил строку-результат,
+    # completeness_guard добирает её из текста слоя.
+    pages = [["С-реактивный белок 1.8 мг/л <5.0", "Гемоглобин 13.7 г/дл 11.7 - 15.5"]]
+    monkeypatch.setattr(ex, "reconstruct_pages", lambda p: pages)
+    monkeypatch.setattr(ex, "source_text", lambda p: "\n".join(pages[0]))
+    # Модель вернула только гемоглобин — СРБ пропущен.
+    monkeypatch.setattr(ex, "_structure_text", lambda lines, name: [
+        LabResult(analyte_name="Гемоглобин", value_num=13.7, value_raw="13.7",
+                  ref_low=11.7, ref_high=15.5)])
+    rows = ex._extract_from_text_layer(Path("doc.pdf"))
+    names = [r.analyte_name for r in rows]
+    assert "С-реактивный белок" in names  # добран стражем
+    assert "Гемоглобин" in names
+    assert next(r for r in rows if r.analyte_name == "С-реактивный белок").value_num == 1.8
+
+
 def test_run_analysis_uses_text_layer_when_strong(monkeypatch):
     monkeypatch.setattr(ex, "_should_use_text_layer", lambda p: True)
-    monkeypatch.setattr(ex, "reconstruct_lines", lambda p: ["Гемоглобин 13.7 г/дл 11.7 - 15.5"])
+    monkeypatch.setattr(ex, "reconstruct_pages", lambda p: [["Гемоглобин 13.7 г/дл 11.7 - 15.5"]])
     monkeypatch.setattr(ex, "source_text", lambda p: "Гемоглобин 13.7 г/дл 11.7 - 15.5")
     monkeypatch.setattr(ex, "_structure_text", lambda lines, name: [
         LabResult(analyte_name="Гемоглобин", value_num=13.7, value_raw="13.7",
@@ -38,7 +78,7 @@ def test_run_analysis_uses_text_layer_when_strong(monkeypatch):
 
 def test_run_analysis_falls_back_when_text_layer_weak(monkeypatch):
     monkeypatch.setattr(ex, "_should_use_text_layer", lambda p: True)
-    monkeypatch.setattr(ex, "reconstruct_lines", lambda p: ["мусор"])
+    monkeypatch.setattr(ex, "reconstruct_pages", lambda p: [["мусор"]])
     monkeypatch.setattr(ex, "source_text", lambda p: "мусор")
     monkeypatch.setattr(ex, "_structure_text", lambda lines, name: [])  # слабо → 0 строк
     monkeypatch.setattr(ex, "_prepare_b64", lambda p: ["img1"])
@@ -56,7 +96,7 @@ def test_run_analysis_falls_back_when_text_layer_weak(monkeypatch):
 
 def test_run_analysis_falls_back_when_guard_rejects_majority(monkeypatch):
     monkeypatch.setattr(ex, "_should_use_text_layer", lambda p: True)
-    monkeypatch.setattr(ex, "reconstruct_lines", lambda p: ["x"])
+    monkeypatch.setattr(ex, "reconstruct_pages", lambda p: [["x"]])
     monkeypatch.setattr(ex, "source_text", lambda p: "тут нет таких чисел 1 2")
     # Обе строки с числами, которых нет в источнике → >50% выбраковки.
     monkeypatch.setattr(ex, "_structure_text", lambda lines, name: [

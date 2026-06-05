@@ -2,8 +2,27 @@
 from botkin.preprocess.pdf_text import (
     has_usable_text_layer,
     reconstruct_lines,
+    reconstruct_pages,
     source_text,
 )
+
+
+def test_reconstruct_pages_groups_lines_per_page(make_pdf, tmp_path):
+    # Многостраничный PDF: строки группируются по страницам, а reconstruct_lines —
+    # плоская склейка тех же страниц по порядку.
+    pdf = tmp_path / "twopage.pdf"
+    make_pdf(pdf, pages=[
+        [(50, 100, "С-реактивный"), (160, 100, "белок"),
+         (260, 100, "1.8"), (320, 100, "мг/л")],
+        [(50, 100, "Гемоглобин"), (200, 100, "13.7"), (260, 100, "г/дл")],
+    ])
+    pages = reconstruct_pages(pdf)
+    assert len(pages) == 2
+    assert any("С-реактивный" in ln for ln in pages[0])
+    assert all("С-реактивный" not in ln for ln in pages[1])
+    assert any("Гемоглобин" in ln for ln in pages[1])
+    # Плоская склейка страниц = reconstruct_lines.
+    assert reconstruct_lines(pdf) == [ln for pg in pages for ln in pg]
 
 
 def test_reconstruct_merges_value_offset_by_one_px(make_pdf, tmp_path):

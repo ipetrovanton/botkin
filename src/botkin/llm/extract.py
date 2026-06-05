@@ -19,7 +19,7 @@ from botkin.llm.client import get_client, default_options
 from botkin.llm.prompts import ANALYSIS_VLM_SYSTEM, DOCTOR_REPORT_VLM_SYSTEM, ANALYSIS_TEXT_SYSTEM
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
 from botkin.preprocess.pdf_text import (
-    has_usable_text_layer, reconstruct_lines, source_text,
+    has_usable_text_layer, reconstruct_pages, source_text,
 )
 
 log = logging.getLogger(__name__)
@@ -578,21 +578,120 @@ def _merge_dedup(base: list[LabResult], extra: list[LabResult]) -> list[LabResul
     return out
 
 
+# ── Анти-пропускной страж (completeness) ─────────────────────────────────────
+# Симметрия к verbatim_guard: тот ловит галлюцинации (число не из источника), этот —
+# пропуски (строка-результат источника не дала строки в ответе). Одинокий результат
+# на отдельной странице (С-реактивный белок без заголовка) LLM иногда теряет.
+
+_VALUE_TOKEN_RE = re.compile(r"^-?\d+(?:[.,]\d+)?\*?$")  # чистый токен-значение (+флаг «*»)
+_PLAIN_NUM_RE = re.compile(r"^-?\d+(?:[.,]\d+)?$")
+_OPERATORS = ("<", ">", "≤", "≥")
+_DASHES = ("-", "–", "—")
+
+
+def _extract_unit_ref(rest: list[str]) -> tuple[Optional[str], Optional[str]]:
+    """Хвост строки после значения → (unit, reference). Нет референса → (unit, None)."""
+    for i, tok in enumerate(rest):
+        # одно-токенные формы: «<5.0», «<20», «35-45»
+        if _LE_RE.match(tok) or _GE_RE.match(tok) or _RANGE_RE.match(tok):
+            return (" ".join(rest[:i]) or None), tok
+        # «< 1.0» — оператор + число отдельными токенами
+        if tok in _OPERATORS and i + 1 < len(rest) and re.match(r"^-?\d", rest[i + 1]):
+            return (" ".join(rest[:i]) or None), tok + rest[i + 1]
+        # «35 - 45» — число, тире, число
+        if (_PLAIN_NUM_RE.match(tok) and i + 2 < len(rest)
+                and rest[i + 1] in _DASHES and _PLAIN_NUM_RE.match(rest[i + 2])):
+            return (" ".join(rest[:i]) or None), f"{tok} - {rest[i + 2]}"
+    return (" ".join(rest) or None), None
+
+
+def _parse_text_line(line: str) -> Optional[LabResult]:
+    """Чистая строка текстового слоя → LabResult, либо None если это не строка-результат.
+
+    Гейт строгий (чтобы не подбирать шапку/подвал — телефон, даты, возраст, обрывки
+    примечаний): имя (есть буква) + чистый числовой токен-значение + токен референса.
+    """
+    tokens = line.split()
+    vi = next((i for i, t in enumerate(tokens) if _VALUE_TOKEN_RE.match(t)), None)
+    if not vi:  # нет токена-значения, либо значение в самом начале (нет имени)
+        return None
+    name = " ".join(tokens[:vi]).strip()
+    if not any(ch.isalpha() for ch in name):
+        return None
+    unit, ref = _extract_unit_ref(tokens[vi + 1:])
+    if ref is None:  # без референса не считаем строкой-результатом
+        return None
+    value_num, value_text = parse_lab_value(tokens[vi])
+    ref_low, ref_high, ref_operator, ref_text = parse_reference_range(ref)
+    return LabResult(
+        analyte_name=name, value_num=value_num, value_text=value_text,
+        value_raw=tokens[vi], unit=unit,
+        ref_low=ref_low, ref_high=ref_high, ref_operator=ref_operator, ref_text=ref_text,
+    )
+
+
+def _value_key(value) -> Optional[str]:
+    """Нормализованный токен значения для сравнения покрытия (None → None)."""
+    toks = _num_tokens(value)
+    return toks[0] if toks else None
+
+
+def completeness_guard(lines: list[str], rows: list[LabResult]) -> list[LabResult]:
+    """Строки-результаты источника, не представленные в rows → восстановленные LabResult.
+
+    Покрытие считаем ПО ЗНАЧЕНИЮ показателя, а не по имени: имена от LLM и от парсера
+    строки могут расходиться, а значение — стабильный якорь. Так не плодим ложные дубли.
+    Недобор при коллизии значений безопаснее ложного добора — мы лишь не хуже прежнего.
+    """
+    covered = {_value_key(r.value_num) for r in rows}
+    covered.discard(None)
+    recovered: list[LabResult] = []
+    for line in lines:
+        r = _parse_text_line(line)
+        if r is None:
+            continue
+        key = _value_key(r.value_num)
+        if key is None or key in covered:
+            continue
+        covered.add(key)
+        recovered.append(r)
+    return recovered
+
+
 def _should_use_text_layer(source_path: Path) -> bool:
     return source_path.suffix.lower() == ".pdf" and has_usable_text_layer(source_path)
 
 
 def _extract_from_text_layer(source_path: Path) -> list[LabResult] | None:
-    """Извлечение из текстового слоя. None → результат слабый, нужен VLM-фолбэк."""
-    lines = reconstruct_lines(source_path)
+    """Извлечение из текстового слоя. None → результат слабый, нужен VLM-фолбэк.
+
+    Постранично: каждая страница — отдельный text-LLM вызов, чтобы одинокий результат
+    на своей странице (С-реактивный белок без заголовка) не тонул на фоне большой
+    таблицы соседней страницы. Затем completeness_guard добирает пропущенные строки.
+    """
+    pages = reconstruct_pages(source_path)
     src = source_text(source_path)
+    all_lines = [ln for pg in pages for ln in pg]
     log.info(
-        "[TEXTLAYER_QUALITY] Doc: '%s' | символов=%d | строк-реконструкции=%d",
-        source_path.name, len(src), len(lines),
+        "[TEXTLAYER_QUALITY] Doc: '%s' | символов=%d | страниц=%d строк-реконструкции=%d",
+        source_path.name, len(src), len(pages), len(all_lines),
     )
-    if not lines:
+    if not all_lines:
         return None
-    rows = _structure_text(lines, source_path.name)
+    rows: list[LabResult] = []
+    for i, lines in enumerate(pages):
+        if not lines:
+            continue
+        page_rows = _structure_text(lines, f"{source_path.name}#стр{i + 1}")
+        rows = _merge_dedup(rows, page_rows)
+    # Анти-пропускной добор: строки-результаты слоя, что LLM пропустил.
+    recovered = completeness_guard(all_lines, rows)
+    if recovered:
+        log.info(
+            "[COMPLETENESS_GUARD] Doc: '%s' | добрано пропущенных строк=%d: %s",
+            source_path.name, len(recovered), [r.analyte_name for r in recovered],
+        )
+        rows = _merge_dedup(rows, recovered)
     if not rows:
         return None
     kept, rejected = _verbatim_guard(rows, src)

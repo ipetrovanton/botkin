@@ -37,14 +37,24 @@ def _page_lines(page, y_tol: float) -> list[str]:
     return [ln for ln in lines if ln]
 
 
-def reconstruct_lines(path: Path, y_tol: float | None = None) -> list[str]:
-    """Все страницы PDF → список физических строк в порядке документа."""
+def reconstruct_pages(path: Path, y_tol: float | None = None) -> list[list[str]]:
+    """PDF → список страниц, каждая — список физических строк в порядке документа.
+
+    Постраничная раскладка нужна извлечению: одинокий результат на отдельной странице
+    (напр. С-реактивный белок без заголовка) теряется, если все страницы свалить в один
+    LLM-вызов вместе с большой таблицей. Постранично модель фокусируется на одной странице.
+    """
     tol = TEXT_LAYER_Y_TOLERANCE if y_tol is None else y_tol
-    out: list[str] = []
+    pages: list[list[str]] = []
     with pymupdf.open(str(path)) as doc:
         for page in doc:
-            out.extend(_page_lines(page, tol))
-    return out
+            pages.append(_page_lines(page, tol))
+    return pages
+
+
+def reconstruct_lines(path: Path, y_tol: float | None = None) -> list[str]:
+    """Все страницы PDF → плоский список физических строк в порядке документа."""
+    return [ln for page in reconstruct_pages(path, y_tol) for ln in page]
 
 
 def source_text(path: Path) -> str:
