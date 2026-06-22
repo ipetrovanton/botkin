@@ -109,3 +109,9 @@ def test_loader_reads_packaged_registry():
     n = load_default()
     assert n.correct("Гемоглобин").canonical is not None
     assert n.correct("Глюкоза").status == "matched"
+
+
+def test_load_default_caches_registry():
+    # Реестр (~6 тыс. записей) не должен перечитываться на каждый вызов.
+    from botkin.normalize.analytes import load_default
+    assert load_default() is load_default()

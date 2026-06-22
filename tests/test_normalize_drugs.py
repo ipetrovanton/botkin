@@ -68,3 +68,9 @@ def test_loader_reads_packaged_registry():
     assert n.correct("элкап").canonical == "Элькар"
     assert n.correct("Глиалатин").canonical == "Глиатилин"
     assert n.correct("элкап").mnn == "Левокарнитин"
+
+
+def test_load_default_caches_registry():
+    # Словарь ГРЛС (~21 тыс. названий) грузится один раз, а не на каждый вызов.
+    from botkin.normalize.drugs import load_default
+    assert load_default() is load_default()

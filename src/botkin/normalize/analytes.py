@@ -9,16 +9,14 @@
 """
 from __future__ import annotations
 
-import json
-import math
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
-from rapidfuzz import distance, fuzz, process
-
 from botkin.config import ANALYTE_MAX_EDIT_RATIO, ANALYTE_RATIO_FLOOR
+from botkin.normalize.base import BaseNormalizer, normalize_name, read_registry
 
 _REGISTRY_PATH = Path(__file__).parent.parent / "reference" / "analytes" / "registry.jsonl"
 _SHORT_KEY_LEN = 3  # ключи такой длины и короче требуют точного совпадения
@@ -59,7 +57,7 @@ _CBC_ALL = _CBC_CORE | frozenset({
 
 def _clean_analyte_name(name: str) -> str:
     """Нормализует имя показателя и снимает квалификаторы («MCHC (…)» → «mchc»)."""
-    return _strip_qualifiers(_normalize_name(name))
+    return _strip_qualifiers(normalize_name(name))
 
 
 def is_cbc_analyte(name: str | None) -> bool:
@@ -98,10 +96,6 @@ def summary_title(
     return fallback
 
 
-def _normalize_name(name: str) -> str:
-    return " ".join(name.strip().lower().replace("ё", "е").split())
-
-
 # Квалификаторы, которые модель/бланк дописывают к названию показателя и которые сбивают
 # матч: скобочные пояснения «(общ.число)» и хвосты «, %» / «, абс.» / «, отн.».
 _PARENS_RE = re.compile(r"\([^)]*\)")
@@ -118,13 +112,7 @@ def _strip_qualifiers(query: str) -> str:
     return " ".join(s.split()).strip(" ,")
 
 
-def _unverified(raw: str, dist: int | None = None, ratio: float = 0.0) -> AnalyteMatch:
-    return AnalyteMatch(raw=raw, canonical=None, loinc=None, nmu=None, group=None,
-                        expected_units=(), status="unverified", match_status=None,
-                        distance=dist, ratio=ratio)
-
-
-class AnalyteNormalizer:
+class AnalyteNormalizer(BaseNormalizer):
     """Сверяет распознанные названия анализов со справочником ФСЛИ через RapidFuzz."""
 
     def __init__(
@@ -133,26 +121,42 @@ class AnalyteNormalizer:
         max_edit_ratio: float = ANALYTE_MAX_EDIT_RATIO,
         ratio_floor: float = ANALYTE_RATIO_FLOOR,
     ):
-        self._max_edit_ratio = max_edit_ratio
-        self._ratio_floor = ratio_floor
-        # Поисковый ключ → каноничная запись. Канонические имена имеют ПРИОРИТЕТ над
-        # синонимами: иначе чужой синоним «крадёт» ключ (напр. «тромбоциты» как синоним
-        # CD31+клетки перебивал показатель «Тромбоциты»). Два прохода: сначала имена
-        # (первый победитель среди имён), затем синонимы — только на свободные ключи.
-        records = list(records)
-        self._by_key: dict[str, dict] = {}
+        super().__init__(records, max_edit_ratio, ratio_floor)
+
+    def _build_index(self, records: list[dict]) -> dict[str, dict]:
+        # Канонические имена имеют приоритет над синонимами: иначе чужой синоним «крадёт»
+        # ключ (например «тромбоциты» как синоним CD31+клетки перебивал показатель
+        # «Тромбоциты»). Два прохода: сначала имена, затем синонимы на свободные ключи.
+        by_key: dict[str, dict] = {}
         for record in records:
-            key = _normalize_name(record.get("name") or "")
-            if key and key not in self._by_key:
-                self._by_key[key] = record
+            key = normalize_name(record.get("name") or "")
+            if key and key not in by_key:
+                by_key[key] = record
         for record in records:
             for syn in record.get("synonyms", []):
-                key = _normalize_name(syn or "")
-                if key and key not in self._by_key:
-                    self._by_key[key] = record
-        self._choices: list[str] = list(self._by_key)
+                key = normalize_name(syn or "")
+                if key and key not in by_key:
+                    by_key[key] = record
+        return by_key
 
-    def _result(self, raw_name: str, record: dict, dist: int, ratio: float) -> AnalyteMatch:
+    def _prepare_query(self, raw_name: str) -> str:
+        query = normalize_name(raw_name)
+        # Отсекаем квалификаторы («, %», «, абс.», «(...)») — модель часто их дописывает.
+        # Но если в остатке лишь аббревиатура (≤3), откатываемся к оригиналу: голый «mcv»
+        # точно совпал бы со случайным синонимом, а полная строка честно уйдёт в unverified.
+        stripped = _strip_qualifiers(query)
+        return stripped if len(stripped) > _SHORT_KEY_LEN else query
+
+    def _short_circuit(self, query: str, raw_name: str) -> AnalyteMatch | None:
+        # Короткие ключи (аббревиатуры) — только точное совпадение, фаззи на них даёт мусор.
+        if len(query) <= _SHORT_KEY_LEN:
+            record = self._by_key.get(query)
+            if record is not None:
+                return self._matched(raw_name, record, 0, 100.0)
+            return self._unverified(raw_name)
+        return None
+
+    def _matched(self, raw_name: str, record: dict, dist: int, ratio: float) -> AnalyteMatch:
         return AnalyteMatch(
             raw=raw_name,
             canonical=record["name"],   # ANALYTE — чистое имя без биоматериала
@@ -166,54 +170,13 @@ class AnalyteNormalizer:
             ratio=ratio,
         )
 
-    def correct(self, raw_name: str) -> AnalyteMatch:
-        query = _normalize_name(raw_name)
-        # Отсекаем квалификаторы («, %», «, абс.», «(...)») — модель часто их дописывает.
-        # Но если в остатке лишь аббревиатура (≤3), откатываемся к оригиналу: голый «mcv»
-        # точно совпал бы со случайным синонимом, а полная строка честно уйдёт в unverified.
-        stripped = _strip_qualifiers(query)
-        if len(stripped) > _SHORT_KEY_LEN:
-            query = stripped
-        if not query or not self._choices:
-            return _unverified(raw_name)
-
-        # Короткие ключи (аббревиатуры) — только точное совпадение.
-        if len(query) <= _SHORT_KEY_LEN:
-            record = self._by_key.get(query)
-            if record is not None:
-                return self._result(raw_name, record, 0, 100.0)
-            return _unverified(raw_name)
-
-        cap = max(1, math.floor(len(query) * self._max_edit_ratio))
-        best = process.extractOne(
-            query, self._choices,
-            scorer=distance.DamerauLevenshtein.distance,
-            score_cutoff=cap,
-        )
-        if best is None:
-            return _unverified(raw_name)
-
-        matched_key, dist, _ = best
-        ratio = fuzz.ratio(query, matched_key)
-        if ratio < self._ratio_floor:
-            return _unverified(raw_name, dist=int(dist), ratio=ratio)
-        return self._result(raw_name, self._by_key[matched_key], int(dist), ratio)
+    def _unverified(self, raw_name: str, dist: int | None = None, ratio: float = 0.0) -> AnalyteMatch:
+        return AnalyteMatch(raw=raw_name, canonical=None, loinc=None, nmu=None, group=None,
+                            expected_units=(), status="unverified", match_status=None,
+                            distance=dist, ratio=ratio)
 
 
-def _read_registry(path: Path = _REGISTRY_PATH) -> list[dict]:
-    if not path.exists():
-        return []
-    records: list[dict] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        obj = json.loads(line)
-        if "_meta" in obj:
-            continue
-        records.append(obj)
-    return records
-
-
+@lru_cache(maxsize=1)
 def load_default() -> AnalyteNormalizer:
-    return AnalyteNormalizer(_read_registry())
+    """Нормализатор из упакованного registry.jsonl. Кэшируется: реестр ФСЛИ читается раз."""
+    return AnalyteNormalizer(read_registry(_REGISTRY_PATH))

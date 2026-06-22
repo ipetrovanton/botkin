@@ -12,16 +12,14 @@ Scorer выбран по замеру на словаре 20 948 названи�
 """
 from __future__ import annotations
 
-import json
-import math
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
-from rapidfuzz import distance, fuzz, process
-
 from botkin.config import DRUG_MAX_EDIT_RATIO, DRUG_RATIO_FLOOR
+from botkin.normalize.base import BaseNormalizer, read_registry
 
 _REGISTRY_PATH = Path(__file__).parent.parent / "reference" / "drugs" / "registry.jsonl"
 # Хвост свободного текста: всё с первой цифры или разделителя дозы/формы.
@@ -42,17 +40,7 @@ class DrugMatch:
     ratio: float                      # fuzz.ratio к кандидату (0–100)
 
 
-def _normalize_name(name: str) -> str:
-    """lower, ё→е, схлопывание пробелов — для устойчивого матчинга."""
-    return " ".join(name.strip().lower().replace("ё", "е").split())
-
-
-def _unverified(raw: str, dist: int | None = None, ratio: float = 0.0) -> DrugMatch:
-    return DrugMatch(raw=raw, canonical=None, type=None, mnn=None, statuses=(),
-                     reg_numbers=(), status="unverified", distance=dist, ratio=ratio)
-
-
-class DrugNormalizer:
+class DrugNormalizer(BaseNormalizer):
     """Сверяет распознанные названия лекарств со структурным справочником через RapidFuzz."""
 
     def __init__(
@@ -61,37 +49,9 @@ class DrugNormalizer:
         max_edit_ratio: float = DRUG_MAX_EDIT_RATIO,
         ratio_floor: float = DRUG_RATIO_FLOOR,
     ):
-        self._max_edit_ratio = max_edit_ratio
-        self._ratio_floor = ratio_floor
-        # Карта: нормализованное имя → запись справочника.
-        self._by_key: dict[str, dict] = {}
-        for record in records:
-            key = _normalize_name(record["name"])
-            if key and key not in self._by_key:
-                self._by_key[key] = record
-        self._choices: list[str] = list(self._by_key)
+        super().__init__(records, max_edit_ratio, ratio_floor)
 
-    def correct(self, raw_name: str) -> DrugMatch:
-        query = _normalize_name(raw_name)
-        if not query or not self._choices:
-            return _unverified(raw_name)
-
-        # Лимит правок зависит от длины: короткие имена строже (меньше ложных снапов).
-        cap = max(1, math.floor(len(query) * self._max_edit_ratio))
-        best = process.extractOne(
-            query, self._choices,
-            scorer=distance.DamerauLevenshtein.distance,
-            score_cutoff=cap,   # для distance-scorer это МАКСимально допустимое расстояние
-        )
-        if best is None:
-            return _unverified(raw_name)
-
-        matched_key, dist, _ = best
-        ratio = fuzz.ratio(query, matched_key)
-        if ratio < self._ratio_floor:
-            return _unverified(raw_name, dist=int(dist), ratio=ratio)
-
-        record = self._by_key[matched_key]
+    def _matched(self, raw_name: str, record: dict, dist: int, ratio: float) -> DrugMatch:
         return DrugMatch(
             raw=raw_name,
             canonical=record["name"],
@@ -100,9 +60,13 @@ class DrugNormalizer:
             statuses=tuple(record.get("statuses", ())),
             reg_numbers=tuple(record.get("reg_numbers", ())),
             status="matched",
-            distance=int(dist),
+            distance=dist,
             ratio=ratio,
         )
+
+    def _unverified(self, raw_name: str, dist: int | None = None, ratio: float = 0.0) -> DrugMatch:
+        return DrugMatch(raw=raw_name, canonical=None, type=None, mnn=None, statuses=(),
+                         reg_numbers=(), status="unverified", distance=dist, ratio=ratio)
 
     def correct_free_text(self, line: str) -> DrugMatch:
         """Best-effort для строк с дозой/формой (doctor_report.medications).
@@ -112,7 +76,7 @@ class DrugNormalizer:
         """
         head = _DOSE_TAIL_RE.split(line, maxsplit=1)[0].strip()
         if not head:
-            return _unverified(line)
+            return self._unverified(line)
         match = self.correct(head)
         if match.status == "unverified" and " " in head:
             match = self.correct(head.split()[0])
@@ -124,21 +88,7 @@ class DrugNormalizer:
         )
 
 
-def _read_registry(path: Path = _REGISTRY_PATH) -> list[dict]:
-    if not path.exists():
-        return []
-    records: list[dict] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        obj = json.loads(line)
-        if "_meta" in obj:   # первая строка — метаданные источника
-            continue
-        records.append(obj)
-    return records
-
-
+@lru_cache(maxsize=1)
 def load_default() -> DrugNormalizer:
-    """Создаёт нормализатор из упакованного registry.jsonl и параметров из config."""
-    return DrugNormalizer(_read_registry())
+    """Нормализатор из упакованного registry.jsonl. Кэшируется: словарь ГРЛС читается раз."""
+    return DrugNormalizer(read_registry(_REGISTRY_PATH))
