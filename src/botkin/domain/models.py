@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from botkin.normalize.dates import parse_date as _parse_date
 
-# ── Типы ──────────────────────────────────────────────────────────────────────
+# Типы
 
 DocType = Literal["analysis", "doctor_report", "certificate", "unknown"]
 # Должен совпадать с CHECK(status IN ...) в schema.sql. recognizing/normalizing —
@@ -24,7 +24,7 @@ DOC_TYPE_LABELS: dict[str, str] = {
     "unknown": "Документ 📄",
 }
 
-# ── Парсинг русских дат ───────────────────────────────────────────────────────
+# Парсинг русских дат
 
 
 def parse_ru_date(value: str | datetime | None) -> datetime | None:
@@ -33,7 +33,7 @@ def parse_ru_date(value: str | datetime | None) -> datetime | None:
     return dt
 
 
-# ── Модели ────────────────────────────────────────────────────────────────────
+# Модели
 
 
 class LabResult(BaseModel):

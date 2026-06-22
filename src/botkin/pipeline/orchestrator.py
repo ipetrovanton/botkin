@@ -84,11 +84,11 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
         IMAGE_EXTRACT_LONG_SIDE, IMAGE_CLASSIFY_LONG_SIDE, PDF_RENDER_DPI,
     )
 
-    # ── 1. Статус: распознавание ───────────────────────────────────────────
+    # 1. Статус: распознавание
     with get_conn() as conn:
         DocumentRepo(conn, user_id).set_status(document_id, "recognizing")
 
-    # ── 2. Classify (VLM) ──────────────────────────────────────────────────
+    # 2. Classify (VLM)
     async with LLM_SEMAPHORE:
         try:
             result = await asyncio.to_thread(classify.run_vlm, source_path)
@@ -106,11 +106,11 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
         repo.set_doc_type(document_id, doc_type)
         repo.set_metadata(document_id, result.title, result.clinic)
 
-    # ── Статус: нормализация (извлечение деталей + нормализация) ────────────
+    # Статус: нормализация (извлечение деталей + нормализация)
     with get_conn() as conn:
         DocumentRepo(conn, user_id).set_status(document_id, "normalizing")
 
-    # ── 3. Extract (VLM) ───────────────────────────────────────────────────
+    # 3. Extract (VLM)
     async with LLM_SEMAPHORE:
         try:
             handler = _EXTRACTORS.get(doc_type)
@@ -124,7 +124,7 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
             await notify_user(telegram_user_id, extract_failed(document_id))
             return
 
-    # ── 4. Финал ───────────────────────────────────────────────────────────
+    # 4. Финал
     with get_conn() as conn:
         DocumentRepo(conn, user_id).set_status(document_id, "extracted")
     log.info("Doc %d processed", document_id)
@@ -137,7 +137,7 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
         await notify_user(telegram_user_id, document_processed(document_id, doc_type))
 
 
-# ── Обработчики по типу документа ───────────────────────────────────────────────
+# Обработчики по типу документа.
 # Добавить тип = добавить async-обработчик и строку в _EXTRACTORS, не трогая _run.
 # Незнакомый тип extract пропускает (файл уже сохранён).
 
@@ -180,7 +180,7 @@ _EXTRACTORS = {
 }
 
 
-# ── Хелперы ────────────────────────────────────────────────────────────────────
+# Хелперы
 
 def _mark_failed(document_id: int) -> None:
     # Без user_id: вызывается в т.ч. из глобального обработчика, который ловит сбой ещё
@@ -199,7 +199,7 @@ def _save_raw_extraction(document_id: int, items: list) -> None:
         conn.commit()
 
 
-# ── Persist ────────────────────────────────────────────────────────────────────
+# Persist
 
 def _persist_lab(document_id: int, user_id: int, items: list[LabResult]) -> list:
     """Нормализует и сохраняет показатели; возвращает список AnalyteMatch (для заголовка)."""
