@@ -57,10 +57,10 @@ async def process_document(document_id: int, telegram_user_id: int) -> None:
     """Полный pipeline: classify → extract → persist. Точка входа из API."""
     try:
         await _run(document_id, telegram_user_id)
-    except Exception as e:
+    except Exception:
         log.exception("Global pipeline failure for %d", document_id)
         _mark_failed(document_id)
-        await notify_user(telegram_user_id, pipeline_failed(document_id, str(e)))
+        await notify_user(telegram_user_id, pipeline_failed(document_id))
 
 
 async def _run(document_id: int, telegram_user_id: int) -> None:
@@ -95,8 +95,9 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
                 None, classify.run_vlm, source_path,
             )
         except ClassificationError as e:
+            log.error("Doc %d: сбой классификации: %s", document_id, e)
             _mark_failed(document_id)
-            await notify_user(telegram_user_id, classify_failed(document_id, str(e)))
+            await notify_user(telegram_user_id, classify_failed(document_id))
             return
 
     doc_type = result.doc_type
@@ -148,8 +149,9 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
                 log.info("Doc %d type=%s — extract пропускаем", document_id, doc_type)
 
         except ExtractionError as e:
+            log.error("Doc %d: сбой извлечения: %s", document_id, e)
             _mark_failed(document_id)
-            await notify_user(telegram_user_id, extract_failed(document_id, str(e)))
+            await notify_user(telegram_user_id, extract_failed(document_id))
             return
 
     # ── 4. Финал ───────────────────────────────────────────────────────────

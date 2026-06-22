@@ -11,7 +11,11 @@ from botkin.normalize.dates import parse_date as _parse_date
 # ── Типы ──────────────────────────────────────────────────────────────────────
 
 DocType = Literal["analysis", "doctor_report", "certificate", "unknown"]
-DocStatus = Literal["received", "processing", "extracted", "failed"]
+# Должен совпадать с CHECK(status IN ...) в schema.sql. recognizing/normalizing —
+# стадии, которые проставляет pipeline; processing остаётся для legacy-строк.
+DocStatus = Literal[
+    "received", "processing", "recognizing", "normalizing", "extracted", "failed",
+]
 
 DOC_TYPE_LABELS: dict[str, str] = {
     "analysis": "Анализы 🧪",

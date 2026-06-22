@@ -25,19 +25,27 @@ async def notify_user(telegram_user_id: int, text: str) -> None:
         log.error("Failed to send Telegram notification to %d: %s", telegram_user_id, e)
 
 
-def classify_failed(document_id: int, error: str) -> str:
-    return f"❌ <b>Сбой классификации</b> для документа #{document_id}.\nОшибка: {error}"
+# Детали ошибки (трейсбек, пути, имена внутренних исключений) пользователю не показываем —
+# это медицинский продукт, наружу только понятный статус. Диагностика остаётся в логах.
 
-
-def extract_failed(document_id: int, error: str) -> str:
-    return f"❌ <b>Сбой извлечения данных</b> для документа #{document_id}.\nОшибка: {error}"
-
-
-def pipeline_failed(document_id: int, error: str) -> str:
+def classify_failed(document_id: int) -> str:
     return (
-        f"❌ <b>Системная ошибка обработки</b> для документа #{document_id}.\n"
-        f"Пожалуйста, обратитесь к администратору или попробуйте еще раз.\n"
-        f"Ошибка: {error}"
+        f"❌ <b>Не удалось распознать документ</b> #{document_id}.\n"
+        f"Попробуйте загрузить более чёткое фото или скан."
+    )
+
+
+def extract_failed(document_id: int) -> str:
+    return (
+        f"❌ <b>Не удалось извлечь данные</b> из документа #{document_id}.\n"
+        f"Попробуйте загрузить более чёткое фото или скан."
+    )
+
+
+def pipeline_failed(document_id: int) -> str:
+    return (
+        f"❌ <b>Ошибка обработки</b> документа #{document_id}.\n"
+        f"Попробуйте ещё раз или обратитесь к администратору."
     )
 
 

@@ -121,6 +121,15 @@ def test_domain_models():
     lab2 = LabResult(analyte_name="Гемоглобин", value_num=145.0, value_raw="145", unit_raw="g/l", taken_at_raw="23.03.2026")
     assert lab2.value_raw == "145"
 
+
+def test_doc_status_covers_pipeline_stages():
+    """DocStatus принимает все статусы, которые реально проставляет pipeline."""
+    from botkin.domain.models import UploadResponse
+
+    # recognizing/normalizing пишутся в orchestrator и разрешены схемой — тип обязан их знать.
+    for status in ("received", "recognizing", "normalizing", "extracted", "failed"):
+        assert UploadResponse(document_id=1, status=status).status == status
+
 def test_show_attaches_nav_keyboard():
     from botkin.bot.keyboards import card_keyboard
     kb = card_keyboard(doc_id=1, has_prev=False, has_next=False)

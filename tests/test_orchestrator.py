@@ -120,6 +120,29 @@ def test_persist_lab_overrides_cbc_group(set_test_db, monkeypatch):
     assert [r["analyte_group"] for r in rows] == ["Гематологические исследования"] * 4
 
 
+def test_pipeline_failure_does_not_leak_error_to_user(set_test_db, monkeypatch):
+    """Внутренний текст ошибки classify/extract не уходит пользователю в Telegram."""
+    from botkin.exceptions import ClassificationError
+    from botkin.pipeline import orchestrator
+
+    monkeypatch.setattr(orchestrator, "DELIVERY_FALLBACK_DELAY", 0.0)
+    uid, did = _make_doc()
+
+    sent: list[str] = []
+
+    async def capture(_uid, text):
+        sent.append(text)
+
+    secret = "KeyError /opt/botkin/secret.py:42"
+    with patch.object(orchestrator.classify, "run_vlm",
+                      side_effect=ClassificationError(secret)), \
+         patch("botkin.pipeline.orchestrator.notify_user", side_effect=capture):
+        asyncio.run(orchestrator.process_document(did, 777))
+
+    assert sent  # пользователь получил уведомление о сбое
+    assert secret not in " ".join(sent)  # но без внутренних деталей
+
+
 def test_persist_lab_is_atomic_on_midway_failure(set_test_db, monkeypatch):
     """Сбой на середине панели откатывает всю вставку — частичной панели в БД не остаётся."""
     import pytest
