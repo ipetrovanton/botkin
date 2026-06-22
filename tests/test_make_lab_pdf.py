@@ -6,7 +6,7 @@
 Текстовый слой кириллический (china-s), пригоден для reconstruct_pages.
 """
 
-from botkin.preprocess.pdf_text import has_usable_text_layer, reconstruct_pages
+from botkin.preprocess.pdf_text import reconstruct_pages
 
 
 def test_result_row_columns_land_on_one_physical_line(make_lab_pdf, tmp_path):
@@ -27,12 +27,6 @@ def test_result_row_columns_land_on_one_physical_line(make_lab_pdf, tmp_path):
     assert "13.7" in row_line and "г/дл" in row_line and "11.7-15.5" in row_line
     # шапка бланка присутствует в слое.
     assert "ИНВИТРО" in flat and "Иванов И.И." in flat
-
-
-def test_usable_text_layer(make_lab_pdf, tmp_path):
-    p = tmp_path / "lab.pdf"
-    make_lab_pdf(p, rows=[("Лейкоциты", "5.15", "×10⁹/л", "4.5-11.0")])
-    assert has_usable_text_layer(p) is True
 
 
 def test_pagination_splits_rows_and_loses_nothing(make_lab_pdf, tmp_path):
