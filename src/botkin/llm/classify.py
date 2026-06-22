@@ -12,7 +12,7 @@ from botkin.config import (
 from botkin.domain.models import ClassifyResult, DocType
 from botkin.exceptions import ClassificationError
 from botkin.llm.client import get_client, default_options, usage_of
-from botkin.llm.prompts import CLASSIFY_VLM_SYSTEM
+from botkin.llm.prompts import CLASSIFY_INSTRUCTION, CLASSIFY_VLM_SYSTEM, PROMPTS_VERSION
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
 
 log = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ def run_vlm(source_path: Path) -> ClassifyResult:
     client = get_client(temperature=VLM_TEMPERATURE, mode=instructor.Mode.JSON)
 
     content = [
-        {"type": "text", "text": "Classify this medical document image."},
+        {"type": "text", "text": CLASSIFY_INSTRUCTION},
         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64[0]}"}},
     ]
     messages = [
@@ -55,9 +55,9 @@ def run_vlm(source_path: Path) -> ClassifyResult:
         elapsed = time.perf_counter() - t0
         prompt_tokens, completion_tokens = usage_of(response)
         log.info(
-            "[SUCCESS_CLASSIFY] Doc: '%s' | Result: '%s' (conf=%.2f) | Elapsed: %.2fs | "
-            "Prompt: %d t | Completion: %d t",
-            source_path.name, response.doc_type, response.confidence,
+            "[SUCCESS_CLASSIFY] Doc: '%s' | Result: '%s' (conf=%.2f) | Промпты: %s | "
+            "Elapsed: %.2fs | Prompt: %d t | Completion: %d t",
+            source_path.name, response.doc_type, response.confidence, PROMPTS_VERSION,
             elapsed, prompt_tokens, completion_tokens,
         )
         return ClassifyResult(

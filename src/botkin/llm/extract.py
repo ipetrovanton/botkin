@@ -19,7 +19,10 @@ from botkin.config import (
 from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ExtractionError
 from botkin.llm.client import get_client, default_options, usage_of
-from botkin.llm.prompts import ANALYSIS_VLM_SYSTEM, DOCTOR_REPORT_VLM_SYSTEM, ANALYSIS_TEXT_SYSTEM
+from botkin.llm.prompts import (
+    ANALYSIS_INSTRUCTION, ANALYSIS_TEXT_SYSTEM, ANALYSIS_VLM_SYSTEM,
+    DOCTOR_REPORT_INSTRUCTION, DOCTOR_REPORT_VLM_SYSTEM, PROMPTS_VERSION, TEXT_INSTRUCTION,
+)
 from botkin.parsing.harvester import (
     _collect_tables, harvest_lab_rows, loads_json, salvage_json_objects,
 )
@@ -120,9 +123,10 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
         n_parsed = _count_rows(response)
         tok_s = completion_tokens / elapsed if elapsed > 0 else 0.0
         log.info(
-            "[SUCCESS_EXTRACT] Doc: '%s' | Type: '%s' | Elapsed: %.2fs | "
+            "[SUCCESS_EXTRACT] Doc: '%s' | Type: '%s' | Промпты: %s | Elapsed: %.2fs | "
             "Prompt: %d t | Completion: %d t | %.1f tok/s | Распознано строк: %d",
-            doc_name, doc_type, elapsed, prompt_tokens, completion_tokens, tok_s, n_parsed,
+            doc_name, doc_type, PROMPTS_VERSION, elapsed,
+            prompt_tokens, completion_tokens, tok_s, n_parsed,
         )
         # Сырой ответ модели — на DEBUG (может быть объёмным). При n_parsed==0 поднимаем до WARNING:
         # это и есть «извлечение вернуло пусто» — самое нужное для диагностики место.
@@ -156,12 +160,9 @@ def _raw_text_from_exc(exc: Exception) -> str:
         return ""
 
 
-_ANALYSIS_INSTRUCTION = "Extract lab results from these document images."
-
-
 def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult], int]:
     """Один VLM-вызов по набору изображений + гибридный разбор → (строки, число исследований)."""
-    messages = _messages_from_images(ANALYSIS_VLM_SYSTEM, _ANALYSIS_INSTRUCTION, b64_images)
+    messages = _messages_from_images(ANALYSIS_VLM_SYSTEM, ANALYSIS_INSTRUCTION, b64_images)
     try:
         raw = _call_vlm(messages, RawAnalysis, doc_name, "analysis")
     except ExtractionError as e:
@@ -187,9 +188,6 @@ def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult]
     return rows, (len(tables) or tables_struct)
 
 
-_TEXT_INSTRUCTION = "Размести эти строки лабораторного бланка по колонкам."
-
-
 def _messages_from_text(system_prompt: str, instruction: str, text: str) -> list[dict]:
     return [
         {"role": "system", "content": system_prompt},
@@ -206,7 +204,7 @@ def _call_text(messages: list[dict], doc_name: str) -> RawAnalysis:
 def _structure_text(lines: list[str], doc_name: str) -> list[LabResult]:
     """Координатные строки → LabResult через text-only LLM (temp=0) + маппинг."""
     text = "\n".join(lines)
-    messages = _messages_from_text(ANALYSIS_TEXT_SYSTEM, _TEXT_INSTRUCTION, text)
+    messages = _messages_from_text(ANALYSIS_TEXT_SYSTEM, TEXT_INSTRUCTION, text)
     try:
         raw = _call_text(messages, doc_name)
     except ExtractionError as e:
@@ -329,5 +327,5 @@ def run_analysis(source_path: Path) -> list[LabResult]:
 
 
 def run_doctor_report(source_path: Path) -> list[DoctorReport]:
-    messages = _build_messages(DOCTOR_REPORT_VLM_SYSTEM, "Extract doctor reports from these document images.", source_path)
+    messages = _build_messages(DOCTOR_REPORT_VLM_SYSTEM, DOCTOR_REPORT_INSTRUCTION, source_path)
     return _call_vlm(messages, DoctorReports, source_path.name, "doctor_report").results

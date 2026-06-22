@@ -90,6 +90,30 @@ def test_extract_survives_missing_usage(tmp_path):
     assert items and items[0].analyte_name == "Гемоглобин"
 
 
+def test_extract_logs_prompt_version(tmp_path, caplog):
+    """Версия промптов попадает в лог успешного извлечения — для воспроизводимости."""
+    import logging
+
+    from botkin.llm import extract
+    from botkin.llm.extract import RawAnalysis
+    from botkin.llm.prompts import PROMPTS_VERSION
+
+    raw = RawAnalysis.model_validate({
+        "results": [{"parameter": "Гемоглобин", "value": "145", "unit": "г/л"}],
+    })
+    object.__setattr__(raw, "_raw_response",
+                       MagicMock(usage=MagicMock(prompt_tokens=10, completion_tokens=5)))
+    fake = MagicMock()
+    fake.chat.completions.create.return_value = raw
+
+    with patch("botkin.llm.extract.get_client", return_value=fake), \
+         patch("botkin.llm.extract.prepare_images", return_value=[b"\xff\xd8fakejpeg"]), \
+         caplog.at_level(logging.INFO):
+        extract.run_analysis(_tiny_pdf(tmp_path))
+
+    assert any(PROMPTS_VERSION in r.getMessage() for r in caplog.records)
+
+
 def test_extract_analysis_mocked(tmp_path):
     from botkin.llm import extract
     from botkin.llm.extract import RawAnalysis

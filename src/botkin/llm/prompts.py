@@ -1,4 +1,19 @@
-"""Промпты для классификации и извлечения данных через VLM (qwen3-vl:8b-instruct)."""
+"""Промпты для классификации и извлечения данных через VLM (qwen3-vl:8b-instruct).
+
+PROMPTS_VERSION логируется рядом с результатом каждого вызова. Поднимай его при ЛЮБОМ
+изменении текста промптов ниже — иначе по логам не отличить регрессию промпта от
+регрессии модели после апгрейда Ollama. Формат — дата правки.
+"""
+
+PROMPTS_VERSION = "2026-06-22"
+
+# Короткие user-инструкции к системным промптам (системный текст несёт всю логику,
+# инструкция лишь задаёт задачу конкретного вызова). Держим рядом с промптами, а не
+# раскиданными по extract.py/classify.py.
+CLASSIFY_INSTRUCTION = "Classify this medical document image."
+ANALYSIS_INSTRUCTION = "Extract lab results from these document images."
+DOCTOR_REPORT_INSTRUCTION = "Extract doctor reports from these document images."
+TEXT_INSTRUCTION = "Размести эти строки лабораторного бланка по колонкам."
 
 CLASSIFY_VLM_SYSTEM = """Ты — точный классификатор медицинских документов. Определи тип документа по изображению.
 
