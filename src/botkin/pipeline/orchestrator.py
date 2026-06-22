@@ -91,9 +91,7 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
     # ── 2. Classify (VLM) ──────────────────────────────────────────────────
     async with LLM_SEMAPHORE:
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, classify.run_vlm, source_path,
-            )
+            result = await asyncio.to_thread(classify.run_vlm, source_path)
         except ClassificationError as e:
             log.error("Doc %d: сбой классификации: %s", document_id, e)
             _mark_failed(document_id)
@@ -116,9 +114,7 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
     async with LLM_SEMAPHORE:
         try:
             if doc_type == "analysis":
-                items: list[LabResult] = await asyncio.get_event_loop().run_in_executor(
-                    None, extract.run_analysis, source_path,
-                )
+                items: list[LabResult] = await asyncio.to_thread(extract.run_analysis, source_path)
                 log.info("Doc %d: извлечено строк анализов=%d", document_id, len(items))
                 _save_raw_extraction(document_id, items)
                 matches = _persist_lab(document_id, user_id, items)
@@ -139,9 +135,7 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
                     log.info("Doc %d: заголовок обобщён → '%s'", document_id, title)
 
             elif doc_type == "doctor_report":
-                items: list[DoctorReport] = await asyncio.get_event_loop().run_in_executor(
-                    None, extract.run_doctor_report, source_path,
-                )
+                items: list[DoctorReport] = await asyncio.to_thread(extract.run_doctor_report, source_path)
                 _save_raw_extraction(document_id, items)
                 _persist_doctor_report(document_id, user_id, items)
 

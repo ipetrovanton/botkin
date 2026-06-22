@@ -119,8 +119,7 @@ def _process(img: Image.Image, long_side: int, upscale: bool, deskew: bool, enha
 
 def _pdf_pages(path: Path, long_side: int, upscale: bool, enhance: bool) -> list[bytes]:
     out: list[bytes] = []
-    doc = pymupdf.open(str(path))
-    try:
+    with pymupdf.open(str(path)) as doc:
         log.info("[PDF] %s: страниц в документе=%d | рендер до %d @ %d dpi",
                  path.name, doc.page_count, MAX_PAGES, PDF_RENDER_DPI)
         for index, page in enumerate(doc):
@@ -133,8 +132,6 @@ def _pdf_pages(path: Path, long_side: int, upscale: bool, enhance: bool) -> list
             log.info("[PDF] %s стр.%d: рендер %dx%d → итог %dx%d px, JPEG %d КБ",
                      path.name, index + 1, pix.width, pix.height, fw, fh, len(jpeg) // 1024)
             out.append(jpeg)
-    finally:
-        doc.close()
     return out
 
 

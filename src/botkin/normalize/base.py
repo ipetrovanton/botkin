@@ -80,6 +80,13 @@ class BaseNormalizer:
         if early is not None:
             return early
 
+        # Точное совпадение минует фаззи-скан по всему словарю: у него расстояние 0, и
+        # extractOne всё равно вернул бы его. Для частого случая «имя как в реестре» —
+        # прямой lookup вместо линейного прохода по десяткам тысяч кандидатов.
+        exact = self._by_key.get(query)
+        if exact is not None:
+            return self._matched(raw_name, exact, 0, 100.0)
+
         # Лимит правок растёт с длиной имени: короткие строки строже, чтобы не снапнуть мусор.
         cap = max(1, math.floor(len(query) * self._max_edit_ratio))
         best = process.extractOne(
