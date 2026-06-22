@@ -100,19 +100,19 @@ async def run_progress_flow(tg_user_id: int, doc_id: int, edit) -> None:
         log.exception("[FLOW_ERROR] Doc %d | сбой в run_progress_flow", doc_id)
 
 
-@router.message(F.photo)
-async def on_photo(message: Message) -> None:
-    photo = message.photo[-1]
-    file_info = await message.bot.get_file(photo.file_id)
-    file_bytes = await message.bot.download_file(file_info.file_path)
-    filename = f"photo_{photo.file_unique_id}.jpg"
+async def _start_upload_flow(
+    message: Message, filename: str, file_bytes: bytes, *, followup: str | None = None,
+) -> None:
+    """Грузит файл на API и запускает фоновый поллинг прогресса. Общий хвост on_photo/on_document.
 
+    followup (подсказка про разрешение для фото) шлём ДО прогресс-сообщения — иначе фоновый
+    таск успевает продвинуть прогресс-бар раньше подсказки.
+    """
     try:
-        result = await _upload_to_api(message.from_user.id, filename, file_bytes.read())
+        result = await _upload_to_api(message.from_user.id, filename, file_bytes)
         doc_id = result["document_id"]
-        # Подсказка/предупреждение о разрешении — ДО прогресс-сообщения и поллинга,
-        # иначе фоновый таск успевает продвинуть прогресс-бар раньше предупреждения.
-        await message.answer(photo_followup_text(photo.width))
+        if followup:
+            await message.answer(followup)
         sent = await message.answer(render_progress("received", doc_id))
 
         async def _edit(text: str):
@@ -128,6 +128,17 @@ async def on_photo(message: Message) -> None:
     except httpx.HTTPStatusError as e:
         log.exception("Upload failed")
         await message.answer(f"❌ Ошибка загрузки: {e.response.status_code}")
+
+
+@router.message(F.photo)
+async def on_photo(message: Message) -> None:
+    photo = message.photo[-1]
+    file_info = await message.bot.get_file(photo.file_id)
+    file_bytes = await message.bot.download_file(file_info.file_path)
+    filename = f"photo_{photo.file_unique_id}.jpg"
+    await _start_upload_flow(
+        message, filename, file_bytes.read(), followup=photo_followup_text(photo.width),
+    )
 
 
 @router.message(F.document)
@@ -145,22 +156,4 @@ async def on_document(message: Message) -> None:
     filename = doc.file_name or f"doc_{doc.file_unique_id}"
     if not Path(filename).suffix and doc.mime_type in _MIME_EXT:
         filename += _MIME_EXT[doc.mime_type]
-
-    try:
-        result = await _upload_to_api(message.from_user.id, filename, file_bytes.read())
-        doc_id = result["document_id"]
-        sent = await message.answer(render_progress("received", doc_id))
-
-        async def _edit(text: str):
-            try:
-                await sent.edit_text(text)
-            except Exception as e:  # noqa: BLE001 — "message is not modified" и пр.
-                if "message is not modified" in str(e).lower():
-                    log.debug("edit skipped (not modified): %s", e)
-                else:
-                    log.warning("[EDIT_FAIL] Doc %d | %d симв. | %s", doc_id, len(text), e)
-
-        asyncio.create_task(run_progress_flow(message.from_user.id, doc_id, _edit))
-    except httpx.HTTPStatusError as e:
-        log.exception("Upload failed")
-        await message.answer(f"❌ Ошибка загрузки: {e.response.status_code}")
+    await _start_upload_flow(message, filename, file_bytes.read())

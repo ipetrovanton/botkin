@@ -9,6 +9,17 @@ TYPE_EMOJI = {"analysis": "🧪", "doctor_report": "👨‍⚕️",
               "certificate": "📄", "unknown": "📄"}
 
 
+def ref_marker(value_num, ref_low, ref_high) -> str:
+    """⬆️/⬇️ если значение вне границ нормы (учитывает односторонние границы), иначе ''."""
+    if value_num is None:
+        return ""
+    if ref_low is not None and value_num < ref_low:
+        return " ⬇️"
+    if ref_high is not None and value_num > ref_high:
+        return " ⬆️"
+    return ""
+
+
 def doc_title(doc: dict) -> str:
     """Название документа: title, иначе лейбл типа."""
     if doc.get("title"):
@@ -50,12 +61,8 @@ def format_labs_summary(groups: list[dict], label: str) -> str:
         unit = html.escape(pts[-1].get("unit") or "")
         trend = " → ".join(str(v) for v in vals)
         last = pts[-1]
-        marker = ""
         lo, hi, v = last.get("ref_low"), last.get("ref_high"), last["value_num"]
-        if hi is not None and v > hi:
-            marker = " ⬆️"
-        elif lo is not None and v < lo:
-            marker = " ⬇️"
+        marker = ref_marker(v, lo, hi)
         norm = ""
         if lo is not None and hi is not None:
             norm = f"  (норма {lo}–{hi})"

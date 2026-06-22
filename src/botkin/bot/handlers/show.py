@@ -6,7 +6,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from botkin.bot.cards import format_card_header
+from botkin.bot.cards import format_card_header, ref_marker
 from botkin.bot.keyboards import card_keyboard
 from botkin.db.queries import (
     get_doctor_reports, get_lab_results, get_last_document, get_user_id,
@@ -62,19 +62,6 @@ def _format_ref(r: dict) -> str:
     return ""
 
 
-def _ref_marker(r: dict) -> str:
-    """⬆️/⬇️ по доступным границам (в т.ч. односторонним)."""
-    v = r.get("value_num")
-    if v is None:
-        return ""
-    low, high = r.get("ref_low"), r.get("ref_high")
-    if low is not None and v < low:
-        return " ⬇️"
-    if high is not None and v > high:
-        return " ⬆️"
-    return ""
-
-
 def _format_labs(rows: list[dict]) -> str:
     lines = []
     for r in rows:
@@ -91,7 +78,7 @@ def _format_labs(rows: list[dict]) -> str:
         ref = _format_ref(r)
         ref = f" ({html.escape(ref)})" if ref else ""
         warn = " ⚠️" if r.get("unit_mismatch") else ""
-        marker = _ref_marker(r)
+        marker = ref_marker(r.get("value_num"), r.get("ref_low"), r.get("ref_high"))
         lines.append(f"{len(lines) + 1}. <b>{name}</b>: {value}{unit}{ref}{marker}{warn}")
     return "\n".join(lines) or "—"
 
