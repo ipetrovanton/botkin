@@ -13,12 +13,12 @@ import instructor
 from pydantic import BaseModel
 
 from botkin.config import (
-    VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_EXTRACT_LONG_SIDE,
+    VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, VLM_MAX_RETRIES, IMAGE_EXTRACT_LONG_SIDE,
     VERBATIM_MAX_REJECT_RATIO,
 )
 from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ExtractionError
-from botkin.llm.client import get_client, default_options
+from botkin.llm.client import get_client, default_options, usage_of
 from botkin.llm.prompts import ANALYSIS_VLM_SYSTEM, DOCTOR_REPORT_VLM_SYSTEM, ANALYSIS_TEXT_SYSTEM
 from botkin.parsing.harvester import (
     _collect_tables, harvest_lab_rows, loads_json, salvage_json_objects,
@@ -111,18 +111,18 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
             model=VLM_MODEL,
             messages=messages,
             response_model=response_model,
-            max_retries=2,
+            max_retries=VLM_MAX_RETRIES,
             max_tokens=VLM_MAX_TOKENS,
             extra_body={"options": options or default_options()},
         )
         elapsed = time.perf_counter() - t0
-        usage = response._raw_response.usage
+        prompt_tokens, completion_tokens = usage_of(response)
         n_parsed = _count_rows(response)
-        tok_s = usage.completion_tokens / elapsed if elapsed > 0 else 0.0
+        tok_s = completion_tokens / elapsed if elapsed > 0 else 0.0
         log.info(
             "[SUCCESS_EXTRACT] Doc: '%s' | Type: '%s' | Elapsed: %.2fs | "
             "Prompt: %d t | Completion: %d t | %.1f tok/s | Распознано строк: %d",
-            doc_name, doc_type, elapsed, usage.prompt_tokens, usage.completion_tokens, tok_s, n_parsed,
+            doc_name, doc_type, elapsed, prompt_tokens, completion_tokens, tok_s, n_parsed,
         )
         # Сырой ответ модели — на DEBUG (может быть объёмным). При n_parsed==0 поднимаем до WARNING:
         # это и есть «извлечение вернуло пусто» — самое нужное для диагностики место.

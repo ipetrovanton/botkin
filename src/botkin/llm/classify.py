@@ -6,10 +6,12 @@ from pathlib import Path
 import instructor
 from pydantic import BaseModel
 
-from botkin.config import VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_CLASSIFY_LONG_SIDE
+from botkin.config import (
+    VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, VLM_MAX_RETRIES, IMAGE_CLASSIFY_LONG_SIDE,
+)
 from botkin.domain.models import ClassifyResult, DocType
 from botkin.exceptions import ClassificationError
-from botkin.llm.client import get_client, default_options
+from botkin.llm.client import get_client, default_options, usage_of
 from botkin.llm.prompts import CLASSIFY_VLM_SYSTEM
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
 
@@ -46,16 +48,17 @@ def run_vlm(source_path: Path) -> ClassifyResult:
             model=VLM_MODEL,
             messages=messages,
             response_model=ClassifySchema,
+            max_retries=VLM_MAX_RETRIES,
             max_tokens=VLM_MAX_TOKENS,
             extra_body={"options": default_options()},
         )
         elapsed = time.perf_counter() - t0
-        usage = response._raw_response.usage
+        prompt_tokens, completion_tokens = usage_of(response)
         log.info(
             "[SUCCESS_CLASSIFY] Doc: '%s' | Result: '%s' (conf=%.2f) | Elapsed: %.2fs | "
             "Prompt: %d t | Completion: %d t",
             source_path.name, response.doc_type, response.confidence,
-            elapsed, usage.prompt_tokens, usage.completion_tokens,
+            elapsed, prompt_tokens, completion_tokens,
         )
         return ClassifyResult(
             doc_type=response.doc_type, confidence=response.confidence,

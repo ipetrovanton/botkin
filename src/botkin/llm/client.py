@@ -25,6 +25,19 @@ def default_options() -> dict:
         "num_predict": VLM_NUM_PREDICT,
     }
 
+
+def usage_of(response) -> tuple[int, int]:
+    """(prompt_tokens, completion_tokens) из ответа instructor; (0, 0) если их нет.
+
+    usage — приватное поле _raw_response и нужно только для лога. Раньше обращение к нему
+    было незащищённым: успешный вызов падал, если usage недоступен (None/другой формат).
+    """
+    try:
+        u = response._raw_response.usage
+        return int(u.prompt_tokens), int(u.completion_tokens)
+    except (AttributeError, TypeError, ValueError):
+        return 0, 0
+
 _ollama_url: str | None = None
 
 

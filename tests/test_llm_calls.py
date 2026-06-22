@@ -49,6 +49,47 @@ def test_classify_uses_small_image_and_mocked_client(tmp_path):
     assert kwargs.get("long_side") == IMAGE_CLASSIFY_LONG_SIDE
 
 
+def test_classify_survives_missing_usage(tmp_path):
+    """Недоступный usage не должен валить успешную классификацию (usage — только для лога)."""
+    from botkin.llm import classify
+
+    resp = MagicMock()
+    resp.doc_type = "analysis"
+    resp.confidence = 0.9
+    resp.title = None
+    resp.clinic = None
+    resp._raw_response.usage = None   # счётчики токенов недоступны
+
+    fake = MagicMock()
+    fake.chat.completions.create.return_value = resp
+
+    with patch("botkin.llm.classify.get_client", return_value=fake), \
+         patch("botkin.llm.classify.prepare_images", return_value=[b"\xff\xd8fakejpeg"]):
+        result = classify.run_vlm(_tiny_pdf(tmp_path))
+
+    assert result.doc_type == "analysis"
+
+
+def test_extract_survives_missing_usage(tmp_path):
+    """Недоступный usage не должен валить успешное извлечение."""
+    from botkin.llm import extract
+    from botkin.llm.extract import RawAnalysis
+
+    raw = RawAnalysis.model_validate({
+        "results": [{"parameter": "Гемоглобин", "value": "145", "unit": "г/л"}],
+    })
+    object.__setattr__(raw, "_raw_response", MagicMock(usage=None))
+
+    fake = MagicMock()
+    fake.chat.completions.create.return_value = raw
+
+    with patch("botkin.llm.extract.get_client", return_value=fake), \
+         patch("botkin.llm.extract.prepare_images", return_value=[b"\xff\xd8fakejpeg"]):
+        items = extract.run_analysis(_tiny_pdf(tmp_path))
+
+    assert items and items[0].analyte_name == "Гемоглобин"
+
+
 def test_extract_analysis_mocked(tmp_path):
     from botkin.llm import extract
     from botkin.llm.extract import RawAnalysis

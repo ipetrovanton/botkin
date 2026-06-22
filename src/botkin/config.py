@@ -112,6 +112,8 @@ VLM_NUM_CTX = int(os.getenv("VLM_NUM_CTX", _get("vlm.num_ctx", _DEFAULTS["vlm"][
 VLM_MAX_TOKENS = int(os.getenv("VLM_MAX_TOKENS", _get("vlm.max_tokens", _DEFAULTS["vlm"]["max_tokens"])))
 VLM_NUM_PREDICT = int(os.getenv("VLM_NUM_PREDICT", _get("vlm.num_predict", _DEFAULTS["vlm"]["num_predict"])))
 VLM_REPEAT_PENALTY = float(os.getenv("VLM_REPEAT_PENALTY", _get("vlm.repeat_penalty", _DEFAULTS["vlm"]["repeat_penalty"])))
+# Сколько раз instructor переспросит модель при невалидном по схеме ответе.
+VLM_MAX_RETRIES = int(os.getenv("VLM_MAX_RETRIES", "2"))
 # Потолок одного VLM-вызова. Деградировавший вызов (генерация дублей) не должен висеть
 # минутами — по таймауту прерываем, страница пропускается, документ сохраняет остальное.
 VLM_REQUEST_TIMEOUT = float(os.getenv("VLM_REQUEST_TIMEOUT", "120"))
