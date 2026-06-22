@@ -8,7 +8,7 @@ from botkin.config import (
     DELIVERY_FALLBACK_DELAY, IMAGE_CLASSIFY_LONG_SIDE, IMAGE_EXTRACT_LONG_SIDE,
     PDF_RENDER_DPI, VLM_MODEL, VLM_NUM_CTX, VLM_NUM_PREDICT, VLM_TEMPERATURE,
 )
-from botkin.db.connection import get_conn
+from botkin.db.connection import get_conn, transaction
 from botkin.db.repos import DocumentRepo
 from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ClassificationError, ExtractionError
@@ -194,7 +194,7 @@ def _persist_lab(document_id: int, user_id: int, items: list[LabResult]) -> list
     # показателя (Гемоглобин/Эритроциты числятся «Химико-микроскопическими»). Опознаём
     # панель один раз по всему документу и проставляем строкам гематологию.
     is_cbc = is_cbc_panel([item.analyte_name for item in items])
-    with get_conn() as conn:
+    with get_conn() as conn, transaction(conn):
         for item in items:
             unit_canon, unit_raw = canonical_unit(item.unit)
             match = normalizer.correct(item.analyte_name)
@@ -234,7 +234,6 @@ def _persist_lab(document_id: int, user_id: int, items: list[LabResult]) -> list
                     "unit_mismatch": unit_mismatch,
                 },
             )
-        conn.commit()
     return matches
 
 
@@ -250,7 +249,7 @@ def _normalize_medications(lines: list[str]) -> str:
 
 
 def _persist_doctor_report(document_id: int, user_id: int, items: list[DoctorReport]) -> None:
-    with get_conn() as conn:
+    with get_conn() as conn, transaction(conn):
         for item in items:
             conn.execute(
                 """INSERT INTO doctor_reports(document_id, user_id, diagnosis,
@@ -272,4 +271,3 @@ def _persist_doctor_report(document_id: int, user_id: int, items: list[DoctorRep
                     "doctor_name": item.doctor_name, "department": item.department,
                 },
             )
-        conn.commit()

@@ -118,3 +118,45 @@ def test_persist_lab_overrides_cbc_group(set_test_db, monkeypatch):
         ).fetchall()
     # Состав опознан как ОАК → все строки в гематологии, мусорная химмикро-группа исправлена.
     assert [r["analyte_group"] for r in rows] == ["Гематологические исследования"] * 4
+
+
+def test_persist_lab_is_atomic_on_midway_failure(set_test_db, monkeypatch):
+    """Сбой на середине панели откатывает всю вставку — частичной панели в БД не остаётся."""
+    import pytest
+
+    from botkin.db.connection import get_conn
+    from botkin.db.repos import DocumentRepo, UserRepo
+    from botkin.domain.models import LabResult
+    from botkin.normalize.analytes import AnalyteNormalizer
+    from botkin.pipeline import orchestrator
+
+    monkeypatch.setattr(orchestrator, "_ANALYTE_NORMALIZER", AnalyteNormalizer([]))
+
+    with get_conn() as conn:
+        uid = UserRepo(conn).get_or_create(9300)
+        did = DocumentRepo(conn, uid).create(source_path="/tmp/panel.jpg")
+
+    # Второй показатель роняет вставку уже после того, как первый записан.
+    real_unit = orchestrator.canonical_unit
+    seen = {"n": 0}
+
+    def flaky_unit(unit):
+        seen["n"] += 1
+        if seen["n"] == 2:
+            raise RuntimeError("сбой на второй строке")
+        return real_unit(unit)
+
+    monkeypatch.setattr(orchestrator, "canonical_unit", flaky_unit)
+
+    items = [
+        LabResult(analyte_name="Гемоглобин", value_num=140, unit="г/л"),
+        LabResult(analyte_name="Эритроциты", value_num=4.5, unit="10^12/л"),
+    ]
+    with pytest.raises(RuntimeError):
+        orchestrator._persist_lab(did, uid, items)
+
+    with get_conn() as conn:
+        n = conn.execute(
+            "SELECT COUNT(*) c FROM lab_results WHERE document_id=?", (did,),
+        ).fetchone()["c"]
+    assert n == 0

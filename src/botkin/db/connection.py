@@ -114,3 +114,21 @@ def get_conn() -> Iterator[sqlite3.Connection]:
         yield conn
     finally:
         conn.close()
+
+
+@contextmanager
+def transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    """Явная транзакция поверх autocommit-коннекта: либо всё, либо ничего.
+
+    get_conn() работает в autocommit (isolation_level=None), поэтому каждая отдельная
+    INSERT фиксируется сразу. Для вставки панели целиком нужна ручная BEGIN/COMMIT —
+    при сбое на середине откатываемся, а не оставляем половину строк.
+    """
+    conn.execute("BEGIN")
+    try:
+        yield
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    else:
+        conn.execute("COMMIT")
