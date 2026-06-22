@@ -1,13 +1,16 @@
-"""VLM-извлечение структурированных данных из медицинских документов."""
-import json
+"""VLM-извлечение структурированных данных из медицинских документов.
+
+Здесь только оркестрация вызовов модели: подготовка картинок/сообщений, сам вызов
+qwen3-vl через instructor, выбор пути (текстовый слой vs VLM) и сшивка результатов.
+Весь детерминированный разбор (числа, harvester, текстовый слой, дедуп) вынесен в
+botkin.parsing и переиспользуется здесь.
+"""
 import logging
-import re
 import time
 from pathlib import Path
-from typing import Optional, Union
 
 import instructor
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from botkin.config import (
     VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_EXTRACT_LONG_SIDE,
@@ -17,6 +20,12 @@ from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ExtractionError
 from botkin.llm.client import get_client, default_options
 from botkin.llm.prompts import ANALYSIS_VLM_SYSTEM, DOCTOR_REPORT_VLM_SYSTEM, ANALYSIS_TEXT_SYSTEM
+from botkin.parsing.harvester import (
+    _collect_tables, harvest_lab_rows, loads_json, salvage_json_objects,
+)
+from botkin.parsing.rows import RawAnalysis, extraction_quality, merge_dedup, rows_from_raw
+from botkin.parsing.scalars import parse_lab_value, parse_reference_range
+from botkin.parsing.text_layer import _parse_text_line, _verbatim_guard, completeness_guard
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
 from botkin.preprocess.pdf_text import (
     has_usable_text_layer, reconstruct_pages, source_text,
@@ -24,254 +33,21 @@ from botkin.preprocess.pdf_text import (
 
 log = logging.getLogger(__name__)
 
+# Имена под старый интерфейс модуля: часть тестов обращается к ним как к атрибутам
+# botkin.llm.extract. Сами реализации живут в botkin.parsing.
+_merge_dedup = merge_dedup
+_salvage_json_objects = salvage_json_objects
+_loads_json = loads_json
+
+__all__ = [
+    "run_analysis", "run_doctor_report", "RawAnalysis", "extraction_quality",
+    "harvest_lab_rows", "rows_from_raw", "parse_lab_value", "parse_reference_range",
+    "completeness_guard", "_parse_text_line", "_verbatim_guard",
+]
+
 
 class DoctorReports(BaseModel):
     results: list[DoctorReport] = []
-
-
-# ── Сырая схема ответа qwen3-vl для анализов ─────────────────────────────────
-# Модель естественно отдаёт вложенную структуру tests[].results[] с полями
-# parameter/value/reference_range, а не плоский LabResult. Принимаем её как есть
-# (+ алиасы на частые синонимы и top-level results как подстраховку), затем маппим.
-
-class _RawRow(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    parameter: Optional[str] = Field(
-        default=None, validation_alias=AliasChoices("parameter", "name", "analyte_name", "test_name"))
-    value: Optional[Union[str, float, int]] = Field(
-        default=None, validation_alias=AliasChoices("value", "result", "value_num"))
-    unit: Optional[str] = None
-    reference_range: Optional[str] = Field(
-        default=None, validation_alias=AliasChoices("reference_range", "reference", "norm", "ref"))
-    comment: Optional[str] = Field(
-        default=None, validation_alias=AliasChoices("comment", "comments"))
-
-
-class _RawTest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    test_name: Optional[str] = None
-    results: list[_RawRow] = []
-
-
-class RawAnalysis(BaseModel):
-    """Верхний уровень сырого ответа: список тестов и/или плоский список строк."""
-    model_config = ConfigDict(extra="ignore")
-    tests: list[_RawTest] = []
-    results: list[_RawRow] = []
-
-
-_RANGE_RE = re.compile(r"^(-?\d+(?:[.,]\d+)?)\s*[-–—]\s*(-?\d+(?:[.,]\d+)?)$")
-_LE_RE = re.compile(r"^[<≤]\s*(-?\d+(?:[.,]\d+)?)$")
-_GE_RE = re.compile(r"^[>≥]\s*(-?\d+(?:[.,]\d+)?)$")
-
-
-def _to_float(s: str) -> float:
-    return float(s.replace(",", "."))
-
-
-def parse_lab_value(value) -> tuple[Optional[float], Optional[str]]:
-    """Результат показателя → (value_num, value_text). Одно из них всегда None.
-
-    Берём ВЕДУЩЕЕ число: «40.8»/«217»/«5,4»→число; «44.6*» (флаг)→44.6;
-    «40.8%»/«9 мм/ч» (вклеенная единица)→число; нечисловой текст→value_text.
-    """
-    if value is None:
-        return None, None
-    if isinstance(value, (int, float)):
-        return float(value), None
-    s = str(value).strip()
-    if not s:
-        return None, None
-    m = re.match(r"^[<>≤≥]", s)  # это оператор нормы, не результат — не число
-    if m:
-        return None, s
-    m = re.match(r"^(-?\d+(?:[.,]\d+)?)", s)  # ведущее число, хвост (флаг/единица) отбрасываем
-    if m:
-        return _to_float(m.group(1)), None
-    return None, s
-
-
-def parse_reference_range(ref) -> tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
-    """Норма → (ref_low, ref_high, ref_operator, ref_text).
-
-    «35 - 45»→low/high; «< 1.0»→op '<' + high; «> 120»→op '>' + low; «≤/≥»→'<'/'>';
-    нечисловая норма→ref_text.
-    """
-    if ref is None:
-        return None, None, None, None
-    s = str(ref).strip()
-    if not s:
-        return None, None, None, None
-    m = _RANGE_RE.match(s)
-    if m:
-        return _to_float(m.group(1)), _to_float(m.group(2)), None, None
-    m = _LE_RE.match(s)
-    if m:
-        return None, _to_float(m.group(1)), "<", None
-    m = _GE_RE.match(s)
-    if m:
-        return _to_float(m.group(1)), None, ">", None
-    return None, None, None, s
-
-
-def rows_from_raw(raw: RawAnalysis) -> list[LabResult]:
-    """Уплощает tests[].results[] (+ top-level results) в список LabResult."""
-    rows: list[_RawRow] = list(raw.results)
-    for test in raw.tests:
-        rows.extend(test.results)
-    out: list[LabResult] = []
-    for r in rows:
-        if not r.parameter:
-            continue
-        value_num, value_text = parse_lab_value(r.value)
-        ref_low, ref_high, ref_operator, ref_text = parse_reference_range(r.reference_range)
-        out.append(LabResult(
-            analyte_name=r.parameter,
-            value_num=value_num,
-            value_text=value_text,
-            value_raw=str(r.value) if r.value is not None else None,
-            unit=r.unit,
-            ref_low=ref_low,
-            ref_high=ref_high,
-            ref_operator=ref_operator,
-            ref_text=ref_text,
-            comments=r.comment,
-        ))
-    return _dedup_rows(out)
-
-
-# ── Harvester по содержимому (fallback к структурному разбору) ────────────────
-# qwen3-vl каждый прогон меняет имена ключей (англ/рус) и обёртку. Harvester
-# не полагается на фиксированные имена: распознаёт роль поля по алиасу ключа
-# (по подстроке, рус+англ), а при незнакомом ключе — по виду значения.
-
-_KEY_COMMENT = ("comment", "коммент", "примечан")
-_KEY_REF = ("reference", "range", "норма", "норматив", "диапазон", "ref", "norm")
-_KEY_UNIT = ("unit", "единиц", "ед.изм", "ед_изм", "размерност")
-_KEY_VALUE = ("value", "result", "результат", "значен")
-_KEY_NAME = ("parameter", "name", "analyte", "показател", "исследован", "параметр",
-             "наименован", "тест", "test")
-
-
-def _key_role(key: str) -> Optional[str]:
-    """Роль поля по имени ключа. Порядок важен: ref/unit/comment до value/name."""
-    k = " ".join(str(key).strip().lower().replace("ё", "е").split())
-    if not k:
-        return None
-    if any(t in k for t in _KEY_COMMENT):
-        return "comment"
-    if any(t in k for t in _KEY_REF):
-        return "ref"
-    if any(t in k for t in _KEY_UNIT):
-        return "unit"
-    if any(t in k for t in _KEY_VALUE):
-        return "value"
-    if any(t in k for t in _KEY_NAME):
-        return "name"
-    return None
-
-
-def _looks_like_ref(s: str) -> bool:
-    return bool(_RANGE_RE.match(s) or _LE_RE.match(s) or _GE_RE.match(s))
-
-
-def _looks_like_number(s: str) -> bool:
-    return bool(re.match(r"^-?\d", s.strip()))
-
-
-def _harvest_row(d: dict) -> Optional[LabResult]:
-    """Одна строка-показатель (dict с произвольными именами полей) → LabResult."""
-    scalars = [(str(k), str(v).strip()) for k, v in d.items()
-               if v is not None and not isinstance(v, (list, dict)) and str(v).strip()]
-    if not scalars:
-        return None
-
-    name = value_str = unit = ref = comment = None
-    taken: set[int] = set()
-    # 1) по ролям ключей
-    for i, (k, s) in enumerate(scalars):
-        role = _key_role(k)
-        if role == "name" and name is None:
-            name, _ = s, taken.add(i)
-        elif role == "value" and value_str is None:
-            value_str, _ = s, taken.add(i)
-        elif role == "unit" and unit is None:
-            unit, _ = s, taken.add(i)
-        elif role == "ref" and ref is None:
-            ref, _ = s, taken.add(i)
-        elif role == "comment" and comment is None:
-            comment, _ = s, taken.add(i)
-    # 2) добор по содержимому из незанятых полей
-    if ref is None:
-        for i, (k, s) in enumerate(scalars):
-            if i not in taken and _looks_like_ref(s):
-                ref, _ = s, taken.add(i)
-                break
-    if value_str is None:
-        for i, (k, s) in enumerate(scalars):
-            if i not in taken and _looks_like_number(s):
-                value_str, _ = s, taken.add(i)
-                break
-    if name is None:
-        cand = [(i, s) for i, (k, s) in enumerate(scalars)
-                if i not in taken and not _looks_like_number(s)]
-        if cand:
-            i, name = max(cand, key=lambda x: len(x[1]))
-            taken.add(i)
-    if not name:
-        return None
-
-    value_num, value_text = parse_lab_value(value_str)
-    ref_low, ref_high, ref_operator, ref_text = parse_reference_range(ref)
-    return LabResult(
-        analyte_name=name, value_num=value_num, value_text=value_text,
-        value_raw=value_str, unit=unit,
-        ref_low=ref_low, ref_high=ref_high, ref_operator=ref_operator, ref_text=ref_text,
-        comments=comment,
-    )
-
-
-def _is_row_dict(d) -> bool:
-    """dict «похож на строку показателя»: ≥2 скаляра и есть значение/норма (по виду или ключу)."""
-    if not isinstance(d, dict):
-        return False
-    scal = [(k, v) for k, v in d.items() if not isinstance(v, (list, dict))]
-    if len(scal) < 2:
-        return False
-    by_content = any(
-        v is not None and (_looks_like_number(str(v)) or _looks_like_ref(str(v)))
-        for k, v in scal
-    )
-    by_key = any(_key_role(str(k)) in ("value", "ref") for k, v in scal)
-    return by_content or by_key
-
-
-def _collect_tables(node, out: list) -> None:
-    """Рекурсивно ищет списки строк-показателей в произвольном JSON."""
-    if isinstance(node, list):
-        rows = [x for x in node if _is_row_dict(x)]
-        dicts = [x for x in node if isinstance(x, dict)]
-        if rows and len(rows) == len(dicts):
-            out.append(rows)
-        else:
-            for x in node:
-                _collect_tables(x, out)
-    elif isinstance(node, dict):
-        for v in node.values():
-            _collect_tables(v, out)
-
-
-def harvest_lab_rows(data) -> list[LabResult]:
-    """Сырой JSON ответа модели (любой структуры) → список LabResult по содержимому."""
-    tables: list = []
-    _collect_tables(data, tables)
-    out: list[LabResult] = []
-    for table in tables:
-        for item in table:
-            row = _harvest_row(item)
-            if row is not None:
-                out.append(row)
-    return _dedup_rows(out)
 
 
 def _prepare_b64(source_path: Path) -> list[str]:
@@ -367,51 +143,6 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
         raise err from e
 
 
-def _loads_json(text: str):
-    """Толерантный json.loads сырого ответа модели. None, если не разобрать."""
-    if not text:
-        return None
-    try:
-        return json.loads(text)
-    except (json.JSONDecodeError, ValueError):
-        return None
-
-
-def _salvage_json_objects(text: str) -> list[dict]:
-    """Извлекает все сбалансированные {...}-объекты из (возможно оборванного) текста.
-
-    qwen3-vl при зацикливании упирается в num_predict и обрывает JSON на полуслове —
-    весь ответ невалиден, json.loads падает. Но полные объекты-строки ДО обрыва
-    валидны: сканируем по балансу скобок (учитывая строки/escape), парсим каждый
-    закрытый объект отдельно. harvester затем соберёт из них показатели.
-    """
-    objs: list[dict] = []
-    stack: list[int] = []
-    in_str = esc = False
-    for i, ch in enumerate(text):
-        if in_str:
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == "{":
-            stack.append(i)
-        elif ch == "}" and stack:
-            start = stack.pop()
-            try:
-                obj = json.loads(text[start:i + 1])
-            except (json.JSONDecodeError, ValueError):
-                continue
-            if isinstance(obj, dict):
-                objs.append(obj)
-    return objs
-
-
 def _raw_text_from_exc(exc: Exception) -> str:
     """Сырой текст последнего ответа модели из instructor-исключения (для salvage)."""
     raw = getattr(exc, "raw_text", None)
@@ -435,7 +166,7 @@ def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult]
         raw = _call_vlm(messages, RawAnalysis, doc_name, "analysis")
     except ExtractionError as e:
         # Обрезанный JSON/таймаут: спасаем полные объекты-строки из сырого ответа.
-        objs = _salvage_json_objects(_raw_text_from_exc(e))
+        objs = salvage_json_objects(_raw_text_from_exc(e))
         rows = harvest_lab_rows(objs) if objs else []
         if rows:
             log.info("[EXTRACT_SALVAGED] Doc: '%s' | из обрезанного ответа спасено строк: %d", doc_name, len(rows))
@@ -446,7 +177,7 @@ def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult]
     if rows:
         return rows, tables_struct
     # Структурный разбор пуст (чужие ключи) → harvester по сырому JSON.
-    data = _loads_json(_raw_content(raw))
+    data = loads_json(_raw_content(raw))
     if data is None:
         return [], tables_struct
     tables: list = []
@@ -479,183 +210,13 @@ def _structure_text(lines: list[str], doc_name: str) -> list[LabResult]:
     try:
         raw = _call_text(messages, doc_name)
     except ExtractionError as e:
-        objs = _salvage_json_objects(_raw_text_from_exc(e))
+        objs = salvage_json_objects(_raw_text_from_exc(e))
         return harvest_lab_rows(objs) if objs else []
     rows = rows_from_raw(raw)
     if rows:
         return rows
-    data = _loads_json(_raw_content(raw))
+    data = loads_json(_raw_content(raw))
     return harvest_lab_rows(data) if data is not None else []
-
-
-def extraction_quality(items: list[LabResult]) -> dict:
-    """Сводка качества извлечения — для сравнения конфигов (полнота полей)."""
-    return {
-        "total": len(items),
-        "with_value_num": sum(1 for i in items if i.value_num is not None),
-        "with_value_text": sum(1 for i in items if i.value_text),
-        "with_ref": sum(1 for i in items if i.ref_low is not None
-                        or i.ref_high is not None or i.ref_text),
-        "with_unit": sum(1 for i in items if i.unit),
-    }
-
-
-_NUM_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
-
-
-def _num_tokens(*values) -> list[str]:
-    """Нормализованные числовые токены из значений (запятая→точка, без хвостовых .0)."""
-    out: list[str] = []
-    for v in values:
-        if v is None:
-            continue
-        for m in _NUM_RE.findall(str(v)):
-            s = m.replace(",", ".")
-            if s.endswith(".0"):
-                s = s[:-2]
-            out.append(s)
-    return out
-
-
-def _verbatim_guard(rows: list[LabResult], source_text: str):
-    """Делит строки на (kept, rejected): каждое число строки обязано быть в source_text.
-
-    Числа источника собираем в множество нормализованных токенов; строка проходит,
-    если ВСЕ её числа (value_raw + границы референса) присутствуют в источнике.
-    """
-    source_nums = set(_num_tokens(source_text))
-    kept: list[LabResult] = []
-    rejected: list[LabResult] = []
-    for r in rows:
-        tokens = _num_tokens(r.value_raw, r.ref_low, r.ref_high, r.ref_text)
-        if all(t in source_nums for t in tokens):
-            kept.append(r)
-        else:
-            rejected.append(r)
-    return kept, rejected
-
-
-def _row_key(r: LabResult):
-    return (r.analyte_name.strip().lower(), r.value_num, r.value_text)
-
-
-def _dedup_rows(rows: list[LabResult]) -> list[LabResult]:
-    """Схлопывает одинаковые (имя, значение) строки, сохраняя порядок первого вхождения.
-
-    qwen3-vl при зацикливании повторяет показатели (MCV/MCH/MCHC/RDW дважды) — это
-    раздувает ответ до num_predict и грозит обрывом JSON. Дедуп на выходе разбора.
-    """
-    seen: set = set()
-    out: list[LabResult] = []
-    for r in rows:
-        key = _row_key(r)
-        if key not in seen:
-            seen.add(key)
-            out.append(r)
-    return out
-
-
-def _name_key(r: LabResult) -> str:
-    """Ключ показателя по имени (без значения): lower, ё→е, схлопывание пробелов."""
-    return " ".join(r.analyte_name.strip().lower().replace("ё", "е").split())
-
-
-def _merge_dedup(base: list[LabResult], extra: list[LabResult]) -> list[LabResult]:
-    """Сливает добор постранично с общим вызовом, дедуп по ИМЕНИ показателя.
-
-    Модель недетерминирована в значениях: один показатель в общем вызове и в доборе
-    может иметь разные числа (Гемоглобин 13.7 г/дл vs 143 г/л). Дедуп по (имя,значение)
-    оставлял бы оба — дубли с противоречием. Ключ по имени: повтор отбрасываем (доверяем
-    первому/общему проходу), добавляем только реально новые показатели (потерянная страница).
-    """
-    seen = {_name_key(r) for r in base}
-    out = list(base)
-    for r in extra:
-        key = _name_key(r)
-        if key not in seen:
-            seen.add(key)
-            out.append(r)
-    return out
-
-
-# ── Анти-пропускной страж (completeness) ─────────────────────────────────────
-# Симметрия к verbatim_guard: тот ловит галлюцинации (число не из источника), этот —
-# пропуски (строка-результат источника не дала строки в ответе). Одинокий результат
-# на отдельной странице (С-реактивный белок без заголовка) LLM иногда теряет.
-
-_VALUE_TOKEN_RE = re.compile(r"^-?\d+(?:[.,]\d+)?\*?$")  # чистый токен-значение (+флаг «*»)
-_PLAIN_NUM_RE = re.compile(r"^-?\d+(?:[.,]\d+)?$")
-_OPERATORS = ("<", ">", "≤", "≥")
-_DASHES = ("-", "–", "—")
-
-
-def _extract_unit_ref(rest: list[str]) -> tuple[Optional[str], Optional[str]]:
-    """Хвост строки после значения → (unit, reference). Нет референса → (unit, None)."""
-    for i, tok in enumerate(rest):
-        # одно-токенные формы: «<5.0», «<20», «35-45»
-        if _LE_RE.match(tok) or _GE_RE.match(tok) or _RANGE_RE.match(tok):
-            return (" ".join(rest[:i]) or None), tok
-        # «< 1.0» — оператор + число отдельными токенами
-        if tok in _OPERATORS and i + 1 < len(rest) and re.match(r"^-?\d", rest[i + 1]):
-            return (" ".join(rest[:i]) or None), tok + rest[i + 1]
-        # «35 - 45» — число, тире, число
-        if (_PLAIN_NUM_RE.match(tok) and i + 2 < len(rest)
-                and rest[i + 1] in _DASHES and _PLAIN_NUM_RE.match(rest[i + 2])):
-            return (" ".join(rest[:i]) or None), f"{tok} - {rest[i + 2]}"
-    return (" ".join(rest) or None), None
-
-
-def _parse_text_line(line: str) -> Optional[LabResult]:
-    """Чистая строка текстового слоя → LabResult, либо None если это не строка-результат.
-
-    Гейт строгий (чтобы не подбирать шапку/подвал — телефон, даты, возраст, обрывки
-    примечаний): имя (есть буква) + чистый числовой токен-значение + токен референса.
-    """
-    tokens = line.split()
-    vi = next((i for i, t in enumerate(tokens) if _VALUE_TOKEN_RE.match(t)), None)
-    if not vi:  # нет токена-значения, либо значение в самом начале (нет имени)
-        return None
-    name = " ".join(tokens[:vi]).strip()
-    if not any(ch.isalpha() for ch in name):
-        return None
-    unit, ref = _extract_unit_ref(tokens[vi + 1:])
-    if ref is None:  # без референса не считаем строкой-результатом
-        return None
-    value_num, value_text = parse_lab_value(tokens[vi])
-    ref_low, ref_high, ref_operator, ref_text = parse_reference_range(ref)
-    return LabResult(
-        analyte_name=name, value_num=value_num, value_text=value_text,
-        value_raw=tokens[vi], unit=unit,
-        ref_low=ref_low, ref_high=ref_high, ref_operator=ref_operator, ref_text=ref_text,
-    )
-
-
-def _value_key(value) -> Optional[str]:
-    """Нормализованный токен значения для сравнения покрытия (None → None)."""
-    toks = _num_tokens(value)
-    return toks[0] if toks else None
-
-
-def completeness_guard(lines: list[str], rows: list[LabResult]) -> list[LabResult]:
-    """Строки-результаты источника, не представленные в rows → восстановленные LabResult.
-
-    Покрытие считаем ПО ЗНАЧЕНИЮ показателя, а не по имени: имена от LLM и от парсера
-    строки могут расходиться, а значение — стабильный якорь. Так не плодим ложные дубли.
-    Недобор при коллизии значений безопаснее ложного добора — мы лишь не хуже прежнего.
-    """
-    covered = {_value_key(r.value_num) for r in rows}
-    covered.discard(None)
-    recovered: list[LabResult] = []
-    for line in lines:
-        r = _parse_text_line(line)
-        if r is None:
-            continue
-        key = _value_key(r.value_num)
-        if key is None or key in covered:
-            continue
-        covered.add(key)
-        recovered.append(r)
-    return recovered
 
 
 def _should_use_text_layer(source_path: Path) -> bool:
@@ -683,7 +244,7 @@ def _extract_from_text_layer(source_path: Path) -> list[LabResult] | None:
         if not lines:
             continue
         page_rows = _structure_text(lines, f"{source_path.name}#стр{i + 1}")
-        rows = _merge_dedup(rows, page_rows)
+        rows = merge_dedup(rows, page_rows)
     # Анти-пропускной добор: строки-результаты слоя, что LLM пропустил.
     recovered = completeness_guard(all_lines, rows)
     if recovered:
@@ -691,7 +252,7 @@ def _extract_from_text_layer(source_path: Path) -> list[LabResult] | None:
             "[COMPLETENESS_GUARD] Doc: '%s' | добрано пропущенных строк=%d: %s",
             source_path.name, len(recovered), [r.analyte_name for r in recovered],
         )
-        rows = _merge_dedup(rows, recovered)
+        rows = merge_dedup(rows, recovered)
     if not rows:
         return None
     kept, rejected = _verbatim_guard(rows, src)
@@ -706,7 +267,7 @@ def _extract_from_text_layer(source_path: Path) -> list[LabResult] | None:
 
 
 def _finish(rows: list[LabResult], doc_name: str, t0: float, n_calls: int) -> list[LabResult]:
-    """Финальное логирование качества (DRY: общий хвост текстового и VLM путей)."""
+    """Финальное логирование качества (общий хвост текстового и VLM путей)."""
     q = extraction_quality(rows)
     total_s = time.perf_counter() - t0
     log.info(
@@ -762,7 +323,7 @@ def run_analysis(source_path: Path) -> list[LabResult]:
                     source_path.name, i + 1, e,
                 )
                 continue
-            rows = _merge_dedup(rows, page_rows)
+            rows = merge_dedup(rows, page_rows)
 
     return _finish(rows, source_path.name, t0, n_calls)
 
