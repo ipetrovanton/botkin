@@ -10,7 +10,7 @@ from botkin.config import (
 )
 from botkin.db.connection import get_conn, transaction
 from botkin.db.repos import DocumentRepo
-from botkin.domain.models import LabResult, DoctorReport
+from botkin.domain.models import ClassifyResult, DoctorReport, LabResult
 from botkin.exceptions import ClassificationError, ExtractionError
 from botkin.llm import classify, extract
 from botkin.normalize.drugs import DrugNormalizer, load_default
@@ -113,35 +113,11 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
     # ── 3. Extract (VLM) ───────────────────────────────────────────────────
     async with LLM_SEMAPHORE:
         try:
-            if doc_type == "analysis":
-                items: list[LabResult] = await asyncio.to_thread(extract.run_analysis, source_path)
-                log.info("Doc %d: извлечено строк анализов=%d", document_id, len(items))
-                _save_raw_extraction(document_id, items)
-                matches = _persist_lab(document_id, user_id, items)
-                # Метрика качества нормализации по ФСЛИ — для сравнения конфигов.
-                if matches:
-                    matched = sum(1 for m in matches if m.status == "matched")
-                    log.info(
-                        "[NORMALIZE_QUALITY] Doc %d | сопоставлено ФСЛИ: %d/%d | не распознано: %d",
-                        document_id, matched, len(matches), len(matches) - matched,
-                    )
-                    # Обобщённый заголовок по группе исследований (биоматериал не используем).
-                    title = summary_title(
-                        [m.group for m in matches],
-                        test_names=[m.canonical or m.raw for m in matches],
-                    )
-                    with get_conn() as conn:
-                        DocumentRepo(conn, user_id).set_metadata(document_id, title, result.clinic)
-                    log.info("Doc %d: заголовок обобщён → '%s'", document_id, title)
-
-            elif doc_type == "doctor_report":
-                items: list[DoctorReport] = await asyncio.to_thread(extract.run_doctor_report, source_path)
-                _save_raw_extraction(document_id, items)
-                _persist_doctor_report(document_id, user_id, items)
-
+            handler = _EXTRACTORS.get(doc_type)
+            if handler is not None:
+                await handler(document_id, user_id, source_path, result)
             else:
                 log.info("Doc %d type=%s — extract пропускаем", document_id, doc_type)
-
         except ExtractionError as e:
             log.error("Doc %d: сбой извлечения: %s", document_id, e)
             _mark_failed(document_id)
@@ -159,6 +135,49 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
         claimed = DocumentRepo(conn, user_id).claim_delivery(document_id)
     if claimed:
         await notify_user(telegram_user_id, document_processed(document_id, doc_type))
+
+
+# ── Обработчики по типу документа ───────────────────────────────────────────────
+# Добавить тип = добавить async-обработчик и строку в _EXTRACTORS, не трогая _run.
+# Незнакомый тип extract пропускает (файл уже сохранён).
+
+async def _extract_analysis(
+    document_id: int, user_id: int, source_path: Path, result: ClassifyResult,
+) -> None:
+    items: list[LabResult] = await asyncio.to_thread(extract.run_analysis, source_path)
+    log.info("Doc %d: извлечено строк анализов=%d", document_id, len(items))
+    _save_raw_extraction(document_id, items)
+    matches = _persist_lab(document_id, user_id, items)
+    if not matches:
+        return
+    # Метрика качества нормализации по ФСЛИ — для сравнения конфигов.
+    matched = sum(1 for m in matches if m.status == "matched")
+    log.info(
+        "[NORMALIZE_QUALITY] Doc %d | сопоставлено ФСЛИ: %d/%d | не распознано: %d",
+        document_id, matched, len(matches), len(matches) - matched,
+    )
+    # Обобщённый заголовок по группе исследований (биоматериал не используем).
+    title = summary_title(
+        [m.group for m in matches],
+        test_names=[m.canonical or m.raw for m in matches],
+    )
+    with get_conn() as conn:
+        DocumentRepo(conn, user_id).set_metadata(document_id, title, result.clinic)
+    log.info("Doc %d: заголовок обобщён → '%s'", document_id, title)
+
+
+async def _extract_doctor_report(
+    document_id: int, user_id: int, source_path: Path, result: ClassifyResult,
+) -> None:
+    items: list[DoctorReport] = await asyncio.to_thread(extract.run_doctor_report, source_path)
+    _save_raw_extraction(document_id, items)
+    _persist_doctor_report(document_id, user_id, items)
+
+
+_EXTRACTORS = {
+    "analysis": _extract_analysis,
+    "doctor_report": _extract_doctor_report,
+}
 
 
 # ── Хелперы ────────────────────────────────────────────────────────────────────

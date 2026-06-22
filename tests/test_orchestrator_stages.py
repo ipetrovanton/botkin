@@ -44,6 +44,29 @@ def test_title_generalized_by_group(set_test_db, monkeypatch):
     assert row["status"] == "extracted"
 
 
+def test_doctor_report_path_persists(set_test_db, monkeypatch):
+    """Документ-заключение: извлечение и сохранение заключения врача + статус extracted."""
+    from botkin.pipeline import orchestrator
+    from botkin.db.connection import get_conn
+    from botkin.domain.models import DoctorReport
+    monkeypatch.setattr(orchestrator, "DELIVERY_FALLBACK_DELAY", 0.0)
+    uid, did = _make_doc()
+    with patch.object(orchestrator.classify, "run_vlm",
+                      return_value=ClassifyResult(doc_type="doctor_report", confidence=0.9)), \
+         patch.object(orchestrator.extract, "run_doctor_report",
+                      return_value=[DoctorReport(diagnosis="ОРВИ", doctor_name="Иванов")]), \
+         patch("botkin.pipeline.orchestrator.notify_user", side_effect=_anoop):
+        asyncio.run(orchestrator.process_document(did, 321))
+    with get_conn() as conn:
+        doc = conn.execute("SELECT status, raw_extraction FROM documents WHERE id=?", (did,)).fetchone()
+        rep = conn.execute(
+            "SELECT diagnosis, doctor_name FROM doctor_reports WHERE document_id=?", (did,),
+        ).fetchone()
+    assert doc["status"] == "extracted"
+    assert doc["raw_extraction"] is not None
+    assert rep["diagnosis"] == "ОРВИ" and rep["doctor_name"] == "Иванов"
+
+
 def test_stages_recorded(set_test_db, monkeypatch):
     """Стадии recognizing и normalizing проставляются по ходу."""
     from botkin.pipeline import orchestrator
