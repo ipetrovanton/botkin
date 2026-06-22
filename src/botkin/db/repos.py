@@ -15,13 +15,6 @@ class BaseRepo:
         self.conn = conn
         self.user_id = user_id
 
-    def _all_for_user(self, where_extra: str = "", params: tuple = ()) -> list[dict]:
-        sql = f"SELECT * FROM {self.table} WHERE user_id = ?"
-        if where_extra:
-            sql += " AND " + where_extra
-        rows = self.conn.execute(sql, (self.user_id, *params)).fetchall()
-        return [dict(r) for r in rows]
-
 
 class DocumentRepo(BaseRepo):
     table = "documents"
@@ -65,9 +58,6 @@ class DocumentRepo(BaseRepo):
             (doc_type, document_id, self.user_id),
         )
         self.conn.commit()
-
-    def mark_failed(self, document_id: int) -> None:
-        self.set_status(document_id, "failed")
 
     def get(self, document_id: int) -> dict | None:
         row = self.conn.execute(

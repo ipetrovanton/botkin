@@ -168,6 +168,9 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
 # ── Хелперы ────────────────────────────────────────────────────────────────────
 
 def _mark_failed(document_id: int) -> None:
+    # Без user_id: вызывается в т.ч. из глобального обработчика, который ловит сбой ещё
+    # до того, как из БД прочитан владелец документа. Пометка статуса по id безопасна —
+    # данные не читаются, только переключается статус собственного документа.
     with get_conn() as conn:
         conn.execute("UPDATE documents SET status = 'failed' WHERE id = ?", (document_id,))
         conn.commit()
@@ -210,15 +213,26 @@ def _persist_lab(document_id: int, user_id: int, items: list[LabResult]) -> list
                    taken_at, source_table_cell, value_raw, unit_raw, taken_at_raw,
                    analyte_canonical, loinc, nmu_code, analyte_group, match_status,
                    unit_expected, unit_mismatch)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (document_id, user_id, item.analyte_code, item.analyte_name,
-                 item.value_num, item.value_text, unit_canon,
-                 item.ref_low, item.ref_high, item.ref_operator, item.ref_text,
-                 item.taken_at.isoformat() if item.taken_at else None,
-                 item.source_table_cell,
-                 item.value_raw, unit_raw, item.taken_at_raw,
-                 match.canonical, match.loinc, match.nmu, group,
-                 match.status, unit_expected, unit_mismatch),
+                   VALUES (:document_id, :user_id, :analyte_code, :analyte_name,
+                   :value_num, :value_text, :unit, :ref_low, :ref_high, :ref_operator, :ref_text,
+                   :taken_at, :source_table_cell, :value_raw, :unit_raw, :taken_at_raw,
+                   :analyte_canonical, :loinc, :nmu_code, :analyte_group, :match_status,
+                   :unit_expected, :unit_mismatch)""",
+                {
+                    "document_id": document_id, "user_id": user_id,
+                    "analyte_code": item.analyte_code, "analyte_name": item.analyte_name,
+                    "value_num": item.value_num, "value_text": item.value_text, "unit": unit_canon,
+                    "ref_low": item.ref_low, "ref_high": item.ref_high,
+                    "ref_operator": item.ref_operator, "ref_text": item.ref_text,
+                    "taken_at": item.taken_at.isoformat() if item.taken_at else None,
+                    "source_table_cell": item.source_table_cell,
+                    "value_raw": item.value_raw, "unit_raw": unit_raw,
+                    "taken_at_raw": item.taken_at_raw,
+                    "analyte_canonical": match.canonical, "loinc": match.loinc,
+                    "nmu_code": match.nmu, "analyte_group": group,
+                    "match_status": match.status, "unit_expected": unit_expected,
+                    "unit_mismatch": unit_mismatch,
+                },
             )
         conn.commit()
     return matches
@@ -243,14 +257,19 @@ def _persist_doctor_report(document_id: int, user_id: int, items: list[DoctorRep
                    recommendations_json, complaints_json, anamnesis, medications_json,
                    medications_normalized_json,
                    visit_date, doctor_name, department)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (document_id, user_id, item.diagnosis,
-                 json.dumps(item.recommendations, ensure_ascii=False),
-                 json.dumps(item.complaints, ensure_ascii=False),
-                 item.anamnesis,
-                 json.dumps(item.medications, ensure_ascii=False),
-                 _normalize_medications(item.medications),
-                 item.visit_date.isoformat() if item.visit_date else None,
-                 item.doctor_name, item.department),
+                   VALUES (:document_id, :user_id, :diagnosis,
+                   :recommendations_json, :complaints_json, :anamnesis, :medications_json,
+                   :medications_normalized_json,
+                   :visit_date, :doctor_name, :department)""",
+                {
+                    "document_id": document_id, "user_id": user_id, "diagnosis": item.diagnosis,
+                    "recommendations_json": json.dumps(item.recommendations, ensure_ascii=False),
+                    "complaints_json": json.dumps(item.complaints, ensure_ascii=False),
+                    "anamnesis": item.anamnesis,
+                    "medications_json": json.dumps(item.medications, ensure_ascii=False),
+                    "medications_normalized_json": _normalize_medications(item.medications),
+                    "visit_date": item.visit_date.isoformat() if item.visit_date else None,
+                    "doctor_name": item.doctor_name, "department": item.department,
+                },
             )
         conn.commit()
