@@ -8,7 +8,7 @@ import httpx
 from aiogram import F, Router
 from aiogram.types import Message
 
-from botkin.bot.cards import format_card_header
+from botkin.bot.document_view import compose_card
 from botkin.bot.progress import poll_until_done, render_progress
 from botkin.config import BOT_API_URL, BOT_PROGRESS_TIMEOUT, PHOTO_LOWRES_WARN, UPLOAD_MAX_BYTES
 from botkin.db.connection import get_conn
@@ -58,13 +58,12 @@ def _resolve_user_id(tg_user_id: int) -> int | None:
 
 
 def render_document_card(doc_id: int, user_id: int) -> str:
-    """Полная карточка документа по id (шапка + детали из show-рендера)."""
-    from botkin.bot.handlers.show import _format_document
+    """Полная карточка документа по id (шапка + детали)."""
     with get_conn() as conn:
         doc = DocumentRepo(conn, user_id).get(doc_id)
     if not doc:
         return "❌ Документ не найден."
-    return f"{format_card_header(doc)}\n────────────\n{_format_document(doc_id, doc)}"
+    return compose_card(doc_id, doc)
 
 
 def claim_delivery_for(doc_id: int, user_id: int) -> bool:

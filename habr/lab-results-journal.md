@@ -1324,3 +1324,49 @@ Repro:
 .venv/bin/python -m pytest -q                                                           # 272 passed
 ```
 
+## Итерация 20: гигиена слоя бота — общий Bot, разрыв цикла импорта рендера (P2)
+
+**Проблема.** Остаток P2 — слой Telegram-бота. Два долга: (1) `notify_user` создавал новый
+`aiogram.Bot` (и его aiohttp-сессию) на **каждое** уведомление, делал send и закрывал сессию —
+лишний хендшейк на каждое сообщение пайплайна; (2) рендер деталей документа `_format_document`
+жил в `handlers/show.py`, а `handlers/upload.py` и `handlers/browse.py` тащили его **отложенным
+импортом внутри функции** (`from botkin.bot.handlers.show import _format_document`) ради разрыва
+цикла, и втроём копипастили композицию карточки `шапка + разделитель + детали`.
+
+**Диагноз.** Отложенный импорт «внутри функции» — типичный симптом архитектурной петли:
+хендлеры импортируют друг у друга. Лечится не подавлением (lazy import), а выносом общего
+кода в слой, который никто из хендлеров не «владеет». Рендер деталей — это чистая функция от
+`(doc_id, doc)`, ей не место в модуле команды `/show`; она нужна трём хендлерам одинаково.
+
+**Решение (TDD: RED → GREEN).**
+- Новый нейтральный модуль `bot/document_view.py`: перенесены `_format_document`, `_format_ref`,
+  `_format_labs`, `_format_doctor_reports`; добавлена общая `compose_card(doc_id, doc)` —
+  единственная теперь точка композиции «шапка + разделитель + детали».
+- `show.py` реэкспортирует `_format_*` (обратная совместимость: тесты и код импортируют их из
+  show) и использует `compose_card`; `cmd_show` ужался. Отложенные импорты в upload/browse
+  заменены верхнеуровневым `from botkin.bot.document_view import compose_card` — цикл разорван.
+- `render_document_card` (upload) и `_render_card` (browse) больше не копипастят композицию —
+  оба зовут `compose_card`.
+- `notify_user`: `Bot` за `@lru_cache(maxsize=1)` на токен — одна сессия на процесс,
+  переиспользуется между уведомлениями (сессию не закрываем, живёт с процессом).
+
+RED: `import botkin.bot.document_view` падал (модуля нет); `_shared_bot` отсутствовал.
+GREEN: `compose_card` для unknown-типа даёт «шапка #7 + ──── + не поддерживается»; `show`
+по-прежнему отдаёт `_format_labs`/`_format_ref` (регресс обратной совместимости);
+`_shared_bot(token)` возвращает тот же объект на повторный вызов.
+
+**Уже было закрыто ранними рефакторами (отметили, не трогали):** маркер нормы ⬆️/⬇️ —
+единственная `cards.ref_marker`, ею пользуются и `format_labs_summary`, и `_format_labs`;
+дедуп `on_photo`/`on_document` — общий хвост `_start_upload_flow`; `asyncio.get_event_loop`
+исчез (остался современный `asyncio.run`); `with pymupdf.open`; затенение `source_text`.
+
+**Итог.** 275 passed (+3 к 272: +1 notifications, +2 document_view), ruff clean. Раздел P2
+код-ревью закрыт полностью (кроме сознательно пропущенного `cdist` — преждевременно для панелей
+в десятки строк). Весь roadmap ревью (P0-1…P2) пройден.
+
+Repro:
+```
+.venv/bin/python -m pytest tests/test_document_view.py tests/test_notifications.py -q  # 3 passed
+.venv/bin/python -m pytest -q                                                          # 275 passed
+```
+

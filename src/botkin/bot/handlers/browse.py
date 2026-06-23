@@ -5,7 +5,8 @@ from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, Message
 
-from botkin.bot.cards import format_card_header, format_labs_summary, format_list_body
+from botkin.bot.cards import format_labs_summary, format_list_body
+from botkin.bot.document_view import compose_card
 from botkin.bot.keyboards import (
     PAGE_SIZE, TYPE_CODES, card_keyboard, decode_cb, list_keyboard,
     period_presets_keyboard, period_view_keyboard,
@@ -27,7 +28,6 @@ async def _need_user(obj, tg_id: int) -> int | None:
 
 
 def _render_card(doc_id: int, user_id: int):
-    from botkin.bot.handlers.show import _format_document
     with get_conn() as conn:
         repo = DocumentRepo(conn, user_id)
         doc = repo.get(doc_id)
@@ -36,7 +36,7 @@ def _render_card(doc_id: int, user_id: int):
         # соседи по дате — прямым индексным запросом, без выгрузки всего списка id
         has_prev = repo.adjacent_id(doc_id, older=True) is not None
         has_next = repo.adjacent_id(doc_id, older=False) is not None
-    text = f"{format_card_header(doc)}\n────────────\n{_format_document(doc_id, doc)}"
+    text = compose_card(doc_id, doc)
     return text, card_keyboard(doc_id, has_prev=has_prev, has_next=has_next)
 
 
