@@ -8,10 +8,11 @@ from pydantic import BaseModel
 
 from botkin.config import (
     VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, VLM_MAX_RETRIES, IMAGE_CLASSIFY_LONG_SIDE,
+    VLM_STRUCTURED_OUTPUT,
 )
 from botkin.domain.models import ClassifyResult, DocType
 from botkin.exceptions import ClassificationError
-from botkin.llm.client import get_client, default_options, usage_of
+from botkin.llm.client import get_client, build_extra_body, usage_of
 from botkin.llm.prompts import CLASSIFY_INSTRUCTION, CLASSIFY_VLM_SYSTEM, PROMPTS_VERSION
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
 
@@ -50,14 +51,15 @@ def run_vlm(source_path: Path) -> ClassifyResult:
             response_model=ClassifySchema,
             max_retries=VLM_MAX_RETRIES,
             max_tokens=VLM_MAX_TOKENS,
-            extra_body={"options": default_options()},
+            extra_body=build_extra_body(ClassifySchema),
         )
         elapsed = time.perf_counter() - t0
         prompt_tokens, completion_tokens = usage_of(response)
         log.info(
-            "[SUCCESS_CLASSIFY] Doc: '%s' | Result: '%s' (conf=%.2f) | Промпты: %s | "
+            "[SUCCESS_CLASSIFY] Doc: '%s' | Result: '%s' (conf=%.2f) | Промпты: %s | Схема: %s | "
             "Elapsed: %.2fs | Prompt: %d t | Completion: %d t",
             source_path.name, response.doc_type, response.confidence, PROMPTS_VERSION,
+            "on" if VLM_STRUCTURED_OUTPUT else "off",
             elapsed, prompt_tokens, completion_tokens,
         )
         return ClassifyResult(

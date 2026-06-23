@@ -30,6 +30,7 @@ _DEFAULTS: dict = {
         "max_tokens": 8192,
         "num_predict": 8192,
         "repeat_penalty": 1.2,
+        "structured_output": True,
     },
     "ollama": {
         "keep_alive": "30m",
@@ -127,6 +128,12 @@ VLM_MAX_RETRIES = int(os.getenv("VLM_MAX_RETRIES", "2"))
 # Потолок одного VLM-вызова. Деградировавший вызов (генерация дублей) не должен висеть
 # минутами — по таймауту прерываем, страница пропускается, документ сохраняет остальное.
 VLM_REQUEST_TIMEOUT = float(os.getenv("VLM_REQUEST_TIMEOUT", "120"))
+# Принуждение JSON-схемы на уровне декодера Ollama (нативный параметр format → XGrammar,
+# 100% соответствие). При выключении — откат на prompt-only JSON (instructor Mode.JSON).
+# Флаг — страховка: конкретная версия Ollama может повести себя иначе на /v1 (см. #10001).
+VLM_STRUCTURED_OUTPUT = os.getenv(
+    "VLM_STRUCTURED_OUTPUT", str(_get("vlm.structured_output"))
+).strip().lower() in ("1", "true", "yes", "on")
 
 # Текстовый слой PDF (детерминированное извлечение без VLM).
 # Минимум символов на страницу, чтобы считать слой годным (отсекает PDF-сканы

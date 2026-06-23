@@ -14,11 +14,11 @@ from pydantic import BaseModel
 
 from botkin.config import (
     VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, VLM_MAX_RETRIES, IMAGE_EXTRACT_LONG_SIDE,
-    VERBATIM_MAX_REJECT_RATIO,
+    VERBATIM_MAX_REJECT_RATIO, VLM_STRUCTURED_OUTPUT,
 )
 from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ExtractionError
-from botkin.llm.client import get_client, default_options, usage_of
+from botkin.llm.client import get_client, build_extra_body, default_options, usage_of
 from botkin.llm.prompts import (
     ANALYSIS_INSTRUCTION, ANALYSIS_TEXT_SYSTEM, ANALYSIS_VLM_SYSTEM,
     DOCTOR_REPORT_INSTRUCTION, DOCTOR_REPORT_VLM_SYSTEM, PROMPTS_VERSION, TEXT_INSTRUCTION,
@@ -116,17 +116,17 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
             response_model=response_model,
             max_retries=VLM_MAX_RETRIES,
             max_tokens=VLM_MAX_TOKENS,
-            extra_body={"options": options or default_options()},
+            extra_body=build_extra_body(response_model, options),
         )
         elapsed = time.perf_counter() - t0
         prompt_tokens, completion_tokens = usage_of(response)
         n_parsed = _count_rows(response)
         tok_s = completion_tokens / elapsed if elapsed > 0 else 0.0
         log.info(
-            "[SUCCESS_EXTRACT] Doc: '%s' | Type: '%s' | Промпты: %s | Elapsed: %.2fs | "
-            "Prompt: %d t | Completion: %d t | %.1f tok/s | Распознано строк: %d",
-            doc_name, doc_type, PROMPTS_VERSION, elapsed,
-            prompt_tokens, completion_tokens, tok_s, n_parsed,
+            "[SUCCESS_EXTRACT] Doc: '%s' | Type: '%s' | Промпты: %s | Схема: %s | "
+            "Elapsed: %.2fs | Prompt: %d t | Completion: %d t | %.1f tok/s | Распознано строк: %d",
+            doc_name, doc_type, PROMPTS_VERSION, "on" if VLM_STRUCTURED_OUTPUT else "off",
+            elapsed, prompt_tokens, completion_tokens, tok_s, n_parsed,
         )
         # Сырой ответ модели — на DEBUG (может быть объёмным). При n_parsed==0 поднимаем до WARNING:
         # это и есть «извлечение вернуло пусто» — самое нужное для диагностики место.

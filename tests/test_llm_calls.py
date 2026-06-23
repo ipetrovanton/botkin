@@ -22,6 +22,72 @@ def _tiny_pdf(tmp_path):
     return p
 
 
+def test_call_passes_native_format_schema_when_enabled(tmp_path):
+    """VLM_STRUCTURED_OUTPUT=on → в Ollama уходит нативный format=JSON-схема (XGrammar)."""
+    from botkin.llm import extract
+    from botkin.llm.extract import RawAnalysis
+
+    raw = RawAnalysis.model_validate({
+        "results": [{"parameter": "Гемоглобин", "value": "145", "unit": "г/л"}]})
+    object.__setattr__(raw, "_raw_response",
+                       MagicMock(usage=MagicMock(prompt_tokens=1, completion_tokens=1)))
+    fake = MagicMock()
+    fake.chat.completions.create.return_value = raw
+
+    with patch("botkin.llm.extract.get_client", return_value=fake), \
+         patch("botkin.llm.extract.prepare_images", return_value=[b"\xff\xd8fakejpeg"]), \
+         patch("botkin.llm.client.VLM_STRUCTURED_OUTPUT", True):
+        extract.run_analysis(_tiny_pdf(tmp_path))
+
+    _, kwargs = fake.chat.completions.create.call_args
+    assert kwargs["extra_body"]["format"] == RawAnalysis.model_json_schema()
+    assert "options" in kwargs["extra_body"]   # опции Ollama не потеряны
+
+
+def test_call_omits_format_when_disabled(tmp_path):
+    """VLM_STRUCTURED_OUTPUT=off → format не отправляется (откат на prompt-only JSON)."""
+    from botkin.llm import extract
+    from botkin.llm.extract import RawAnalysis
+
+    raw = RawAnalysis.model_validate({
+        "results": [{"parameter": "Гемоглобин", "value": "145", "unit": "г/л"}]})
+    object.__setattr__(raw, "_raw_response",
+                       MagicMock(usage=MagicMock(prompt_tokens=1, completion_tokens=1)))
+    fake = MagicMock()
+    fake.chat.completions.create.return_value = raw
+
+    with patch("botkin.llm.extract.get_client", return_value=fake), \
+         patch("botkin.llm.extract.prepare_images", return_value=[b"\xff\xd8fakejpeg"]), \
+         patch("botkin.llm.client.VLM_STRUCTURED_OUTPUT", False):
+        extract.run_analysis(_tiny_pdf(tmp_path))
+
+    _, kwargs = fake.chat.completions.create.call_args
+    assert "format" not in kwargs["extra_body"]
+
+
+def test_classify_passes_native_format_schema_when_enabled(tmp_path):
+    """Классификатор тоже принуждает схему нативным format при включённом флаге."""
+    from botkin.llm import classify
+    from botkin.llm.classify import ClassifySchema
+
+    resp = MagicMock()
+    resp.doc_type = "analysis"
+    resp.confidence = 0.9
+    resp.title = None
+    resp.clinic = None
+    resp._raw_response.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+    fake = MagicMock()
+    fake.chat.completions.create.return_value = resp
+
+    with patch("botkin.llm.classify.get_client", return_value=fake), \
+         patch("botkin.llm.classify.prepare_images", return_value=[b"\xff\xd8fakejpeg"]), \
+         patch("botkin.llm.client.VLM_STRUCTURED_OUTPUT", True):
+        classify.run_vlm(_tiny_pdf(tmp_path))
+
+    _, kwargs = fake.chat.completions.create.call_args
+    assert kwargs["extra_body"]["format"] == ClassifySchema.model_json_schema()
+
+
 def test_classify_uses_small_image_and_mocked_client(tmp_path):
     from botkin.llm import classify
 

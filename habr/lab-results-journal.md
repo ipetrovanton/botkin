@@ -1153,3 +1153,53 @@ grep -rn "db.queries" src tests   # пусто — модуль удалён
 .venv/bin/python -m pytest -q      # 248 passed
 .venv/bin/ruff check src tests     # All checks passed
 ```
+
+## Итерация 17: нативный structured output Ollama — `format`, а не `response_format` (P1-2)
+
+**Проблема.** Извлечение через qwen3-vl недетерминировано: модель присылает то англоязычные,
+то русские ключи JSON, рвёт схему, иногда обрезает ответ. Вся надстройка
+(harvester → salvage → постраничный добор → анти-пропускной страж) построена именно как
+защита от этого. Промпт-only JSON (instructor `Mode.JSON`) просит схему словами в промпте —
+модель может не послушаться. P1-2 из ревью: включить принуждение схемы на уровне декодера
+(Ollama + XGrammar → 100% соответствие грамматике).
+
+**Диагноз — где грабли.** Наивный путь «передать OpenAI-стандартный
+`response_format={"type":"json_schema", ...}`» на Ollama **не работает**: её
+OpenAI-совместимый эндпоинт `/v1/chat/completions` этот параметр игнорирует
+(ollama/ollama#10001, проверено по первоисточнику). instructor `Mode.JSON_SCHEMA` шлёт и вовсе
+нестандартный `response_format={"type":"json_object","schema":...}` — Ollama его `schema`-часть
+тоже не обязана уважать. Документированный, надёжный механизм Ollama — **нативный параметр
+`format` = JSON-схема** (`docs.ollama.com/capabilities/structured-outputs`), он и уходит в
+XGrammar. Через OpenAI-SDK его можно прокинуть в обход instructor как `extra_body={"format": ...}` —
+это поле сериализуется в тело запроса как есть.
+
+**Решение (TDD: RED → GREEN).**
+- Флаг `VLM_STRUCTURED_OUTPUT` (config, дефолт `True`, env-override через truthy-строку).
+  Под медицинский продукт нужна страховка: конкретная версия Ollama может повести себя иначе
+  на `/v1` — флаг даёт мгновенный откат на prompt-only JSON без правки кода.
+- `client.build_extra_body(response_model, options)` — единый сборщик `extra_body`: всегда
+  `options`, плюс `format=response_model.model_json_schema()`, когда флаг включён. Оба пути
+  (`extract._call_vlm`, `classify.run_vlm`) переведены на него — раньше каждый собирал
+  `extra_body` сам.
+- instructor остаётся на `Mode.JSON`: схему на уровне токенов держит Ollama, а валидацию
+  Pydantic и ретраи — instructor. Стражи и harvester НЕ тронуты: они ловят семантические
+  пропуски (показатель есть в бланке, но не извлечён), а не только мусорный JSON.
+- `Схема: on/off` добавлено в `[SUCCESS_EXTRACT]`/`[SUCCESS_CLASSIFY]` — при апгрейде Ollama
+  по логам отличить регрессию схемы от регрессии модели/промпта (продолжение P1-1).
+
+RED: 3 теста падали (`client.VLM_STRUCTURED_OUTPUT` ещё не было). GREEN: тесты проверяют
+контракт — `create()` получает `extra_body["format"] == RawAnalysis.model_json_schema()` при
+включённом флаге и не получает при выключенном; то же для `ClassifySchema`.
+
+**Итог.** 251 passed (+3), ruff clean. Поведенческую проверку (реально ли XGrammar держит
+схему на qwen3-vl) надо прогнать на живом Ollama — в этой среде его нет; контракт kwargs
+закрыт юнит-тестом, схема-принуждение под флагом.
+
+Repro:
+```
+.venv/bin/python -c "from botkin.config import VLM_STRUCTURED_OUTPUT; print(VLM_STRUCTURED_OUTPUT)"  # True
+VLM_STRUCTURED_OUTPUT=off .venv/bin/python -c "from botkin.llm.client import build_extra_body; \
+from botkin.llm.classify import ClassifySchema; print(sorted(build_extra_body(ClassifySchema)))"  # ['options']
+.venv/bin/python -m pytest tests/test_llm_calls.py -q   # 12 passed
+```
+

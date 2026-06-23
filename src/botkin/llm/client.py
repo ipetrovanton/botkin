@@ -6,11 +6,12 @@ import subprocess
 import urllib.request
 
 from openai import OpenAI
+from pydantic import BaseModel
 
 import instructor
 from botkin.config import (
     OLLAMA_URL, OLLAMA_KEEP_ALIVE, VLM_NUM_CTX, VLM_REPEAT_PENALTY, VLM_NUM_PREDICT,
-    VLM_REQUEST_TIMEOUT,
+    VLM_REQUEST_TIMEOUT, VLM_STRUCTURED_OUTPUT,
 )
 
 log = logging.getLogger(__name__)
@@ -24,6 +25,21 @@ def default_options() -> dict:
         "repeat_penalty": VLM_REPEAT_PENALTY,
         "num_predict": VLM_NUM_PREDICT,
     }
+
+
+def build_extra_body(response_model: type[BaseModel], options: dict | None = None) -> dict:
+    """extra_body для OpenAI-SDK → Ollama: опции + (опц.) нативный format=JSON-схема.
+
+    Нативный параметр Ollama `format` принуждает грамматику декодера к схеме (XGrammar).
+    Прокидываем его в обход instructor — instructor.Mode.JSON остаётся для валидации и
+    ретраев, а схему на уровне токенов держит Ollama. OpenAI-стандартный
+    response_format=json_schema на /v1 Ollama игнорирует (ollama/ollama#10001), поэтому
+    именно нативный format. Под флагом VLM_STRUCTURED_OUTPUT — можно отключить.
+    """
+    body: dict = {"options": options or default_options()}
+    if VLM_STRUCTURED_OUTPUT:
+        body["format"] = response_model.model_json_schema()
+    return body
 
 
 def usage_of(response) -> tuple[int, int]:
