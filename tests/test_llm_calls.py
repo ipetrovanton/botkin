@@ -12,6 +12,78 @@ def test_keep_alive_exported():
     assert "num_ctx" in opts and "repeat_penalty" in opts
 
 
+def test_retry_policy_retries_parse_error_then_succeeds():
+    """tenacity-политика: провал парсинга JSON ретраится, успех на 2-й попытке."""
+    from json import JSONDecodeError
+
+    from botkin.llm.client import build_retrying
+
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise JSONDecodeError("bad", "", 0)
+        return "ok"
+
+    result = build_retrying(initial_wait=0, max_wait=0, attempts=3)(flaky)
+    assert result == "ok"
+    assert calls["n"] == 2
+
+
+def test_retry_policy_does_not_retry_non_validation_errors():
+    """4xx-контент (битый запрос) не ретраим — попытка ровно одна."""
+    import pytest
+
+    from botkin.llm.client import build_retrying
+
+    calls = {"n": 0}
+
+    def boom():
+        calls["n"] += 1
+        raise ValueError("400 Bad Request — изображение слишком большое")
+
+    with pytest.raises(Exception):
+        build_retrying(initial_wait=0, max_wait=0, attempts=3)(boom)
+    assert calls["n"] == 1
+
+
+def test_retry_policy_stops_after_attempts():
+    """Стоп по числу попыток: упорный провал валидации не крутит вечно."""
+    import pytest
+    from json import JSONDecodeError
+
+    from botkin.llm.client import build_retrying
+
+    calls = {"n": 0}
+
+    def always_bad():
+        calls["n"] += 1
+        raise JSONDecodeError("bad", "", 0)
+
+    with pytest.raises(Exception):
+        build_retrying(initial_wait=0, max_wait=0, attempts=2)(always_bad)
+    assert calls["n"] == 2
+
+
+def test_retry_policy_raises_retryerror_not_bare_on_exhaustion():
+    """Контракт с instructor: на исчерпании летит tenacity RetryError, а не голый
+    ValidationError. instructor ловит RetryError и оборачивает в InstructorRetryException
+    с last_completion — без этого ломается salvage обрезанного JSON. (reraise=False)."""
+    import pytest
+    from json import JSONDecodeError
+
+    from tenacity import RetryError
+
+    from botkin.llm.client import build_retrying
+
+    def always_bad():
+        raise JSONDecodeError("bad", "", 0)
+
+    with pytest.raises(RetryError):
+        build_retrying(initial_wait=0, max_wait=0, attempts=2)(always_bad)
+
+
 def _tiny_pdf(tmp_path):
     doc = pymupdf.open()
     page = doc.new_page()
@@ -20,6 +92,51 @@ def _tiny_pdf(tmp_path):
     doc.save(str(p))
     doc.close()
     return p
+
+
+def test_extract_passes_tenacity_retrying_as_max_retries(tmp_path):
+    """instructor получает tenacity-Retrying (backoff+jitter), а не голый int."""
+    from tenacity import Retrying
+
+    from botkin.llm import extract
+    from botkin.llm.extract import RawAnalysis
+
+    raw = RawAnalysis.model_validate({
+        "results": [{"parameter": "Гемоглобин", "value": "145", "unit": "г/л"}]})
+    object.__setattr__(raw, "_raw_response",
+                       MagicMock(usage=MagicMock(prompt_tokens=1, completion_tokens=1)))
+    fake = MagicMock()
+    fake.chat.completions.create.return_value = raw
+
+    with patch("botkin.llm.extract.get_client", return_value=fake), \
+         patch("botkin.llm.extract.prepare_images", return_value=[b"\xff\xd8fakejpeg"]):
+        extract.run_analysis(_tiny_pdf(tmp_path))
+
+    _, kwargs = fake.chat.completions.create.call_args
+    assert isinstance(kwargs["max_retries"], Retrying)
+
+
+def test_classify_passes_tenacity_retrying_as_max_retries(tmp_path):
+    """Классификатор тоже ретраит через tenacity, а не захардкоженный int."""
+    from tenacity import Retrying
+
+    from botkin.llm import classify
+
+    resp = MagicMock()
+    resp.doc_type = "analysis"
+    resp.confidence = 0.9
+    resp.title = None
+    resp.clinic = None
+    resp._raw_response.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+    fake = MagicMock()
+    fake.chat.completions.create.return_value = resp
+
+    with patch("botkin.llm.classify.get_client", return_value=fake), \
+         patch("botkin.llm.classify.prepare_images", return_value=[b"\xff\xd8fakejpeg"]):
+        classify.run_vlm(_tiny_pdf(tmp_path))
+
+    _, kwargs = fake.chat.completions.create.call_args
+    assert isinstance(kwargs["max_retries"], Retrying)
 
 
 def test_call_passes_native_format_schema_when_enabled(tmp_path):

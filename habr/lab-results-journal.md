@@ -1203,3 +1203,66 @@ from botkin.llm.classify import ClassifySchema; print(sorted(build_extra_body(Cl
 .venv/bin/python -m pytest tests/test_llm_calls.py -q   # 12 passed
 ```
 
+## Итерация 18: устойчивость VLM-вызовов — tenacity внутрь instructor, а не снаружи (P1-5)
+
+**Проблема.** Ретраи VLM-вызовов были примитивны: `max_retries=2` захардкожен в `extract`,
+а в `classify` своя копия той же константы. У instructor-овых ретраев нет ни backoff, ни
+джиттера, ни потолка по времени — деградировавшая модель (генерация дублей, обрывы) могла
+переспрашиваться мгновенно подряд и долбить Ollama без пауз. P1-5 из ревью: ввести `tenacity`
+(экспоненциальный backoff + джиттер, стоп по числу попыток И по суммарному времени), ретраить
+на провале валидации, но **не** на 4xx-контенте (битый запрос повтором не чинится).
+
+**Диагноз — где грабли провязки.** Очевидный путь «обернуть `create()` снаружи в `Retrying`»
+ломается о контракт исключений instructor. При провале валидации instructor внутри своего
+цикла бросает `ValidationError`/`JSONDecodeError`, а на исчерпании ретраев перехватывает
+`tenacity.RetryError` и переупаковывает его в `InstructorRetryException(last_completion=...)`.
+Этот `last_completion` — сырой ответ модели, на котором держится наш salvage обрезанного JSON
+(`extract._raw_text_from_exc`). Внешняя обёртка увидела бы `InstructorRetryException`
+(а не `ValidationError`) — наш предикат `retry_if_exception_type((JSONDecodeError, ValidationError))`
+его бы не поймал, и ретрай-политика просто не сработала бы.
+
+Правильный механизм нашёлся в самом instructor (1.7.2): `retry_sync(max_retries: int | Retrying)`
+— **он принимает tenacity-`Retrying` напрямую** и итерирует `for attempt in max_retries:`,
+а валидацию делает внутри тела цикла. То есть политику надо отдать *внутрь* instructor, а не
+оборачивать его снаружи. Тогда наш `retry`-предикат управляет ретраями валидации, salvage цел,
+двойного ретрая нет.
+
+**Вторая, более тонкая грабля — `reraise`.** Первая версия `build_retrying` стояла с
+`reraise=True` (наружу — исходное исключение). Юнит-тесты с мокнутым `create()` это пропускали:
+зелено. Но чтение исходника `retry_sync` показало регрессию: instructor ловит именно
+`except RetryError`. При `reraise=True` tenacity на исчерпании бросает голый `ValidationError`
+**мимо** этого перехвата → `InstructorRetryException` не собирается → `last_completion` теряется
+→ salvage обрезанного JSON молча ломается. Фикс: `reraise=False` (дефолт) — instructor получает
+`RetryError`, оборачивает, salvage работает. Урок: интеграцию с чужой библиотекой верифицируй
+по её исходнику, мок-тест контракта исключений не покрывает.
+
+**Решение (TDD: RED → GREEN).**
+- `client.build_retrying(initial_wait, max_wait, attempts, max_seconds)` → `Retrying`:
+  `wait_exponential_jitter`, `stop_after_attempt(VLM_MAX_RETRIES+1) | stop_after_delay(...)`,
+  `retry_if_exception_type((JSONDecodeError, ValidationError))`, `reraise=False`. Дефолты — из
+  config; аргументы оставлены для тестов (`wait=0`).
+- Config: `VLM_RETRY_MAX_SECONDS=300`, `VLM_RETRY_INITIAL_WAIT=1.0`, `VLM_RETRY_MAX_WAIT=10.0`
+  (все с env-override).
+- `extract._call_vlm` и `classify.run_vlm`: `max_retries=VLM_MAX_RETRIES` → `max_retries=build_retrying()`.
+  `VLM_MAX_RETRIES` теперь задаёт число попыток внутри политики, а не передаётся int напрямую.
+- `tenacity>=8.2.0` добавлена в зависимости (раньше была транзитивной).
+- `usage_of()` в try (приватный `_raw_response.usage`) — закрыто ещё в P1-2, перепроверено.
+
+RED: 3 теста политики падали на `ImportError build_retrying`; 2 теста провязки — на
+`max_retries` (был int, ждали `Retrying`). GREEN: политика ретраит `JSONDecodeError` и
+успевает на 2-й попытке; не ретраит `ValueError` (ровно 1 вызов); стоп по числу попыток;
+`create()` в обоих путях получает `isinstance(max_retries, Retrying)`; на исчерпании летит
+`RetryError` (регресс-тест контракта с instructor).
+
+**Итог.** 257 passed (+6 к 251), ruff clean. Поведенческую проверку backoff под реально
+деградировавшей моделью надо снять на живом Ollama — здесь его нет; логику ретраев и контракт
+с instructor закрыли юнит-тестами + чтением исходника библиотеки.
+
+Repro:
+```
+.venv/bin/python -c "from botkin.llm.client import build_retrying; r=build_retrying(); \
+print(type(r).__name__, r.reraise)"   # Retrying False
+.venv/bin/python -m pytest tests/test_llm_calls.py -q   # 18 passed
+.venv/bin/python -m pytest -q                           # 257 passed
+```
+

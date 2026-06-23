@@ -7,12 +7,12 @@ import instructor
 from pydantic import BaseModel
 
 from botkin.config import (
-    VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, VLM_MAX_RETRIES, IMAGE_CLASSIFY_LONG_SIDE,
+    VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_CLASSIFY_LONG_SIDE,
     VLM_STRUCTURED_OUTPUT,
 )
 from botkin.domain.models import ClassifyResult, DocType
 from botkin.exceptions import ClassificationError
-from botkin.llm.client import get_client, build_extra_body, usage_of
+from botkin.llm.client import get_client, build_extra_body, build_retrying, usage_of
 from botkin.llm.prompts import CLASSIFY_INSTRUCTION, CLASSIFY_VLM_SYSTEM, PROMPTS_VERSION
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
 
@@ -49,7 +49,7 @@ def run_vlm(source_path: Path) -> ClassifyResult:
             model=VLM_MODEL,
             messages=messages,
             response_model=ClassifySchema,
-            max_retries=VLM_MAX_RETRIES,
+            max_retries=build_retrying(),
             max_tokens=VLM_MAX_TOKENS,
             extra_body=build_extra_body(ClassifySchema),
         )

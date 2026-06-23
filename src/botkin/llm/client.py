@@ -4,17 +4,53 @@ import os
 import platform
 import subprocess
 import urllib.request
+from json import JSONDecodeError
 
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+from tenacity import (
+    Retrying, retry_if_exception_type, stop_after_attempt, stop_after_delay,
+    wait_exponential_jitter,
+)
 
 import instructor
 from botkin.config import (
     OLLAMA_URL, OLLAMA_KEEP_ALIVE, VLM_NUM_CTX, VLM_REPEAT_PENALTY, VLM_NUM_PREDICT,
-    VLM_REQUEST_TIMEOUT, VLM_STRUCTURED_OUTPUT,
+    VLM_MAX_RETRIES, VLM_REQUEST_TIMEOUT, VLM_RETRY_INITIAL_WAIT, VLM_RETRY_MAX_SECONDS,
+    VLM_RETRY_MAX_WAIT, VLM_STRUCTURED_OUTPUT,
 )
 
 log = logging.getLogger(__name__)
+
+
+def build_retrying(
+    initial_wait: float | None = None,
+    max_wait: float | None = None,
+    attempts: int | None = None,
+    max_seconds: float | None = None,
+) -> Retrying:
+    """tenacity-Retrying для VLM-вызовов: экспоненциальный backoff с джиттером.
+
+    Ретраим только ошибки парсинга/валидации ответа (JSONDecodeError, ValidationError) —
+    модель «недоген» JSON, повтор имеет смысл. Битый запрос (4xx, слишком большое
+    изображение и т.п.) не ретраим: повтор его не починит, лишь жжёт время и GPU.
+    Стоп — по числу попыток И по суммарному времени (деградировавшая модель не крутит
+    ретраи минутами); джиттер разводит одновременные повторы к Ollama.
+
+    reraise=False (дефолт) — намеренно: instructor ожидает на исчерпании RetryError,
+    который он перехватывает и оборачивает в InstructorRetryException с last_completion.
+    Этот last_completion нужен salvage обрезанного JSON (_raw_text_from_exc). При
+    reraise=True наружу летел бы голый ValidationError мимо перехвата — salvage сломался бы.
+    """
+    initial = VLM_RETRY_INITIAL_WAIT if initial_wait is None else initial_wait
+    mx = VLM_RETRY_MAX_WAIT if max_wait is None else max_wait
+    n = (VLM_MAX_RETRIES + 1) if attempts is None else attempts
+    secs = VLM_RETRY_MAX_SECONDS if max_seconds is None else max_seconds
+    return Retrying(
+        retry=retry_if_exception_type((JSONDecodeError, ValidationError)),
+        wait=wait_exponential_jitter(initial=initial, max=mx),
+        stop=stop_after_attempt(n) | stop_after_delay(secs),
+    )
 
 
 def default_options() -> dict:

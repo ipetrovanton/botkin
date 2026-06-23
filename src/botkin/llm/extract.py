@@ -13,12 +13,14 @@ import instructor
 from pydantic import BaseModel
 
 from botkin.config import (
-    VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, VLM_MAX_RETRIES, IMAGE_EXTRACT_LONG_SIDE,
+    VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_EXTRACT_LONG_SIDE,
     VERBATIM_MAX_REJECT_RATIO, VLM_STRUCTURED_OUTPUT,
 )
 from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ExtractionError
-from botkin.llm.client import get_client, build_extra_body, default_options, usage_of
+from botkin.llm.client import (
+    get_client, build_extra_body, build_retrying, default_options, usage_of,
+)
 from botkin.llm.prompts import (
     ANALYSIS_INSTRUCTION, ANALYSIS_TEXT_SYSTEM, ANALYSIS_VLM_SYSTEM,
     DOCTOR_REPORT_INSTRUCTION, DOCTOR_REPORT_VLM_SYSTEM, PROMPTS_VERSION, TEXT_INSTRUCTION,
@@ -114,7 +116,7 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
             model=VLM_MODEL,
             messages=messages,
             response_model=response_model,
-            max_retries=VLM_MAX_RETRIES,
+            max_retries=build_retrying(),
             max_tokens=VLM_MAX_TOKENS,
             extra_body=build_extra_body(response_model, options),
         )

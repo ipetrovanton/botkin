@@ -125,6 +125,12 @@ VLM_NUM_PREDICT = int(os.getenv("VLM_NUM_PREDICT", _get("vlm.num_predict")))
 VLM_REPEAT_PENALTY = float(os.getenv("VLM_REPEAT_PENALTY", _get("vlm.repeat_penalty")))
 # Сколько раз instructor переспросит модель при невалидном по схеме ответе.
 VLM_MAX_RETRIES = int(os.getenv("VLM_MAX_RETRIES", "2"))
+# Ретраи VLM-вызовов (tenacity): экспоненциальный backoff с джиттером, стоп по числу
+# попыток (VLM_MAX_RETRIES) И по суммарному времени. Деградировавшая модель не должна
+# крутить минутами; джиттер разводит одновременные ретраи.
+VLM_RETRY_MAX_SECONDS = float(os.getenv("VLM_RETRY_MAX_SECONDS", "300"))
+VLM_RETRY_INITIAL_WAIT = float(os.getenv("VLM_RETRY_INITIAL_WAIT", "1.0"))
+VLM_RETRY_MAX_WAIT = float(os.getenv("VLM_RETRY_MAX_WAIT", "10.0"))
 # Потолок одного VLM-вызова. Деградировавший вызов (генерация дублей) не должен висеть
 # минутами — по таймауту прерываем, страница пропускается, документ сохраняет остальное.
 VLM_REQUEST_TIMEOUT = float(os.getenv("VLM_REQUEST_TIMEOUT", "120"))
