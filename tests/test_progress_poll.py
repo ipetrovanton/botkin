@@ -63,7 +63,7 @@ def test_run_progress_flow_uses_config_timeout(monkeypatch):
         captured.update(kwargs)
         return None
 
-    monkeypatch.setattr(up, "get_user_id", lambda t: 1)
+    monkeypatch.setattr(up, "_resolve_user_id", lambda t: 1)
     monkeypatch.setattr(up, "poll_until_done", fake_poll)
 
     async def edit(_):

@@ -8,21 +8,20 @@ from aiogram.types import Message
 
 from botkin.bot.cards import format_card_header, ref_marker
 from botkin.bot.keyboards import card_keyboard
-from botkin.db.queries import (
-    get_doctor_reports, get_lab_results, get_last_document, get_user_id,
-)
+from botkin.db.connection import get_conn
+from botkin.db.repos import DocumentRepo, LabRepo, ReportRepo, UserRepo
 
 router = Router(name="show")
 
 
 @router.message(Command("show", "last"))
 async def cmd_show(message: Message) -> None:
-    user_id = get_user_id(message.from_user.id)
+    with get_conn() as conn:
+        user_id = UserRepo(conn).get_id(message.from_user.id)
+        doc = DocumentRepo(conn, user_id).get_last() if user_id else None
     if not user_id:
         await message.answer("⚠️ Отправь /start для регистрации.")
         return
-
-    doc = get_last_document(user_id)
     if not doc:
         await message.answer("📭 Документов пока нет.")
         return
@@ -37,10 +36,15 @@ async def cmd_show(message: Message) -> None:
 
 def _format_document(doc_id: int, doc: dict) -> str:
     doc_type = doc["doc_type"]
+    user_id = doc["user_id"]
     if doc_type == "analysis":
-        return _format_labs(get_lab_results(doc_id))
+        with get_conn() as conn:
+            rows = LabRepo(conn, user_id).for_document(doc_id)
+        return _format_labs(rows)
     elif doc_type == "doctor_report":
-        return _format_doctor_reports(get_doctor_reports(doc_id))
+        with get_conn() as conn:
+            rows = ReportRepo(conn, user_id).for_document(doc_id)
+        return _format_doctor_reports(rows)
     else:
         return (
             "ℹ️ Распознавание этого типа документа (например, рецептов) "

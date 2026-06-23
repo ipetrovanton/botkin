@@ -12,8 +12,7 @@ from botkin.bot.cards import format_card_header
 from botkin.bot.progress import poll_until_done, render_progress
 from botkin.config import BOT_API_URL, BOT_PROGRESS_TIMEOUT, PHOTO_LOWRES_WARN, UPLOAD_MAX_BYTES
 from botkin.db.connection import get_conn
-from botkin.db.queries import get_document, get_document_status, get_user_id
-from botkin.db.repos import DocumentRepo
+from botkin.db.repos import DocumentRepo, UserRepo
 
 router = Router(name="upload")
 log = logging.getLogger("botkin.bot.upload")
@@ -52,10 +51,17 @@ async def _upload_to_api(tg_user_id: int, filename: str, file_bytes: bytes) -> d
         return resp.json()
 
 
+def _resolve_user_id(tg_user_id: int) -> int | None:
+    """user_id по telegram-id (шов: в тестах подменяется без обращения к БД)."""
+    with get_conn() as conn:
+        return UserRepo(conn).get_id(tg_user_id)
+
+
 def render_document_card(doc_id: int, user_id: int) -> str:
     """Полная карточка документа по id (шапка + детали из show-рендера)."""
     from botkin.bot.handlers.show import _format_document
-    doc = get_document(doc_id, user_id)
+    with get_conn() as conn:
+        doc = DocumentRepo(conn, user_id).get(doc_id)
     if not doc:
         return "❌ Документ не найден."
     return f"{format_card_header(doc)}\n────────────\n{_format_document(doc_id, doc)}"
@@ -70,13 +76,14 @@ async def run_progress_flow(tg_user_id: int, doc_id: int, edit) -> None:
     """Поллит статус и по завершении показывает карточку. `edit(text)` — корутина."""
     log.info("[FLOW_START] Doc %d | tg_user=%d", doc_id, tg_user_id)
     try:
-        user_id = get_user_id(tg_user_id)
+        user_id = _resolve_user_id(tg_user_id)
         if not user_id:
             log.warning("[FLOW_NO_USER] Doc %d | tg_user=%d не зарегистрирован", doc_id, tg_user_id)
             return
 
         async def _get_status():
-            return get_document_status(doc_id, user_id)
+            with get_conn() as conn:
+                return DocumentRepo(conn, user_id).get_status(doc_id)
 
         final = await poll_until_done(
             doc_id=doc_id, get_status=_get_status, edit=edit,

@@ -1100,3 +1100,56 @@ Repro:
 grep -rn "# ──" src/    # пусто
 .venv/bin/python -m pytest -q
 ```
+
+## Итерация 16: единый слой доступа к данным — три контракта свели в репозитории (P0-2)
+
+**Проблема.** Код-ревью 2026-06-22 (`docs/code-review-2026-06-22.md`, пункт P0-2) назвал
+главным архитектурным долгом «три параллельных механизма доступа к данным»:
+1. `db/queries.py` — модульные функции-чтения, каждая открывает свой `get_conn()`;
+2. `db/repos.py` — классовые репозитории `(conn, user_id)` для записи;
+3. инлайн-SQL прямо в оркестраторе (`_run`-SELECT, `_mark_failed`, `_save_raw_extraction`,
+   `_persist_lab`, `_persist_doctor_report`).
+
+Следствие — рассинхрон: один и тот же запрос жил в двух местах. Дубль `get_document`
+(`queries.py:43` ↔ `DocumentRepo.get`), дубль `get_user_id` (`queries.py:23` ↔ `UserRepo`),
+`get_last_document` ≈ `list_recent(limit=1)`. Правка одного запроса требовала помнить про
+второй экземпляр. Плюс часть читающих запросов (`get_lab_results`, `get_doctor_reports`)
+вообще не имела фильтра `WHERE user_id = ?` — тенант-изоляция держалась только на том, что
+вызывающий заранее проверил владельца документа.
+
+**Диагноз.** Репозитории — правильный единый контракт: `(conn, user_id)` в конструкторе
+делает тенант-скоуп инвариантом класса, а не строкой, которую надо не забыть в каждом
+запросе. Две операции точки входа pipeline честно вне user-скоупа: чтение документа, когда
+владелец ещё не прочитан из БД, и `mark_failed` из глобального обработчика сбоя. Их нельзя
+впихнуть в `(conn, user_id)`-конструктор — оформили как `@staticmethod`-люки
+`DocumentRepo.get_by_id` / `DocumentRepo.mark_failed` (документированные исключения, а не
+размывание контракта).
+
+**Решение.**
+- `repos.py`: расширили `DocumentRepo` (read: `get_status`, `get_last`, `adjacent_id`,
+  `count`, `list`, `in_period`; write: `save_raw_extraction`), добавили `LabRepo`
+  (`save_results`, `for_document`, `dynamics`, `in_period`) и `ReportRepo` (`save`,
+  `for_document`), в `UserRepo` — `get_id` (= бывший `get_user_id`). Убрали мёртвый
+  `list_recent`. Нормализация осталась в pipeline-стадии — репозиторий только персистит
+  готовые словари (`save_results`/`save` принимают list[dict]).
+- `orchestrator.py`: весь инлайн-SQL → вызовы репозиториев. `transaction(conn)` уехала
+  внутрь `LabRepo.save_results`/`ReportRepo.save` — атомарность вставки панели теперь
+  свойство репозитория, а не оркестратора.
+- Хендлеры (`show/dynamics/browse/upload`) и api переведены на репозитории. `_format_document`
+  берёт `user_id` из самого `doc` (`SELECT *` его уже содержит) — сигнатура не поменялась,
+  call-sites не затронуты. В upload ввели приватный шов `_resolve_user_id` (делегирует
+  `UserRepo.get_id`) — чтобы юнит-тесты подменяли его без обращения к БД.
+- Читающим `LabRepo.for_document`/`ReportRepo.for_document` добавили `AND user_id = ?` —
+  усиление тенант-изоляции (раньше фильтра не было). Новый регресс-тест
+  `test_for_document_scoped_to_owner`: чужой `user_id` видит `[]`.
+- `db/queries.py` удалён. Тесты `test_queries_ui.py` переписаны на репозитории.
+
+**Итог.** 248 passed (+1 тенант-тест), ruff clean. Сетей доступа к данным — одна.
+Удалён `queries.py` (177 строк), инлайн-SQL из оркестратора вынесен.
+
+Repro:
+```
+grep -rn "db.queries" src tests   # пусто — модуль удалён
+.venv/bin/python -m pytest -q      # 248 passed
+.venv/bin/ruff check src tests     # All checks passed
+```

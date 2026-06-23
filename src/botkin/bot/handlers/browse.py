@@ -11,16 +11,15 @@ from botkin.bot.keyboards import (
     period_presets_keyboard, period_view_keyboard,
 )
 from botkin.bot.period import parse_manual, preset_range
-from botkin.db.queries import (
-    count_documents, documents_in_period, get_adjacent_document_id, get_document,
-    get_user_id, labs_in_period, list_documents,
-)
+from botkin.db.connection import get_conn
+from botkin.db.repos import DocumentRepo, LabRepo, UserRepo
 
 router = Router(name="browse")
 
 
 async def _need_user(obj, tg_id: int) -> int | None:
-    uid = get_user_id(tg_id)
+    with get_conn() as conn:
+        uid = UserRepo(conn).get_id(tg_id)
     if not uid:
         answer = obj.answer if isinstance(obj, Message) else obj.message.answer
         await answer("⚠️ Отправь /start для регистрации.")
@@ -29,20 +28,24 @@ async def _need_user(obj, tg_id: int) -> int | None:
 
 def _render_card(doc_id: int, user_id: int):
     from botkin.bot.handlers.show import _format_document
-    doc = get_document(doc_id, user_id)
-    if not doc:
-        return None, None
-    # соседи по дате — прямым индексным запросом, без выгрузки всего списка id
-    has_prev = get_adjacent_document_id(user_id, doc_id, older=True) is not None
-    has_next = get_adjacent_document_id(user_id, doc_id, older=False) is not None
+    with get_conn() as conn:
+        repo = DocumentRepo(conn, user_id)
+        doc = repo.get(doc_id)
+        if not doc:
+            return None, None
+        # соседи по дате — прямым индексным запросом, без выгрузки всего списка id
+        has_prev = repo.adjacent_id(doc_id, older=True) is not None
+        has_next = repo.adjacent_id(doc_id, older=False) is not None
     text = f"{format_card_header(doc)}\n────────────\n{_format_document(doc_id, doc)}"
     return text, card_keyboard(doc_id, has_prev=has_prev, has_next=has_next)
 
 
 async def _show_list(target, user_id: int, code: str, offset: int):
     doc_type = TYPE_CODES.get(code)
-    total = count_documents(user_id, doc_type=doc_type)
-    docs = list_documents(user_id, doc_type=doc_type, limit=PAGE_SIZE, offset=offset)
+    with get_conn() as conn:
+        repo = DocumentRepo(conn, user_id)
+        total = repo.count(doc_type=doc_type)
+        docs = repo.list(doc_type=doc_type, limit=PAGE_SIZE, offset=offset)
     body = format_list_body(docs, offset=offset, total=total)
     kb = list_keyboard([d["id"] for d in docs], doc_type=doc_type, offset=offset, total=total)
     await target(body, reply_markup=kb)
@@ -57,12 +60,14 @@ async def cmd_list(message: Message) -> None:
 
 
 async def _period_labs(target, user_id, start, end, label):
-    groups = labs_in_period(user_id, start, end)
+    with get_conn() as conn:
+        groups = LabRepo(conn, user_id).in_period(start, end)
     await target(format_labs_summary(groups, label=label))
 
 
 async def _show_period_docs(target, user_id, start, end, preset):
-    docs = documents_in_period(user_id, start, end, limit=PAGE_SIZE, offset=0)
+    with get_conn() as conn:
+        docs = DocumentRepo(conn, user_id).in_period(start, end, limit=PAGE_SIZE, offset=0)
     body = format_list_body(docs, offset=0, total=len(docs))
     kb = list_keyboard([d["id"] for d in docs], doc_type=None, offset=0, total=len(docs))
     await target(body, reply_markup=kb)
@@ -107,7 +112,8 @@ async def on_callback(cb: CallbackQuery) -> None:
 
     elif action == "nav":
         doc_id, direction = int(parts[0]), parts[1]
-        target_id = get_adjacent_document_id(uid, doc_id, older=(direction == "prev"))
+        with get_conn() as conn:
+            target_id = DocumentRepo(conn, uid).adjacent_id(doc_id, older=(direction == "prev"))
         if target_id is not None:
             text, kb = _render_card(target_id, uid)
             await cb.message.edit_text(text, reply_markup=kb)

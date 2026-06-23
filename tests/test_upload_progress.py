@@ -10,7 +10,7 @@ def test_run_progress_flow_shows_card_on_success(monkeypatch):
         return "extracted"
 
     monkeypatch.setattr(up, "poll_until_done", fake_poll)
-    monkeypatch.setattr(up, "get_user_id", lambda tg: 1)
+    monkeypatch.setattr(up, "_resolve_user_id", lambda tg: 1)
     monkeypatch.setattr(up, "render_document_card", lambda doc_id, uid: "КАРТОЧКА #9")
 
     edit = AsyncMock()
@@ -66,7 +66,7 @@ def test_run_progress_flow_timeout(monkeypatch):
         return None
 
     monkeypatch.setattr(up, "poll_until_done", fake_poll)
-    monkeypatch.setattr(up, "get_user_id", lambda tg: 1)
+    monkeypatch.setattr(up, "_resolve_user_id", lambda tg: 1)
     edit = AsyncMock()
     asyncio.run(up.run_progress_flow(tg_user_id=10, doc_id=9, edit=edit))
     assert "затянул" in edit.await_args.args[0].lower()

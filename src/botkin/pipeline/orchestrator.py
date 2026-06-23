@@ -8,8 +8,8 @@ from botkin.config import (
     DELIVERY_FALLBACK_DELAY, IMAGE_CLASSIFY_LONG_SIDE, IMAGE_EXTRACT_LONG_SIDE,
     PDF_RENDER_DPI, VLM_MODEL, VLM_NUM_CTX, VLM_NUM_PREDICT, VLM_TEMPERATURE,
 )
-from botkin.db.connection import get_conn, transaction
-from botkin.db.repos import DocumentRepo
+from botkin.db.connection import get_conn
+from botkin.db.repos import DocumentRepo, LabRepo, ReportRepo
 from botkin.domain.models import ClassifyResult, DoctorReport, LabResult
 from botkin.exceptions import ClassificationError, ExtractionError
 from botkin.llm import classify, extract
@@ -65,10 +65,7 @@ async def process_document(document_id: int, telegram_user_id: int) -> None:
 
 async def _run(document_id: int, telegram_user_id: int) -> None:
     with get_conn() as conn:
-        doc = conn.execute(
-            "SELECT id, user_id, source_path FROM documents WHERE id = ?",
-            (document_id,),
-        ).fetchone()
+        doc = DocumentRepo.get_by_id(conn, document_id)
 
     if not doc:
         log.error("Document %d not found", document_id)
@@ -146,7 +143,7 @@ async def _extract_analysis(
 ) -> None:
     items: list[LabResult] = await asyncio.to_thread(extract.run_analysis, source_path)
     log.info("Doc %d: извлечено строк анализов=%d", document_id, len(items))
-    _save_raw_extraction(document_id, items)
+    _save_raw_extraction(document_id, user_id, items)
     matches = _persist_lab(document_id, user_id, items)
     if not matches:
         return
@@ -170,7 +167,7 @@ async def _extract_doctor_report(
     document_id: int, user_id: int, source_path: Path, result: ClassifyResult,
 ) -> None:
     items: list[DoctorReport] = await asyncio.to_thread(extract.run_doctor_report, source_path)
-    _save_raw_extraction(document_id, items)
+    _save_raw_extraction(document_id, user_id, items)
     _persist_doctor_report(document_id, user_id, items)
 
 
@@ -184,19 +181,16 @@ _EXTRACTORS = {
 
 def _mark_failed(document_id: int) -> None:
     # Без user_id: вызывается в т.ч. из глобального обработчика, который ловит сбой ещё
-    # до того, как из БД прочитан владелец документа. Пометка статуса по id безопасна —
-    # данные не читаются, только переключается статус собственного документа.
+    # до того, как из БД прочитан владелец документа (см. DocumentRepo.mark_failed).
     with get_conn() as conn:
-        conn.execute("UPDATE documents SET status = 'failed' WHERE id = ?", (document_id,))
-        conn.commit()
+        DocumentRepo.mark_failed(conn, document_id)
 
 
-def _save_raw_extraction(document_id: int, items: list) -> None:
+def _save_raw_extraction(document_id: int, user_id: int, items: list) -> None:
     """Сохраняет полный сырой ответ модели (до нормализации) — гарантия восстановимости."""
     payload = json.dumps([i.model_dump(mode="json") for i in items], ensure_ascii=False)
     with get_conn() as conn:
-        conn.execute("UPDATE documents SET raw_extraction = ? WHERE id = ?", (payload, document_id))
-        conn.commit()
+        DocumentRepo(conn, user_id).save_raw_extraction(document_id, payload)
 
 
 # Persist
@@ -209,46 +203,36 @@ def _persist_lab(document_id: int, user_id: int, items: list[LabResult]) -> list
     # показателя (Гемоглобин/Эритроциты числятся «Химико-микроскопическими»). Опознаём
     # панель один раз по всему документу и проставляем строкам гематологию.
     is_cbc = is_cbc_panel([item.analyte_name for item in items])
-    with get_conn() as conn, transaction(conn):
-        for item in items:
-            unit_canon, unit_raw = canonical_unit(item.unit)
-            match = normalizer.correct(item.analyte_name)
-            matches.append(match)
-            group = HEMATOLOGY_GROUP if (is_cbc and is_cbc_analyte(item.analyte_name)) else match.group
-            # Единица из документа сверяется с НАБОРОМ известных единиц показателя:
-            # совпадение хотя бы с одной канонической формой → ок (нет ложных ⚠️).
-            unit_mismatch = None
-            unit_expected = match.expected_units[0] if match.expected_units else None
-            if match.status == "matched" and match.expected_units and unit_canon:
-                known = {canonical_unit(u)[0] for u in match.expected_units}
-                unit_mismatch = 0 if unit_canon in known else 1
-            conn.execute(
-                """INSERT INTO lab_results(document_id, user_id, analyte_code, analyte_name,
-                   value_num, value_text, unit, ref_low, ref_high, ref_operator, ref_text,
-                   taken_at, source_table_cell, value_raw, unit_raw, taken_at_raw,
-                   analyte_canonical, loinc, nmu_code, analyte_group, match_status,
-                   unit_expected, unit_mismatch)
-                   VALUES (:document_id, :user_id, :analyte_code, :analyte_name,
-                   :value_num, :value_text, :unit, :ref_low, :ref_high, :ref_operator, :ref_text,
-                   :taken_at, :source_table_cell, :value_raw, :unit_raw, :taken_at_raw,
-                   :analyte_canonical, :loinc, :nmu_code, :analyte_group, :match_status,
-                   :unit_expected, :unit_mismatch)""",
-                {
-                    "document_id": document_id, "user_id": user_id,
-                    "analyte_code": item.analyte_code, "analyte_name": item.analyte_name,
-                    "value_num": item.value_num, "value_text": item.value_text, "unit": unit_canon,
-                    "ref_low": item.ref_low, "ref_high": item.ref_high,
-                    "ref_operator": item.ref_operator, "ref_text": item.ref_text,
-                    "taken_at": item.taken_at.isoformat() if item.taken_at else None,
-                    "source_table_cell": item.source_table_cell,
-                    "value_raw": item.value_raw, "unit_raw": unit_raw,
-                    "taken_at_raw": item.taken_at_raw,
-                    "analyte_canonical": match.canonical, "loinc": match.loinc,
-                    "nmu_code": match.nmu, "analyte_group": group,
-                    "match_status": match.status, "unit_expected": unit_expected,
-                    "unit_mismatch": unit_mismatch,
-                },
-            )
+    rows = []
+    for item in items:
+        unit_canon, unit_raw = canonical_unit(item.unit)
+        match = normalizer.correct(item.analyte_name)
+        matches.append(match)
+        group = HEMATOLOGY_GROUP if (is_cbc and is_cbc_analyte(item.analyte_name)) else match.group
+        # Единица из документа сверяется с НАБОРОМ известных единиц показателя:
+        # совпадение хотя бы с одной канонической формой → ок (нет ложных ⚠️).
+        unit_mismatch = None
+        unit_expected = match.expected_units[0] if match.expected_units else None
+        if match.status == "matched" and match.expected_units and unit_canon:
+            known = {canonical_unit(u)[0] for u in match.expected_units}
+            unit_mismatch = 0 if unit_canon in known else 1
+        rows.append({
+            "document_id": document_id, "user_id": user_id,
+            "analyte_code": item.analyte_code, "analyte_name": item.analyte_name,
+            "value_num": item.value_num, "value_text": item.value_text, "unit": unit_canon,
+            "ref_low": item.ref_low, "ref_high": item.ref_high,
+            "ref_operator": item.ref_operator, "ref_text": item.ref_text,
+            "taken_at": item.taken_at.isoformat() if item.taken_at else None,
+            "source_table_cell": item.source_table_cell,
+            "value_raw": item.value_raw, "unit_raw": unit_raw,
+            "taken_at_raw": item.taken_at_raw,
+            "analyte_canonical": match.canonical, "loinc": match.loinc,
+            "nmu_code": match.nmu, "analyte_group": group,
+            "match_status": match.status, "unit_expected": unit_expected,
+            "unit_mismatch": unit_mismatch,
+        })
+    with get_conn() as conn:
+        LabRepo(conn, user_id).save_results(rows)
     return matches
 
 
@@ -264,25 +248,18 @@ def _normalize_medications(lines: list[str]) -> str:
 
 
 def _persist_doctor_report(document_id: int, user_id: int, items: list[DoctorReport]) -> None:
-    with get_conn() as conn, transaction(conn):
-        for item in items:
-            conn.execute(
-                """INSERT INTO doctor_reports(document_id, user_id, diagnosis,
-                   recommendations_json, complaints_json, anamnesis, medications_json,
-                   medications_normalized_json,
-                   visit_date, doctor_name, department)
-                   VALUES (:document_id, :user_id, :diagnosis,
-                   :recommendations_json, :complaints_json, :anamnesis, :medications_json,
-                   :medications_normalized_json,
-                   :visit_date, :doctor_name, :department)""",
-                {
-                    "document_id": document_id, "user_id": user_id, "diagnosis": item.diagnosis,
-                    "recommendations_json": json.dumps(item.recommendations, ensure_ascii=False),
-                    "complaints_json": json.dumps(item.complaints, ensure_ascii=False),
-                    "anamnesis": item.anamnesis,
-                    "medications_json": json.dumps(item.medications, ensure_ascii=False),
-                    "medications_normalized_json": _normalize_medications(item.medications),
-                    "visit_date": item.visit_date.isoformat() if item.visit_date else None,
-                    "doctor_name": item.doctor_name, "department": item.department,
-                },
-            )
+    rows = [
+        {
+            "document_id": document_id, "user_id": user_id, "diagnosis": item.diagnosis,
+            "recommendations_json": json.dumps(item.recommendations, ensure_ascii=False),
+            "complaints_json": json.dumps(item.complaints, ensure_ascii=False),
+            "anamnesis": item.anamnesis,
+            "medications_json": json.dumps(item.medications, ensure_ascii=False),
+            "medications_normalized_json": _normalize_medications(item.medications),
+            "visit_date": item.visit_date.isoformat() if item.visit_date else None,
+            "doctor_name": item.doctor_name, "department": item.department,
+        }
+        for item in items
+    ]
+    with get_conn() as conn:
+        ReportRepo(conn, user_id).save(rows)
