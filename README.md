@@ -162,6 +162,11 @@ uv run python -m scripts.build_analyte_reference \
 названия анализов короче и ближе друг к другу). Эти значения — стартовые, подбираются замером
 на целевой машине.
 
+> **Env-override (12-factor).** Любой скалярный параметр `config.json` переопределяется
+> одноимённой env-переменной в ВЕРХНЕМ_РЕГИСТРЕ без префикса секции — например `IMAGE_JPEG_QUALITY`,
+> `PDF_RENDER_DPI`, `DRUG_RATIO_FLOOR`, `ANALYTE_RATIO_FLOOR`. Порядок разрешения:
+> env → `config.json` → встроенный дефолт (`config._DEFAULTS`). Список примеров — в `.env.example`.
+
 ## Структура проекта
 
 ```
