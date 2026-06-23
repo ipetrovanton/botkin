@@ -18,22 +18,29 @@ log = logging.getLogger(__name__)
 
 
 def _page_lines(page, y_tol: float) -> list[str]:
-    """Слова страницы → физические строки (кластеризация по Y, сортировка по X)."""
+    """Слова страницы → физические строки (кластеризация по скользящему центроиду Y, сорт. по X).
+
+    Кластер сравнивает слово со своим средним y0 (центроидом), а не с y0 первого слова:
+    плавный дрейф базовой линии (каждое слово на доли пункта ниже соседа) иначе копился бы
+    от анкера и рвал строку, хотя соседние слова почти на одной высоте.
+    """
     words = page.get_text("words")  # (x0, y0, x1, y1, word, block, line, word_no)
     if not words:
         return []
     words = sorted(words, key=lambda w: (w[1], w[0]))  # по y0, затем x0
-    clusters: list[tuple[float, list]] = []  # (опорный y0, слова)
-    for w in words:
-        y0 = w[1]
-        if clusters and abs(y0 - clusters[-1][0]) <= y_tol:
-            clusters[-1][1].append(w)
+    clusters: list[dict] = []  # {"sum_y": Σy0, "n": слов, "items": [(x0, word)]}
+    for x0, y0, _x1, _y1, word, *_rest in words:
+        if clusters and abs(y0 - clusters[-1]["sum_y"] / clusters[-1]["n"]) <= y_tol:
+            cur = clusters[-1]
+            cur["sum_y"] += y0
+            cur["n"] += 1
+            cur["items"].append((x0, word))
         else:
-            clusters.append((y0, [w]))
+            clusters.append({"sum_y": y0, "n": 1, "items": [(x0, word)]})
     lines = []
-    for _y, group in clusters:
-        ordered = sorted(group, key=lambda w: w[0])
-        lines.append(" ".join(w[4] for w in ordered).strip())
+    for cur in clusters:
+        ordered = sorted(cur["items"], key=lambda t: t[0])
+        lines.append(" ".join(word for _x0, word in ordered).strip())
     return [ln for ln in lines if ln]
 
 

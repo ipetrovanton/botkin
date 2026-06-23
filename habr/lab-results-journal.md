@@ -1266,3 +1266,61 @@ print(type(r).__name__, r.reraise)"   # Retrying False
 .venv/bin/python -m pytest -q                           # 257 passed
 ```
 
+## Итерация 19: батч P2-гигиены — 12-factor, дрейф строки по центроиду, дедуп (P2)
+
+**Контекст.** Закрываем раздел P2 код-ревью (`docs/code-review-2026-06-22.md`, строки 107-129):
+низкорисковая гигиена. Несколько пунктов оказались уже закрытыми ранними рефакторами (exact-hit
+в `BaseNormalizer.correct`, `source_text`-затенение, `with pymupdf.open`) — отметили и пошли
+дальше. Ниже — то, что реально несло баг или долг.
+
+**Находка 1 (баг корректности) — кластеризация слов текстового слоя «по анкеру» копит дрейф.**
+Сборка слов PDF-слоя в физические строки (`pdf_text._page_lines`) кластеризовала по Y так:
+каждое слово сравнивалось с y0 **первого** слова кластера (`abs(y0 - clusters[-1][0]) <= y_tol`).
+Базовая линия строки в реальных бланках плавает на доли пункта от слова к слову (тот самый
+«значение на 1px ниже имени»). При плавном дрейфе накопленное смещение от анкера превышает
+толеранцию, хотя **соседние** слова почти на одной высоте → строка рвётся пополам.
+
+Доказательство (RED-тест `test_gradual_y_drift_stays_one_line`): три слова с y0 = 100, 102, 104
+при `y_tol=3`. Анкерная логика: 104 − 100 = 4 > 3 → разрыв на «Гемоглобин 140» и «г/л».
+Скользящий центроид: после {100, 102} среднее 101; |104 − 101| = 3 ≤ 3 → строка цела.
+Фикс: кластер хранит `{sum_y, n, items}` и сравнивает слово со своим средним `sum_y/n`, а не с
+анкером. Регресс `test_distinct_rows_still_split` (зазор 100→130) подтверждает: реальные разрывы
+строк сохраняются. Это классическое накопление ошибки: сравнение с фиксированной точкой старта
+копит дрейф, сравнение со скользящим средним его «забывает».
+
+**Находка 2 (долг) — «12-factor дыра» в config.** Env-override был выборочным: `VLM_*` читали
+`os.getenv`, а `IMAGE_*`/`DRUG_*`/`ANALYTE_*`/`PDF_RENDER_DPI`/`MAX_PAGES` — только `config.json`/
+дефолт. Приведение типа (`int()`/`float()`) размазано по 20+ строкам. Свели в один хелпер
+`config.setting(key_path, env_name, cast)` с единым порядком `env → config.json → _DEFAULTS` и
+приведением в одной точке; `_as_bool` для флагов. Все скаляры проведены через него.
+Repro регрессии: `IMAGE_JPEG_QUALITY=55 python -c "from botkin import config; print(config.IMAGE_JPEG_QUALITY)"` → `55`
+(раньше env игнорировался).
+
+**Находка 3 (долг) — дубль fallback-конвейера extract.** `_extract_once` и `_structure_text`
+повторяли «raw → rows_from_raw → harvest» и salvage-блок «обрезанный JSON → объекты → harvest».
+Вынесли `_salvage_rows(exc)` и `_rows_or_harvest(raw)`; `_structure_text` ужался с 14 строк до 6.
+Чистый extract-method под зелёными тестами (59 passed на extract-путях).
+
+**Находка 4 (гигиена) — магические числа и широкий except.** В config ушли: лог-лимит `4000`
+(`RAW_LOG_LIMIT`), text-temperature `0.0` (`TEXT_LAYER_TEMPERATURE`), CLAHE-сетка `(8,8)`,
+unsharp-сигма `3`, морфо-ядра deskew `(9,9)`/`(35,35)`, `_SHORT_KEY_LEN=3` (`ANALYTE_SHORT_KEY_LEN`),
+таймауты пробы Ollama `1.5`/`5` (`OLLAMA_PROBE_TIMEOUT`/`OLLAMA_WSL_DETECT_TIMEOUT`). В `client.py`
+сузили `except Exception` пробы доступности до `(OSError, ValueError)`, а «глухой» `except: pass`
+в WSL-детекте заменили на `except (OSError, SubprocessError)` с `log.debug` (наблюдаемость).
+
+**Сознательный пропуск — `cdist` для батч-нормализации.** Ревью предлагало `process.cdist(workers=-1)`
+вместо цикла `correct()`. Цикл есть (`orchestrator._persist_lab`), но это **десятки** показателей
+на документ, а exact-hit уже закрывает частый случай «имя как в реестре» за O(1). `cdist` усложнил
+бы чистый контракт `correct()` (матрица оценок + per-row argmax + ratio-floor + cap) ради незаметного
+выигрыша на панелях в 20 строк. Преждевременная оптимизация — не делаем.
+
+**Итог.** 272 passed (+15 к 257: +6 config-env, +3 client-hygiene, +2 pdf-центроид, +4 config-magic),
+ruff clean. Pyright-замечания на `_get`-union и generic `BaseModel` из `_call_vlm` — пред­существующие,
+не регресс (проект линтуется ruff).
+
+Repro:
+```
+.venv/bin/python -m pytest tests/test_pdf_text_centroid.py tests/test_config_env.py -q  # 8 passed
+.venv/bin/python -m pytest -q                                                           # 272 passed
+```
+

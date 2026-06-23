@@ -8,7 +8,9 @@
 import json
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 try:
     from dotenv import load_dotenv
@@ -34,6 +36,8 @@ _DEFAULTS: dict = {
     },
     "ollama": {
         "keep_alive": "30m",
+        "probe_timeout": 1.5,
+        "wsl_detect_timeout": 5.0,
     },
     "pdf_to_image": {
         "render_dpi": 200,
@@ -44,10 +48,14 @@ _DEFAULTS: dict = {
         "jpeg_quality": 90,
         "classify_long_side": 1000,
         "clahe_clip": 2.0,
+        "clahe_tile": 8,
         "unsharp_amount": 1.5,
+        "unsharp_sigma": 3.0,
         "deskew_min_angle": 3.0,
         "deskew_min_area": 0.40,
         "deskew_max_area": 0.97,
+        "deskew_open_kernel": 9,
+        "deskew_close_kernel": 35,
         "lowres_warn": 1500,
     },
     "database": {
@@ -69,6 +77,7 @@ _DEFAULTS: dict = {
     "analytes": {
         "max_edit_ratio": 0.35,
         "ratio_floor": 75,
+        "short_key_len": 3,
     },
 }
 
@@ -111,18 +120,36 @@ def _get(key_path: str):
     return value if value is not None else _default_for(key_path)
 
 
+def _as_bool(v) -> bool:
+    """Истинность строки/значения env: 1/true/yes/on (регистронезависимо)."""
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def setting(key_path: str, env_name: str, cast: Callable[[Any], Any] = str) -> Any:
+    """Единый порядок разрешения настройки: env → config.json → _DEFAULTS.
+
+    Приведение типа cast применяется в одной точке к любому источнику — закрывает
+    12-factor дыру, где часть констант (VLM_*) читала env, а IMAGE_*/DRUG_*/ANALYTE_*/
+    PDF_RENDER_DPI/MAX_PAGES — нет. Только для скаляров; списки/множества/пути — отдельно.
+    """
+    raw = os.getenv(env_name)
+    if raw is not None:
+        return cast(raw)
+    return cast(_get(key_path))
+
+
 def _resolve_path(raw: str) -> Path:
     p = Path(raw)
     return p if p.is_absolute() else (_project_root / p)
 
 
 # VLM
-VLM_MODEL = os.getenv("VLM_MODEL", _get("vlm.model"))
-VLM_TEMPERATURE = float(os.getenv("VLM_TEMPERATURE", _get("vlm.temperature")))
-VLM_NUM_CTX = int(os.getenv("VLM_NUM_CTX", _get("vlm.num_ctx")))
-VLM_MAX_TOKENS = int(os.getenv("VLM_MAX_TOKENS", _get("vlm.max_tokens")))
-VLM_NUM_PREDICT = int(os.getenv("VLM_NUM_PREDICT", _get("vlm.num_predict")))
-VLM_REPEAT_PENALTY = float(os.getenv("VLM_REPEAT_PENALTY", _get("vlm.repeat_penalty")))
+VLM_MODEL = setting("vlm.model", "VLM_MODEL", str)
+VLM_TEMPERATURE = setting("vlm.temperature", "VLM_TEMPERATURE", float)
+VLM_NUM_CTX = setting("vlm.num_ctx", "VLM_NUM_CTX", int)
+VLM_MAX_TOKENS = setting("vlm.max_tokens", "VLM_MAX_TOKENS", int)
+VLM_NUM_PREDICT = setting("vlm.num_predict", "VLM_NUM_PREDICT", int)
+VLM_REPEAT_PENALTY = setting("vlm.repeat_penalty", "VLM_REPEAT_PENALTY", float)
 # Сколько раз instructor переспросит модель при невалидном по схеме ответе.
 VLM_MAX_RETRIES = int(os.getenv("VLM_MAX_RETRIES", "2"))
 # Ретраи VLM-вызовов (tenacity): экспоненциальный backoff с джиттером, стоп по числу
@@ -137,9 +164,7 @@ VLM_REQUEST_TIMEOUT = float(os.getenv("VLM_REQUEST_TIMEOUT", "120"))
 # Принуждение JSON-схемы на уровне декодера Ollama (нативный параметр format → XGrammar,
 # 100% соответствие). При выключении — откат на prompt-only JSON (instructor Mode.JSON).
 # Флаг — страховка: конкретная версия Ollama может повести себя иначе на /v1 (см. #10001).
-VLM_STRUCTURED_OUTPUT = os.getenv(
-    "VLM_STRUCTURED_OUTPUT", str(_get("vlm.structured_output"))
-).strip().lower() in ("1", "true", "yes", "on")
+VLM_STRUCTURED_OUTPUT = setting("vlm.structured_output", "VLM_STRUCTURED_OUTPUT", _as_bool)
 
 # Текстовый слой PDF (детерминированное извлечение без VLM).
 # Минимум символов на страницу, чтобы считать слой годным (отсекает PDF-сканы
@@ -151,51 +176,71 @@ TEXT_LAYER_Y_TOLERANCE = float(os.getenv("TEXT_LAYER_Y_TOLERANCE", "3.0"))
 # Доля забракованных verbatim-стражем чисел, выше которой результат считается
 # недостоверным → фолбэк на VLM.
 VERBATIM_MAX_REJECT_RATIO = float(os.getenv("VERBATIM_MAX_REJECT_RATIO", "0.5"))
+# Детерминированный (temp=0) text-only вызов структурирования слоя — temperature всегда 0,
+# текст уже точный, креатив модели только навредит.
+TEXT_LAYER_TEMPERATURE = float(os.getenv("TEXT_LAYER_TEMPERATURE", "0.0"))
+# Потолок длины сырого ответа модели в DEBUG-логе (символов) — чтобы не залить лог мегабайтами.
+RAW_LOG_LIMIT = int(os.getenv("RAW_LOG_LIMIT", "4000"))
 
 # Ollama
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 # keep_alive держит модель в VRAM между вызовами — нет перезагрузки весов 6 ГБ
-OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", _get("ollama.keep_alive"))
+OLLAMA_KEEP_ALIVE = setting("ollama.keep_alive", "OLLAMA_KEEP_ALIVE", str)
+# Таймаут пробы доступности Ollama (GET /api/version) — короткий, это лишь ping.
+OLLAMA_PROBE_TIMEOUT = setting("ollama.probe_timeout", "OLLAMA_PROBE_TIMEOUT", float)
+# Таймаут определения IP WSL (wsl hostname -I) на Windows.
+OLLAMA_WSL_DETECT_TIMEOUT = setting("ollama.wsl_detect_timeout", "OLLAMA_WSL_DETECT_TIMEOUT", float)
 
 # PDF → изображение
-PDF_RENDER_DPI = int(_get("pdf_to_image.render_dpi"))
-MAX_PAGES = int(_get("pdf_to_image.max_pages"))
+PDF_RENDER_DPI = setting("pdf_to_image.render_dpi", "PDF_RENDER_DPI", int)
+MAX_PAGES = setting("pdf_to_image.max_pages", "MAX_PAGES", int)
 
 # Подготовка изображений
-IMAGE_EXTRACT_LONG_SIDE = int(_get("image.extract_long_side"))
-IMAGE_JPEG_QUALITY = int(_get("image.jpeg_quality"))
-IMAGE_CLASSIFY_LONG_SIDE = int(_get("image.classify_long_side"))
-IMAGE_CLAHE_CLIP = float(_get("image.clahe_clip"))
-IMAGE_UNSHARP_AMOUNT = float(_get("image.unsharp_amount"))
-IMAGE_DESKEW_MIN_ANGLE = float(_get("image.deskew_min_angle"))
-IMAGE_DESKEW_MIN_AREA = float(_get("image.deskew_min_area"))
-IMAGE_DESKEW_MAX_AREA = float(_get("image.deskew_max_area"))
-PHOTO_LOWRES_WARN = int(_get("image.lowres_warn"))
+IMAGE_EXTRACT_LONG_SIDE = setting("image.extract_long_side", "IMAGE_EXTRACT_LONG_SIDE", int)
+IMAGE_JPEG_QUALITY = setting("image.jpeg_quality", "IMAGE_JPEG_QUALITY", int)
+IMAGE_CLASSIFY_LONG_SIDE = setting("image.classify_long_side", "IMAGE_CLASSIFY_LONG_SIDE", int)
+IMAGE_CLAHE_CLIP = setting("image.clahe_clip", "IMAGE_CLAHE_CLIP", float)
+# Размер сетки CLAHE (tileGridSize = N×N) — локальность адаптивного контраста.
+IMAGE_CLAHE_TILE = setting("image.clahe_tile", "IMAGE_CLAHE_TILE", int)
+IMAGE_UNSHARP_AMOUNT = setting("image.unsharp_amount", "IMAGE_UNSHARP_AMOUNT", float)
+# Сигма гауссова размытия для unsharp-маски (радиус мягкости).
+IMAGE_UNSHARP_SIGMA = setting("image.unsharp_sigma", "IMAGE_UNSHARP_SIGMA", float)
+IMAGE_DESKEW_MIN_ANGLE = setting("image.deskew_min_angle", "IMAGE_DESKEW_MIN_ANGLE", float)
+IMAGE_DESKEW_MIN_AREA = setting("image.deskew_min_area", "IMAGE_DESKEW_MIN_AREA", float)
+IMAGE_DESKEW_MAX_AREA = setting("image.deskew_max_area", "IMAGE_DESKEW_MAX_AREA", float)
+# Морфо-ядра поиска листа при deskew: OPEN убирает шум, CLOSE сшивает лист (N×N).
+IMAGE_DESKEW_OPEN_KERNEL = setting("image.deskew_open_kernel", "IMAGE_DESKEW_OPEN_KERNEL", int)
+IMAGE_DESKEW_CLOSE_KERNEL = setting("image.deskew_close_kernel", "IMAGE_DESKEW_CLOSE_KERNEL", int)
+PHOTO_LOWRES_WARN = setting("image.lowres_warn", "PHOTO_LOWRES_WARN", int)
 
 # Нормализация лекарств.
 # Scorer = дистанция Дамерау-Левенштейна (выбран по замеру на словаре 20 948, см. спек):
 # cap = max(1, floor(len(имя) * DRUG_MAX_EDIT_RATIO)); фильтр fuzz.ratio ≥ DRUG_RATIO_FLOOR.
-DRUG_MAX_EDIT_RATIO = float(_get("drugs.max_edit_ratio"))
-DRUG_RATIO_FLOOR = float(_get("drugs.ratio_floor"))
+DRUG_MAX_EDIT_RATIO = setting("drugs.max_edit_ratio", "DRUG_MAX_EDIT_RATIO", float)
+DRUG_RATIO_FLOOR = setting("drugs.ratio_floor", "DRUG_RATIO_FLOOR", float)
 
 # Нормализация анализов (ФСЛИ).
 # Аналогично препаратам: cap по дистанции Дамерау-Левенштейна + ratio-floor.
-ANALYTE_MAX_EDIT_RATIO = float(_get("analytes.max_edit_ratio"))
-ANALYTE_RATIO_FLOOR = float(_get("analytes.ratio_floor"))
+ANALYTE_MAX_EDIT_RATIO = setting("analytes.max_edit_ratio", "ANALYTE_MAX_EDIT_RATIO", float)
+ANALYTE_RATIO_FLOOR = setting("analytes.ratio_floor", "ANALYTE_RATIO_FLOOR", float)
+# Длина ключа (символов), при которой требуется точное совпадение: короткие аббревиатуры
+# (СОЭ, ЦП) нельзя фаззить — одна правка превращает их в чужой показатель.
+ANALYTE_SHORT_KEY_LEN = setting("analytes.short_key_len", "ANALYTE_SHORT_KEY_LEN", int)
 
 # База данных
 SQLITE_PATH = str(_resolve_path(os.getenv("SQLITE_PATH", _get("database.sqlite_path"))))
 
 # Telegram бот
-BOT_POLLING_TIMEOUT = int(_get("bot.polling_timeout"))
-BOT_API_URL = os.getenv("API_URL", _get("bot.api_url"))
+BOT_POLLING_TIMEOUT = setting("bot.polling_timeout", "BOT_POLLING_TIMEOUT", int)
+# Историческое имя env — API_URL (не BOT_API_URL), сохраняем для совместимости.
+BOT_API_URL = setting("bot.api_url", "API_URL", str)
 # Потолок поллинга прогресса документа в боте. Увязан с потолком обработки на бэкенде:
 # classify + общий extract + добор страниц, каждый VLM-вызов ограничен VLM_REQUEST_TIMEOUT.
 # Иначе бот сдаётся раньше, чем бэкенд закончит (см. инцидент с D3).
 BOT_PROGRESS_TIMEOUT = float(os.getenv("BOT_PROGRESS_TIMEOUT", str(30 + 3 * VLM_REQUEST_TIMEOUT)))
 
 # Загрузка файлов
-UPLOAD_MAX_BYTES = int(_get("upload.max_bytes"))
+UPLOAD_MAX_BYTES = setting("upload.max_bytes", "UPLOAD_MAX_BYTES", int)
 UPLOAD_ALLOWED_EXTENSIONS: set[str] = set(_get("upload.allowed_extensions"))
 UPLOAD_SOURCES_DIR = _resolve_path(os.getenv("SOURCES_DIR", _get("upload.sources_dir")))
 

@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from botkin.config import (
     VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_EXTRACT_LONG_SIDE,
-    VERBATIM_MAX_REJECT_RATIO, VLM_STRUCTURED_OUTPUT,
+    VERBATIM_MAX_REJECT_RATIO, VLM_STRUCTURED_OUTPUT, RAW_LOG_LIMIT, TEXT_LAYER_TEMPERATURE,
 )
 from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ExtractionError
@@ -136,10 +136,10 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
         if n_parsed == 0:
             log.warning(
                 "[EMPTY_EXTRACT] Doc: '%s' | модель вернула 0 строк. Сырой ответ (%d симв.): %s",
-                doc_name, len(raw), raw[:4000] or "<пусто/недоступно>",
+                doc_name, len(raw), raw[:RAW_LOG_LIMIT] or "<пусто/недоступно>",
             )
         else:
-            log.debug("[RAW_EXTRACT] Doc: '%s' | сырой ответ (%d симв.): %s", doc_name, len(raw), raw[:4000])
+            log.debug("[RAW_EXTRACT] Doc: '%s' | сырой ответ (%d симв.): %s", doc_name, len(raw), raw[:RAW_LOG_LIMIT])
         return response
     except Exception as e:
         elapsed = time.perf_counter() - t0
@@ -162,6 +162,21 @@ def _raw_text_from_exc(exc: Exception) -> str:
         return ""
 
 
+def _salvage_rows(exc: ExtractionError) -> list[LabResult]:
+    """Спасти полные объекты-строки из обрезанного/таймаутного ответа модели (общий путь)."""
+    objs = salvage_json_objects(_raw_text_from_exc(exc))
+    return harvest_lab_rows(objs) if objs else []
+
+
+def _rows_or_harvest(raw: RawAnalysis) -> list[LabResult]:
+    """Структурный разбор RawAnalysis; пусто (чужие ключи) → harvester по сырому JSON."""
+    rows = rows_from_raw(raw)
+    if rows:
+        return rows
+    data = loads_json(_raw_content(raw))
+    return harvest_lab_rows(data) if data is not None else []
+
+
 def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult], int]:
     """Один VLM-вызов по набору изображений + гибридный разбор → (строки, число исследований)."""
     messages = _messages_from_images(ANALYSIS_VLM_SYSTEM, ANALYSIS_INSTRUCTION, b64_images)
@@ -169,8 +184,7 @@ def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult]
         raw = _call_vlm(messages, RawAnalysis, doc_name, "analysis")
     except ExtractionError as e:
         # Обрезанный JSON/таймаут: спасаем полные объекты-строки из сырого ответа.
-        objs = salvage_json_objects(_raw_text_from_exc(e))
-        rows = harvest_lab_rows(objs) if objs else []
+        rows = _salvage_rows(e)
         if rows:
             log.info("[EXTRACT_SALVAGED] Doc: '%s' | из обрезанного ответа спасено строк: %d", doc_name, len(rows))
             return rows, 1
@@ -199,7 +213,7 @@ def _messages_from_text(system_prompt: str, instruction: str, text: str) -> list
 
 def _call_text(messages: list[dict], doc_name: str) -> RawAnalysis:
     """Детерминированный (temp=0) text-only вызов структурирования."""
-    options = {**default_options(), "temperature": 0.0}
+    options = {**default_options(), "temperature": TEXT_LAYER_TEMPERATURE}
     return _call_vlm(messages, RawAnalysis, doc_name, "analysis-text", options=options)
 
 
@@ -210,13 +224,8 @@ def _structure_text(lines: list[str], doc_name: str) -> list[LabResult]:
     try:
         raw = _call_text(messages, doc_name)
     except ExtractionError as e:
-        objs = salvage_json_objects(_raw_text_from_exc(e))
-        return harvest_lab_rows(objs) if objs else []
-    rows = rows_from_raw(raw)
-    if rows:
-        return rows
-    data = loads_json(_raw_content(raw))
-    return harvest_lab_rows(data) if data is not None else []
+        return _salvage_rows(e)
+    return _rows_or_harvest(raw)
 
 
 def _should_use_text_layer(source_path: Path) -> bool:

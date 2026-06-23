@@ -15,7 +15,8 @@ from tenacity import (
 
 import instructor
 from botkin.config import (
-    OLLAMA_URL, OLLAMA_KEEP_ALIVE, VLM_NUM_CTX, VLM_REPEAT_PENALTY, VLM_NUM_PREDICT,
+    OLLAMA_URL, OLLAMA_KEEP_ALIVE, OLLAMA_PROBE_TIMEOUT, OLLAMA_WSL_DETECT_TIMEOUT,
+    VLM_NUM_CTX, VLM_REPEAT_PENALTY, VLM_NUM_PREDICT,
     VLM_MAX_RETRIES, VLM_REQUEST_TIMEOUT, VLM_RETRY_INITIAL_WAIT, VLM_RETRY_MAX_SECONDS,
     VLM_RETRY_MAX_WAIT, VLM_STRUCTURED_OUTPUT,
 )
@@ -93,11 +94,12 @@ def usage_of(response) -> tuple[int, int]:
 _ollama_url: str | None = None
 
 
-def _is_url_reachable(url: str, timeout: float = 1.5) -> bool:
+def _is_url_reachable(url: str, timeout: float = OLLAMA_PROBE_TIMEOUT) -> bool:
     try:
         with urllib.request.urlopen(f"{url}/api/version", timeout=timeout) as resp:
             return 200 <= resp.status < 300
-    except Exception:
+    except (OSError, ValueError):
+        # OSError покрывает URLError/socket.timeout/отказ соединения; ValueError — кривой URL.
         return False
 
 
@@ -115,7 +117,7 @@ def _detect_ollama_url() -> str:
         try:
             output = subprocess.check_output(
                 ["wsl", "-d", "Ubuntu", "hostname", "-I"],
-                shell=False, timeout=5,
+                shell=False, timeout=OLLAMA_WSL_DETECT_TIMEOUT,
             ).decode().strip()
             ip = output.split()[0] if output else None
             if ip:
@@ -123,8 +125,9 @@ def _detect_ollama_url() -> str:
                 if _is_url_reachable(candidate):
                     _ollama_url = candidate
                     return candidate
-        except Exception:
-            pass
+        except (OSError, subprocess.SubprocessError) as e:
+            # Детект WSL-IP — необязательный путь; падение не критично, но логируем.
+            log.debug("WSL-детект Ollama не удался: %s", e)
 
     _ollama_url = url
     return url

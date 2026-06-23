@@ -15,11 +15,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
-from botkin.config import ANALYTE_MAX_EDIT_RATIO, ANALYTE_RATIO_FLOOR
+from botkin.config import ANALYTE_MAX_EDIT_RATIO, ANALYTE_RATIO_FLOOR, ANALYTE_SHORT_KEY_LEN
 from botkin.normalize.base import BaseNormalizer, normalize_name, read_registry
 
 _REGISTRY_PATH = Path(__file__).parent.parent / "reference" / "analytes" / "registry.jsonl"
-_SHORT_KEY_LEN = 3  # ключи такой длины и короче требуют точного совпадения
+_SHORT_KEY_LEN = ANALYTE_SHORT_KEY_LEN  # ключи такой длины и короче требуют точного совпадения
 
 
 @dataclass(frozen=True)
