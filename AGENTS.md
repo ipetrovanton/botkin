@@ -127,3 +127,157 @@ botkin/
 - `idx_lab_user_analyte` на `lab_results(user_id, analyte_name, taken_at)`
 - `idx_doctor_reports_user` на `doctor_reports(user_id, visit_date)`
 - `idx_doctor_reports_document` на `doctor_reports(document_id)` — оптимизирует `/show`
+
+---
+
+## 6. Запуск e2e-тестов (LLM) с Ollama в WSL2
+
+### Проблема: Python из Windows не видит Ollama через `localhost`
+
+Ollama в WSL2 с `networkingMode=mirrored` слушает `[::]:11434` (IPv6-wildcard).
+Python-библиотеки (`urllib`, `httpx`/`httpcore`) на Windows при резолве `localhost`
+получают `::1` первым из DNS и пытаются IPv6-соединение — `ConnectionRefusedError`.
+`urllib` делает fallback на `127.0.0.1` и добирается (probe проходит), но `httpcore`
+(используемый OpenAI SDK) — нет.
+
+### Рабочий способ запуска e2e-тестов
+
+```powershell
+# Запускать через WSL: Windows-exe видит Ollama через WSL-loopback
+wsl -d Ubuntu -- .venv/Scripts/python.exe -m pytest tests/test_e2e_llm.py -m llm -s --tb=short
+```
+
+### Долгосрочное исправление
+
+Ollama уже имеет `OLLAMA_HOST=0.0.0.0:11434` в `/etc/systemd/system/ollama.service`,
+но `ss -tlnp` показывает `[::]:11434` (Linux dual-stack). При `networkingMode=mirrored`
+порты WSL зеркалируются на Windows, но для IPv6-first биндинга они не всегда доступны
+через `127.0.0.1`. Решение — явный `OLLAMA_HOST=0.0.0.0` (IPv4-only bind):
+
+```bash
+# В WSL2 Ubuntu:
+sudo sed -i 's/OLLAMA_HOST=0.0.0.0:11434/OLLAMA_HOST=0.0.0.0/' /etc/systemd/system/ollama.service
+sudo systemctl daemon-reload && sudo systemctl restart ollama
+# Проверить: ss -tlnp | grep 11434 → должно быть 0.0.0.0:11434, не [::]:11434
+```
+
+---
+
+## 7. Flash Attention в Ollama
+
+### Проверка
+
+Flash Attention не используется напрямую в коде Python-проекта (`botkin` вызывает Ollama через HTTP API). Оптимизация работает на уровне inference-движка Ollama/llama.cpp.
+
+Для нашей рабочей модели `qwen3-vl:8b-instruct` **Flash Attention включён по умолчанию** в Ollama: архитектура `qwen3vl` присутствует в allowlist Ollama (`gemma3`, `gptoss`, `mistral3`, `qwen3`, `qwen3moe`, `qwen3vl`, `qwen3vlmoe`).
+
+Проверить, что модель загружена на GPU и использует оптимизации:
+
+```bash
+# В WSL2 Ubuntu
+ollama ps
+# Ожидаемый вывод: qwen3-vl:8b-instruct ... 100% GPU
+```
+
+Точный признак включения Flash Attention можно увидеть в логах Ollama при старте генерации:
+
+```bash
+sudo journalctl -u ollama -f | grep -i flash
+# или, если Ollama запущен вручную:
+OLLAMA_DEBUG=1 ollama serve 2>&1 | grep -i flash
+```
+
+### Принудительное включение/выключение
+
+Если нужно явно управлять оптимизацией, задайте переменную окружения серверу Ollama:
+
+```bash
+# Включить (актуально для архитектур, не входящих в allowlist)
+export OLLAMA_FLASH_ATTENTION=1
+ollama serve
+
+# Выключить
+export OLLAMA_FLASH_ATTENTION=0
+ollama serve
+```
+
+Для systemd-сервиса в WSL2 добавьте в `/etc/systemd/system/ollama.service`:
+
+```ini
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0"
+Environment="OLLAMA_FLASH_ATTENTION=1"
+```
+
+Затем перезапустите сервис:
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl restart ollama
+```
+
+### Почему не добавляем в Python-код
+
+`OLLAMA_FLASH_ATTENTION` читается только сервером Ollama при старте. Клиент (`botkin`) не может его переключить через HTTP-запрос. Поэтому конфигурация остаётся на уровне окружения сервера, а в проекте фиксируется инструкция по проверке.
+
+---
+
+## 8. Удержание модели в VRAM и производительность
+
+### Диагноз: модель не всегда остаётся в памяти
+
+Код `botkin` уже передаёт `keep_alive: "30m"` в каждом Ollama-запросе через `options` (`src/botkin/llm/client.py`). Однако в некоторых версиях Ollama OpenAI-совместимый endpoint игнорирует `keep_alive` внутри `options` и использует серверный default (5 минут). В результате модель выгружается из VRAM, если между запросами проходит больше 5 минут.
+
+Проверка текущего поведения:
+
+```bash
+ollama ps
+# Если UNTIL показывает «5 minutes from now» или меньше — keep_alive серверный, не 30m.
+```
+
+### Решение: серверный `OLLAMA_KEEP_ALIVE=-1`
+
+Надёжный способ держать модель в VRAM постоянно — задать переменную окружения серверу Ollama. Значение `-1` означает «не выгружать никогда» (до остановки Ollama).
+
+**Важно:** это привязка 7.6 ГБ VRAM. На GPU с 16 ГБ (например, RTX 3080) запас остаётся, но другие приложения не смогут занять эту память.
+
+### Настройка systemd-сервиса в WSL2
+
+Отредактируйте `/etc/systemd/system/ollama.service`, добавив строку в секцию `[Service]`:
+
+```ini
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0"
+Environment="OLLAMA_FLASH_ATTENTION=1"
+Environment="OLLAMA_KEEP_ALIVE=-1"
+Environment="OLLAMA_NUM_PARALLEL=1"
+Environment="OLLAMA_MAX_LOADED_MODELS=1"
+```
+
+Затем примените изменения:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
+Проверьте, что модель остаётся загруженной после запроса:
+
+```bash
+ollama ps
+# Ожидаемый вывод: UNTIL = Forever
+```
+
+### Почему GPU всё равно может простаивать
+
+Даже при модели в VRAM GPU не загружен 100% из-за архитектуры пайплайна:
+
+1. **CPU-предобработка**: перед каждым VLM-вызовом PDF рендерится в изображения (pymupdf), делается deskew/CLAHE/unsharp, идёт OCR и парсинг текстового слоя. Это CPU-работа, GPU в это время idle.
+2. **Последовательные вызовы**: пайплайн обрабатывает страницы по очереди (`OLLAMA_NUM_PARALLEL=1`). Пока Python ждёт ответ на запрос N, GPU обрабатывает его; затем Python готовит запрос N+1 — и в этот момент GPU простаивает.
+3. **Text-only вызовы структурирования**: `_structure_text` и `_call_text` используют ту же модель `qwen3-vl:8b-instruct`. Это vision-модель, и для текстовых задач она менее эффективна, чем специализированная text-only модель. На текстовых задачах GPU-utilization может быть низкой.
+4. **Таймауты и ретраи**: если модель «залипает» (например, structured output на сложной картинке), запрос висит до таймаута, а GPU не получает новой работы.
+
+### Что можно улучнить дальше
+
+- **Разделить text-only и VLM модели**: для `_structure_text` (координатные строки → JSON) использовать лёгкий text-only LLM (например, `qwen3:8b` или `huihui_ai/qwen3-abliterated:8b`), освободив vision-модель для картинок. Это потребует отдельного `TEXT_MODEL` конфига и fallback-механики.
+- **Параллельная обработка страниц**: если страницы независимы, можно запускать несколько VLM-запросов параллельно (`OLLAMA_NUM_PARALLEL` + `asyncio.gather`), но это увеличивает пиковое потребление VRAM и требует аккуратного дедупа.
+- **Профилирование**: запустить `nvidia-smi dmon` и `ollama ps` в отдельных терминалах во время обработки одного документа, чтобы увидеть, на каких этапах GPU падает в 0%.

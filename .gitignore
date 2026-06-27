@@ -40,6 +40,34 @@ token.txt
 example.jpg.jpg
 *.jpg.jpg
 sample_*.pdf
+sample_*.jpg
+sample_*.jpeg
+sample_*.png
+sample_*.heic
+sample_*.heif
+sample_*.webp
+
+# Реальные документы для e2e (могут содержать ПДн) — сами файлы НЕ коммитим,
+# но версионируем разметку *.expected.json и README для воспроизводимости тестов.
+tests/fixtures/documents/*
+!tests/fixtures/documents/README.md
+!tests/fixtures/documents/*.expected.json
+!tests/fixtures/documents/samples/
+tests/fixtures/documents/samples/*
+!tests/fixtures/documents/samples/*.expected.json
+
+# Служебные отладочные скрипты и логи
+_*.py
+_*.log
+_*.out
+_*.json
+_*.txt
+_*.jpg
+_*.png
+extract_text.py
+test_baseline.jpg
+test_image.jpg
+test_image.png
 
 # Источники справочников (большие выгрузки ФСЛИ) — в репо только собранный registry.jsonl
 справочник_лабораторных_тестов.json

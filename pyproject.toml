@@ -45,6 +45,12 @@ package = true
 testpaths = ["tests"]
 pythonpath = ["src", "."]
 asyncio_default_fixture_loop_scope = "function"
+# По умолчанию e2e с реальной Ollama не гоняем: окружение без GPU (CI) иначе флапает.
+# Запуск явно: `uv run pytest -m llm` (командный -m переопределяет этот фильтр).
+addopts = "-m 'not llm'"
+markers = [
+    "llm: e2e-тесты, дёргающие реальную Ollama (авто-skip, если модель недоступна)",
+]
 
 [tool.ruff]
 src = ["src"]

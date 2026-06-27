@@ -34,6 +34,18 @@ _DEFAULTS: dict = {
         "repeat_penalty": 1.2,
         "structured_output": True,
     },
+    # Текстовая модель для обработки текстового слоя PDF (run_analysis text_layer).
+    # По умолчанию совпадает с VLM, но для скорости лучше выбрать лёгкую text-only
+    # модель, например qwen3:1.7b (1.4 GB) или qwen3:8b (≈5 GB).
+    "text_model": {
+        "model": "qwen3-vl:8b-instruct",
+        "temperature": 0.0,
+        "num_ctx": 4096,
+        "max_tokens": 8192,
+        "num_predict": 8192,
+        "repeat_penalty": 1.2,
+        "structured_output": True,
+    },
     "ollama": {
         "keep_alive": "30m",
         "probe_timeout": 1.5,
@@ -165,6 +177,16 @@ VLM_REQUEST_TIMEOUT = float(os.getenv("VLM_REQUEST_TIMEOUT", "120"))
 # 100% соответствие). При выключении — откат на prompt-only JSON (instructor Mode.JSON).
 # Флаг — страховка: конкретная версия Ollama может повести себя иначе на /v1 (см. #10001).
 VLM_STRUCTURED_OUTPUT = setting("vlm.structured_output", "VLM_STRUCTURED_OUTPUT", _as_bool)
+
+# Text-only модель для обработки текстового слоя PDF.
+# По умолчанию равна VLM, но может быть лёгкой text-only моделью (qwen3:1.7b, qwen3:8b).
+TEXT_MODEL = setting("text_model.model", "TEXT_MODEL", str)
+TEXT_TEMPERATURE = setting("text_model.temperature", "TEXT_TEMPERATURE", float)
+TEXT_NUM_CTX = setting("text_model.num_ctx", "TEXT_NUM_CTX", int)
+TEXT_MAX_TOKENS = setting("text_model.max_tokens", "TEXT_MAX_TOKENS", int)
+TEXT_NUM_PREDICT = setting("text_model.num_predict", "TEXT_NUM_PREDICT", int)
+TEXT_REPEAT_PENALTY = setting("text_model.repeat_penalty", "TEXT_REPEAT_PENALTY", float)
+TEXT_STRUCTURED_OUTPUT = setting("text_model.structured_output", "TEXT_STRUCTURED_OUTPUT", _as_bool)
 
 # Текстовый слой PDF (детерминированное извлечение без VLM).
 # Минимум символов на страницу, чтобы считать слой годным (отсекает PDF-сканы

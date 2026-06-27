@@ -7,7 +7,9 @@ from typing import Optional
 _RANGE_RE = re.compile(r"^(-?\d+(?:[.,]\d+)?)\s*[-–—]\s*(-?\d+(?:[.,]\d+)?)$")
 _LE_RE = re.compile(r"^[<≤]\s*(-?\d+(?:[.,]\d+)?)$")
 _GE_RE = re.compile(r"^[>≥]\s*(-?\d+(?:[.,]\d+)?)$")
-_NUM_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
+# Любое число, но не ловим дефис-минус между двумя цифрами как знак отрицания
+# (иначе "35-56" даёт токен "-56" и _verbatim_guard отбрасывает строку).
+_NUM_RE = re.compile(r"(?<![\d.,])-?\d+(?:[.,]\d+)?")
 
 
 def _to_float(s: str) -> float:
@@ -40,13 +42,15 @@ def parse_reference_range(ref) -> tuple[Optional[float], Optional[float], Option
     """Норма → (ref_low, ref_high, ref_operator, ref_text).
 
     «35 - 45»→low/high; «< 1.0»→op '<' + high; «> 120»→op '>' + low; «≤/≥»→'<'/'>';
-    нечисловая норма→ref_text.
+    нечисловая норма→ref_text. Разделённые пробелом тысячи нормализуем: «1 010 - 1 023».
     """
     if ref is None:
         return None, None, None, None
     s = str(ref).strip()
     if not s:
         return None, None, None, None
+    # Русские бланки разбивают тысячи пробелом; убираем пробелы между цифрами.
+    s = re.sub(r"(?<=\d)\s+(?=\d)", "", s)
     m = _RANGE_RE.match(s)
     if m:
         return _to_float(m.group(1)), _to_float(m.group(2)), None, None

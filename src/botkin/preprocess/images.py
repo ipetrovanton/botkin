@@ -115,14 +115,6 @@ def _encode_jpeg(img: Image.Image) -> bytes:
     return buf.getvalue()
 
 
-def _process(img: Image.Image, long_side: int, upscale: bool, deskew: bool, enhance: bool) -> bytes:
-    if deskew:
-        img = Image.fromarray(_deskew(np.asarray(img.convert("RGB"))))
-    img = _resize(img, long_side, upscale)
-    if enhance:
-        img = Image.fromarray(_enhance(np.asarray(img)))
-    return _encode_jpeg(img)
-
 
 def _pdf_pages(path: Path, long_side: int, upscale: bool, enhance: bool) -> list[bytes]:
     out: list[bytes] = []
@@ -134,8 +126,11 @@ def _pdf_pages(path: Path, long_side: int, upscale: bool, enhance: bool) -> list
                 break
             pix = page.get_pixmap(dpi=PDF_RENDER_DPI)
             img = Image.open(io.BytesIO(pix.tobytes("png")))
-            jpeg = _process(img, long_side, upscale, deskew=False, enhance=enhance)
-            fw, fh = Image.open(io.BytesIO(jpeg)).size
+            img = _resize(img, long_side, upscale)
+            if enhance:
+                img = Image.fromarray(_enhance(np.asarray(img)))
+            fw, fh = img.size
+            jpeg = _encode_jpeg(img)
             log.info("[PDF] %s стр.%d: рендер %dx%d → итог %dx%d px, JPEG %d КБ",
                      path.name, index + 1, pix.width, pix.height, fw, fh, len(jpeg) // 1024)
             out.append(jpeg)
@@ -159,8 +154,13 @@ def prepare_images(
         return _pdf_pages(path, limit, upscale, enhance)
 
     with Image.open(path) as img:
-        jpeg = _process(img, limit, upscale, deskew, enhance)
-    fw, fh = Image.open(io.BytesIO(jpeg)).size
+        if deskew:
+            img = Image.fromarray(_deskew(np.asarray(img.convert("RGB"))))
+        img = _resize(img, limit, upscale)
+        if enhance:
+            img = Image.fromarray(_enhance(np.asarray(img)))
+        fw, fh = img.size
+        jpeg = _encode_jpeg(img)
     log.info("[IMG] %s: итог %dx%d px, JPEG %d КБ", path.name, fw, fh, len(jpeg) // 1024)
     return [jpeg]
 

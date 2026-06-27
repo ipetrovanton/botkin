@@ -64,7 +64,11 @@ def default_options() -> dict:
     }
 
 
-def build_extra_body(response_model: type[BaseModel], options: dict | None = None) -> dict:
+def build_extra_body(
+    response_model: type[BaseModel],
+    options: dict | None = None,
+    structured: bool | None = None,
+) -> dict:
     """extra_body для OpenAI-SDK → Ollama: опции + (опц.) нативный format=JSON-схема.
 
     Нативный параметр Ollama `format` принуждает грамматику декодера к схеме (XGrammar).
@@ -72,9 +76,14 @@ def build_extra_body(response_model: type[BaseModel], options: dict | None = Non
     ретраев, а схему на уровне токенов держит Ollama. OpenAI-стандартный
     response_format=json_schema на /v1 Ollama игнорирует (ollama/ollama#10001), поэтому
     именно нативный format. Под флагом VLM_STRUCTURED_OUTPUT — можно отключить.
+
+    structured=None → использовать глобальный VLM_STRUCTURED_OUTPUT; True/False —
+    форсировать включение/выключение (для адаптивного фолбэка: XGrammar на сложных
+    картинках сваливается в пустой, но валидный по схеме объект — тогда повторяем без format).
     """
+    use_format = VLM_STRUCTURED_OUTPUT if structured is None else structured
     body: dict = {"options": options or default_options()}
-    if VLM_STRUCTURED_OUTPUT:
+    if use_format:
         body["format"] = response_model.model_json_schema()
     return body
 

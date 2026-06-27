@@ -1,6 +1,8 @@
 """Сырая схема ответа VLM и сборка её в список LabResult с дедупом."""
 from __future__ import annotations
 
+import re
+
 from typing import Optional, Union
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
@@ -90,21 +92,70 @@ def _name_key(r: LabResult) -> str:
     return " ".join(r.analyte_name.strip().lower().replace("ё", "е").split())
 
 
+def _unit_dimension(unit: str | None) -> str | None:
+    """Нормализует единицу к физической размерности для дедупа.
+
+    Конвертируемые варианты одной размерности (г/дл vs г/л, ммоль/л vs мг/дл)
+    приводятся к одному ключу, а качественно разные размерности (% vs п/з,
+    10^9/л vs п/з) остаются разными.
+    """
+    if not unit:
+        return None
+    u = unit.lower().replace("ё", "е").replace(" ", "")
+    # Убираем числовые префиксы (10^9, 10^12) и степени.
+    u = re.sub(r"10\^?\d+", "", u)
+    u = re.sub(r"\d+", "", u)
+    u = u.replace("^", "")
+    # Массовые единицы (мкг/нг/пг/мг/кг/г → г).
+    for prefix in ("мкг", "нг", "пг", "мг", "кг", "г"):
+        u = u.replace(prefix, "г")
+    # Объёмные единицы (мкл/мл/дл/кл/фл/пл/нл/л → л).
+    for prefix in ("мкл", "мл", "дл", "кл", "фл", "пл", "нл", "л"):
+        u = u.replace(prefix, "л")
+    # Линейные единицы (мм/см/дм/км/м → м).
+    for prefix in ("мм", "см", "дм", "км", "м"):
+        u = u.replace(prefix, "м")
+    return u
+
+
+def _merge_key(r: LabResult) -> tuple[str, str | None]:
+    """Ключ для merge_dedup: имя + нормализованная размерность.
+
+    Относительные единицы (% и ppm) сохраняем как есть: они точно различают
+    показатели (СИБР O2 % КВМ vs ppm). Для абсолютных размерностей конвертируемые
+    варианты (г/дл vs г/л) схлопываются в один ключ, чтобы отбросить конфликтные
+    дубли от модели. Качественно разные размерности (10^9/л vs п/з) остаются
+    разными и сохраняются как отдельные показатели.
+    """
+    unit = r.unit or None
+    if unit and ("%" in unit or "ppm" in unit.lower()):
+        return (_name_key(r), unit)
+    return (_name_key(r), _unit_dimension(unit))
+
+
 def merge_dedup(base: list[LabResult], extra: list[LabResult]) -> list[LabResult]:
-    """Сливает добор постранично с общим вызовом, дедуп по ИМЕНИ показателя.
+    """Сливает добор постранично с общим вызовом, дедуп по (имя, единица).
 
     Модель недетерминирована в значениях: один показатель в общем вызове и в доборе
-    может иметь разные числа (Гемоглобин 13.7 г/дл vs 143 г/л). Дедуп по (имя,значение)
-    оставлял бы оба — дубли с противоречием. Ключ по имени: повтор отбрасываем (доверяем
-    первому/общему проходу), добавляем только реально новые показатели (потерянная страница).
+    может иметь разные числа. Ключ по (имя, единица): повтор с той же единицей
+    отбрасываем (доверяем первому проходу), а новая единица сохраняется как отдельный
+    показатель.
+
+    Исключение: если добор содержит числовое значение, а уже виденный ряд с той же
+    парой (имя, единица) текстовый (value_num is None), заменяем его.
     """
-    seen = {_name_key(r) for r in base}
+    seen: dict[tuple[str, str | None], int] = {}
     out = list(base)
+    for i, r in enumerate(out):
+        seen[_merge_key(r)] = i
     for r in extra:
-        key = _name_key(r)
+        key = _merge_key(r)
         if key not in seen:
-            seen.add(key)
+            seen[key] = len(out)
             out.append(r)
+        elif r.value_num is not None and out[seen[key]].value_num is None:
+            # Заменяем текстовый дубль на числовой.
+            out[seen[key]] = r
     return out
 
 

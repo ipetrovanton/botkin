@@ -1,10 +1,10 @@
 {
   "vlm": {
     "model": "qwen3-vl:8b-instruct",
-    "temperature": 0.0,
+    "temperature": 0.3,
     "num_ctx": 16384,
-    "max_tokens": 8192,
-    "num_predict": 8192,
+    "max_tokens": 16384,
+    "num_predict": 16384,
     "repeat_penalty": 1.2
   },
   "ollama": { "keep_alive": "30m" },

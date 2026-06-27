@@ -15,6 +15,23 @@ _OPERATORS = ("<", ">", "≤", "≥")
 _DASHES = ("-", "–", "—")
 
 
+def _collapse_numeric_spaces(tokens: list[str]) -> list[str]:
+    """Склеить соседние числовые токены, разделённые пробелами (1 010 → 1010).
+
+    Русские бланки любят разбивать тысячи пробелом: "1 010 - 1 023".
+    Без склеивания парсер видит "010 - 1" и выдаёт ложный референс 10…1.
+    """
+    if not tokens:
+        return tokens
+    collapsed = [tokens[0]]
+    for tok in tokens[1:]:
+        if _PLAIN_NUM_RE.match(collapsed[-1]) and _PLAIN_NUM_RE.match(tok):
+            collapsed[-1] = collapsed[-1] + tok
+        else:
+            collapsed.append(tok)
+    return collapsed
+
+
 def _verbatim_guard(rows: list[LabResult], src_text: str):
     """Делит строки на (kept, rejected): каждое число строки обязано быть в src_text.
 
@@ -36,6 +53,7 @@ def _verbatim_guard(rows: list[LabResult], src_text: str):
 
 def _extract_unit_ref(rest: list[str]) -> tuple[Optional[str], Optional[str]]:
     """Хвост строки после значения → (unit, reference). Нет референса → (unit, None)."""
+    rest = _collapse_numeric_spaces(rest)
     for i, tok in enumerate(rest):
         # одно-токенные формы: «<5.0», «<20», «35-45»
         if _LE_RE.match(tok) or _GE_RE.match(tok) or _RANGE_RE.match(tok):
@@ -50,15 +68,36 @@ def _extract_unit_ref(rest: list[str]) -> tuple[Optional[str], Optional[str]]:
     return (" ".join(rest) or None), None
 
 
+_ANALYZER_PREFIXES = {"cobas", "sysmex", "ves", "roche", "elecsys", "acl", "architect"}
+
+
+def _is_analyzer_token(prev: str, tok: str) -> bool:
+    """True, если токен — номер анализатора (Cobas 6000, Sysmex XN-1000i и т.п.)."""
+    if not prev:
+        return False
+    return prev.rstrip(",;").lower() in _ANALYZER_PREFIXES
+
+
 def _parse_text_line(line: str) -> Optional[LabResult]:
     """Чистая строка текстового слоя → LabResult, либо None если это не строка-результат.
 
     Гейт строгий (чтобы не подбирать шапку/подвал — телефон, даты, возраст, обрывки
     примечаний): имя (есть буква) + чистый числовой токен-значение + токен референса.
+
+    Значение ищем только вне скобок: имена вроде «MCH (содержание Hb в 1 Эр.)» содержат
+    число внутри пояснения, а настоящее значение — за скобками (sample_009).
+    Пропускаем номера анализаторов (Cobas 6000), которые иначе ошибочно становятся значением.
     """
     tokens = line.split()
-    vi = next((i for i, t in enumerate(tokens) if _VALUE_TOKEN_RE.match(t)), None)
-    if not vi:  # нет токена-значения, либо значение в самом начале (нет имени)
+    paren_depth = 0
+    vi = None
+    for i, tok in enumerate(tokens):
+        paren_depth += tok.count("(") - tok.count(")")
+        if paren_depth == 0 and _VALUE_TOKEN_RE.match(tok):
+            if not _is_analyzer_token(tokens[i - 1] if i > 0 else "", tok):
+                vi = i
+                break
+    if vi is None or vi == 0:
         return None
     name = " ".join(tokens[:vi]).strip()
     if not any(ch.isalpha() for ch in name):
@@ -75,9 +114,18 @@ def _parse_text_line(line: str) -> Optional[LabResult]:
     )
 
 
-def _value_key(value) -> Optional[str]:
-    """Нормализованный токен значения для сравнения покрытия (None → None)."""
-    toks = num_tokens(value)
+def _value_key(result: LabResult) -> Optional[str]:
+    """Нормализованный ключ значения для сравнения покрытия (None → None).
+
+    Предпочитаем value_raw: float не различает 0.6 и 0.60, а на бланке это разные
+    показатели (например, базофилы 0.6 % vs моноциты 0.60 ×10^9/л).
+    """
+    if result.value_raw:
+        raw = result.value_raw.strip().replace(",", ".")
+        if raw.endswith("*"):
+            raw = raw[:-1]
+        return raw
+    toks = num_tokens(result.value_num)
     return toks[0] if toks else None
 
 
@@ -90,14 +138,14 @@ def completeness_guard(lines: list[str], rows: list[LabResult]) -> list[LabResul
     Симметрично verbatim_guard: тот ловит лишнее, этот — пропущенное (одинокий результат
     на отдельной странице LLM иногда теряет).
     """
-    covered = {_value_key(r.value_num) for r in rows}
+    covered = {_value_key(r) for r in rows}
     covered.discard(None)
     recovered: list[LabResult] = []
     for line in lines:
         r = _parse_text_line(line)
         if r is None:
             continue
-        key = _value_key(r.value_num)
+        key = _value_key(r)
         if key is None or key in covered:
             continue
         covered.add(key)

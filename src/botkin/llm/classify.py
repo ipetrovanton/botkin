@@ -1,5 +1,11 @@
-"""Классификатор типа документа через VLM (дешёвый вызов на уменьшенной 1-й странице)."""
+"""Классификатор типа документа через VLM (дешёвый вызов на уменьшенной 1-й странице).
+
+Fast-path: цифровые PDF с годным текстовым слоем классифицируются по ключевым словам
+без VLM — экономит ~25 с на документ. VLM вызывается только когда текстовый слой
+недоступен (скан, фото) или ключевые слова не дают однозначного ответа.
+"""
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -15,8 +21,91 @@ from botkin.exceptions import ClassificationError
 from botkin.llm.client import get_client, build_extra_body, build_retrying, usage_of
 from botkin.llm.prompts import CLASSIFY_INSTRUCTION, CLASSIFY_VLM_SYSTEM, PROMPTS_VERSION
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
+from botkin.preprocess.pdf_text import open_pdf
 
 log = logging.getLogger(__name__)
+
+# Заголовки колонок, специфичные для лабораторных бланков (Инвитро/Гемохелп/Тонус).
+# В заключениях врача их нет. Наивный список «диагноз/жалобы» НЕ годится: слово «диагноз»
+# протекает из поля «Диагноз направившего врача» во ВСЕ лабораторные бланки.
+_LAB_TABLE_MARKERS = ("референс", "ед. изм", "ед.изм", "единиц измер")
+
+# Название организации в шапке бланка почти всегда в кавычках («ИНВИТРО-Самара»,
+# ООО «АВК-МЕД»). Берём первую кавычку в первых строках слоя — общий приём, без
+# хардкода списка лабораторий. Длина 3–80 отсекает мусор и сверхдлинные госназвания.
+_QUOTED_ORG = re.compile(r'"([^"]{3,80})"')
+
+# Ключевые слова для корректировки классификации по извлечённому title.
+# Используем как safety-net: явные ошибки VLM (рецепт → doctor_report, МРТ → unknown)
+# исправляем детерминированно, не полагаясь только на промпт.
+_UNKNOWN_TITLE_KEYWORDS = ("рецепт", "назначение", "препарат")
+_DOCTOR_REPORT_TITLE_KEYWORDS = (
+    "мрт", "кт", "рентген", "узи", "экг", "заключение", "прием",
+    "осмотр", "врач", "выписка", "эпикриз", "справка",
+)
+
+
+def _correct_classification_by_content(doc_type: str, title: str | None, visible_text: str | None) -> str:
+    """Корректирует VLM-классификацию по ключевым словам title и visible_text.
+
+    Модель иногда путает рецепт с заключением врача и наоборот.
+    Title и visible_text достаются из того же вызова, поэтому дешевле и надёжнее
+    поправить очевидные случаи правилом, чем гнать дополнительный VLM-вызов.
+    """
+    title_lower = (title or "").lower()
+    text_lower = (visible_text or "").lower()
+
+    # Сначала смотрим на видимый текст — он конкретнее и реже галлюцинирует.
+    if text_lower:
+        if any(k in text_lower for k in _UNKNOWN_TITLE_KEYWORDS):
+            return "unknown"
+        if any(k in text_lower for k in _DOCTOR_REPORT_TITLE_KEYWORDS):
+            return "doctor_report"
+
+    # Fallback на title.
+    if title_lower:
+        if any(k in title_lower for k in _UNKNOWN_TITLE_KEYWORDS):
+            return "unknown"
+        if any(k in title_lower for k in _DOCTOR_REPORT_TITLE_KEYWORDS):
+            return "doctor_report"
+
+    return doc_type
+
+
+def _detect_clinic(pdf) -> str | None:
+    """Название организации из шапки текстового слоя (первая строка в кавычках) или None."""
+    if not pdf.pages:
+        return None
+    header = " ".join(pdf.pages[0][:6])
+    match = _QUOTED_ORG.search(header)
+    return match.group(1).strip() if match else None
+
+
+def _classify_from_text_layer(path: Path) -> ClassifyResult | None:
+    """Fast-path для PDF: распознаёт лабораторный бланк по маркерам таблицы без VLM.
+
+    Высокоточный, односторонний: уверенно подтверждает только `analysis` (бланк с колонками
+    референса/единиц измерения, либо таблица «результат … значения»). Всё остальное —
+    заключения, справки, сканы без слоя — возвращает None и уходит в VLM, который надёжно
+    различает их. Так мы не рискуем ложно пометить заключение как анализ.
+    """
+    try:
+        pdf = open_pdf(path)
+    except Exception:
+        return None
+    if not pdf.is_usable:
+        return None
+
+    text_lower = pdf.flat_text.lower()
+    is_lab = any(m in text_lower for m in _LAB_TABLE_MARKERS) or (
+        "результат" in text_lower and "значения" in text_lower
+    )
+    if not is_lab:
+        return None
+
+    clinic = _detect_clinic(pdf)
+    log.info("[CLASSIFY_FAST] '%s' → analysis (текстовый слой, без VLM, clinic=%s)", path.name, clinic)
+    return ClassifyResult(doc_type="analysis", confidence=0.98, clinic=clinic)
 
 
 class ClassifySchema(BaseModel):
@@ -24,11 +113,23 @@ class ClassifySchema(BaseModel):
     confidence: float
     title: str | None = None
     clinic: str | None = None
+    visible_text: str | None = None
 
 
 def run_vlm(source_path: Path) -> ClassifyResult:
-    """Классифицирует документ по уменьшенной первой странице."""
+    """Классифицирует документ. PDF с годным текстовым слоем — без VLM; остальные — через VLM."""
     t0 = time.perf_counter()
+
+    if source_path.suffix.lower() == ".pdf":
+        fast = _classify_from_text_layer(source_path)
+        if fast is not None:
+            elapsed = time.perf_counter() - t0
+            log.info(
+                "[SUCCESS_CLASSIFY] Doc: '%s' | Result: '%s' (conf=%.2f) | fast-path | Elapsed: %.2fs",
+                source_path.name, fast.doc_type, fast.confidence, elapsed,
+            )
+            return fast
+
     log.info("[START_CLASSIFY] Doc: '%s' | Model: %s", source_path.name, VLM_MODEL)
 
     images = prepare_images(source_path, long_side=IMAGE_CLASSIFY_LONG_SIDE)
@@ -62,8 +163,9 @@ def run_vlm(source_path: Path) -> ClassifyResult:
             "on" if VLM_STRUCTURED_OUTPUT else "off",
             elapsed, prompt_tokens, completion_tokens,
         )
+        corrected_type = _correct_classification_by_content(response.doc_type, response.title, response.visible_text)
         return ClassifyResult(
-            doc_type=response.doc_type, confidence=response.confidence,
+            doc_type=corrected_type, confidence=response.confidence,
             title=response.title, clinic=response.clinic,
         )
     except Exception as e:

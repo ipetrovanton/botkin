@@ -1,0 +1,30 @@
+{
+  "_comment": "Ручная разметка по визуальному чтению двух страниц PDF. Первая страница содержит результаты Андрофлор, вторая — описание бланка без новых результатов; строгая e2e-сверка использует analytes[].value.",
+  "doc_type": "analysis",
+  "clinic": "Инвитро-Самара",
+  "title": "Андрофлор: исследование микрофлоры урогенитального тракта мужчин методом ПЦР в режиме реального времени",
+  "patient_name": "Петров Антон Игоревич",
+  "patient_birth_date": "24.02.1993",
+  "analytes": [
+    {"name": "Геномная ДНК человека", "value": 5.7, "unit": "Lg"},
+    {"name": "Общая бактериальная масса", "value": 4.8, "unit": "Lg"},
+    {"name": "Lactobacillus spp.", "value": 4.7, "unit": "Lg"},
+    {"name": "Lactobacillus spp., относительный показатель", "value": -0.1, "unit": "Lg(X/СВМО)"},
+    {"name": "Corynebacterium spp.", "value": 3.6, "unit": "Lg"},
+    {"name": "Corynebacterium spp., относительный показатель", "value": -1.2, "unit": "Lg(X/СВМО)"},
+    {"name": "Сумма: нормофлора", "value": 3.6, "unit": "Lg"},
+    {"name": "Сумма: нормофлора, относительный показатель", "value": -1.2, "unit": "Lg(X/СВМО)"},
+    {"name": "Megasphaera spp. / Veillonella spp. / Dialister spp.", "value": 3.6, "unit": "Lg"},
+    {"name": "Megasphaera spp. / Veillonella spp. / Dialister spp., относительный показатель", "value": -1.2, "unit": "Lg(X/СВМО)"},
+    {"name": "Сумма: УПМ, ассоциированные с баквагинозом", "value": 3.6, "unit": "Lg"},
+    {"name": "Сумма: УПМ, ассоциированные с баквагинозом, относительный показатель", "value": -1.2, "unit": "Lg(X/СВМО)"},
+    {"name": "Bacteroides spp. / Porphyromonas spp. / Prevotella spp.", "value": 4.0, "unit": "Lg"},
+    {"name": "Bacteroides spp. / Porphyromonas spp. / Prevotella spp., относительный показатель", "value": -0.8, "unit": "Lg(X/СВМО)"},
+    {"name": "Anaerococcus spp.", "value": 3.4, "unit": "Lg"},
+    {"name": "Anaerococcus spp., относительный показатель", "value": -1.4, "unit": "Lg(X/СВМО)"},
+    {"name": "Eubacterium spp.", "value": 4.1, "unit": "Lg"},
+    {"name": "Eubacterium spp., относительный показатель", "value": -0.7, "unit": "Lg(X/СВМО)"},
+    {"name": "Сумма: УПМ анаэробы", "value": 4.4, "unit": "Lg"},
+    {"name": "Сумма: УПМ анаэробы, относительный показатель", "value": -0.4, "unit": "Lg(X/СВМО)"}
+  ]
+}
