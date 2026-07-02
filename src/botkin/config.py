@@ -28,6 +28,7 @@ _DEFAULTS: dict = {
     "vlm": {
         "model": "qwen3-vl:8b-instruct",
         "temperature": 0.0,
+        "classify_temperature": 0.1,
         "num_ctx": 16384,
         "max_tokens": 8192,
         "num_predict": 8192,
@@ -158,6 +159,9 @@ def _resolve_path(raw: str) -> Path:
 # VLM
 VLM_MODEL = setting("vlm.model", "VLM_MODEL", str)
 VLM_TEMPERATURE = setting("vlm.temperature", "VLM_TEMPERATURE", float)
+# Классификация — задача «один из N», не OCR: небольшой шум (0.1) помогает модели
+# не застревать в ошибочном варианте на пограничных бланках. Extract — наоборот, детерминизм.
+CLASSIFY_TEMPERATURE = setting("vlm.classify_temperature", "CLASSIFY_TEMPERATURE", float)
 VLM_NUM_CTX = setting("vlm.num_ctx", "VLM_NUM_CTX", int)
 VLM_MAX_TOKENS = setting("vlm.max_tokens", "VLM_MAX_TOKENS", int)
 VLM_NUM_PREDICT = setting("vlm.num_predict", "VLM_NUM_PREDICT", int)
