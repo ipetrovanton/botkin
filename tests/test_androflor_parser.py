@@ -122,7 +122,7 @@ def test_extract_once_uses_ocr_primary_path(monkeypatch):
 
     def fake_ocr(images, doc_name):
         calls["ocr"] += 1
-        return [LabResult(analyte_name="Геномная ДНК человека", value_num=5.7, unit="Lg")]
+        return [LabResult(analyte_name="Геномная ДНК человека", value_num=5.7, unit="Lg")], 1
 
     def fake_vlm_attempt(messages, doc_name, structured=None):
         calls["vlm"] += 1
@@ -146,7 +146,7 @@ def test_extract_once_falls_back_to_vlm_when_ocr_empty(monkeypatch):
 
     def fake_ocr(images, doc_name):
         calls["ocr"] += 1
-        return []
+        return [], 0
 
     def fake_vlm_attempt(messages, doc_name, structured=None):
         calls["vlm"] += 1
@@ -188,9 +188,10 @@ def test_ocr_then_structure_routes_androflor_to_parser(monkeypatch):
     monkeypatch.setattr(ex, "_call_image_ocr", lambda images, doc_name: _ANDROFLOR_OCR)
     monkeypatch.setattr(ex, "_structure_text", lambda lines, doc_name: calls.__setitem__("structure", 1) or [])
 
-    rows = ex._ocr_then_structure(["img"], "sample_006#стр1")
+    rows, structured_count = ex._ocr_then_structure(["img"], "sample_006#стр1")
 
     assert calls["structure"] == 0
+    assert structured_count == len(rows)  # доменный parser: счётчик = число строк
     assert any(r.analyte_name == "Геномная ДНК человека" and r.value_num == 5.7 for r in rows)
 
 
@@ -205,10 +206,11 @@ def test_ocr_then_structure_routes_generic_to_structure_text(monkeypatch):
     monkeypatch.setattr(ex, "_call_image_ocr", lambda images, doc_name: "Гемоглобин: 153 г/л\nЭритроциты: 4.66")
     monkeypatch.setattr(ex, "_structure_text", fake_structure)
 
-    rows = ex._ocr_then_structure(["img"], "sample_011#стр1")
+    rows, structured_count = ex._ocr_then_structure(["img"], "sample_011#стр1")
 
     assert captured["lines"][0].startswith("Гемоглобин")
     assert rows[0].value_num == 153.0
+    assert structured_count == 1  # одна строка от text-LLM (до completeness_guard)
 
 
 def test_ocr_then_structure_skips_androflor_description_page(monkeypatch):
@@ -223,7 +225,8 @@ def test_ocr_then_structure_skips_androflor_description_page(monkeypatch):
         lambda lines, doc_name: calls.__setitem__("structure", 1) or [LabResult(analyte_name="мусор", value_num=10.0)],
     )
 
-    rows = ex._ocr_then_structure(["img"], "sample_006#стр2")
+    rows, structured_count = ex._ocr_then_structure(["img"], "sample_006#стр2")
 
     assert calls["structure"] == 0
     assert rows == []
+    assert structured_count == 0

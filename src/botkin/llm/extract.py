@@ -60,6 +60,11 @@ _SIBR_OCR_PROMPT = (
 # Минимум строк: полная таблица СИБР даёт 8 временных точек × 4 газа = 32 показателя.
 _SIBR_MIN_ROWS = 16
 
+# Сколько раз повторить text-структурирование без grammar при пустом ответе.
+# XGrammar на части входов схлопывает вывод в пустой объект; пустой ответ бывает
+# и без grammar, поэтому даём несколько дешёвых (пустой ответ быстрый) попыток.
+_TEXT_EMPTY_RETRIES = 2
+
 # Имена под старый интерфейс модуля: часть тестов обращается к ним как к атрибутам
 # botkin.llm.extract. Сами реализации живут в botkin.parsing.
 _merge_dedup = merge_dedup
@@ -265,7 +270,7 @@ def _vlm_extract_attempt(
     return rows, (len(tables) or tables_struct)
 
 
-def _ocr_then_structure(b64_images: list[str], doc_name: str) -> list[LabResult]:
+def _ocr_then_structure(b64_images: list[str], doc_name: str) -> tuple[list[LabResult], int]:
     """OCR-первичный путь: модель читает таблицу как ТЕКСТ (без grammar), затем
     детерминированное структурирование.
 
@@ -277,7 +282,7 @@ def _ocr_then_structure(b64_images: list[str], doc_name: str) -> list[LabResult]
     """
     text = _call_image_ocr(b64_images, doc_name)
     if not text.strip():
-        return []
+        return [], 0
     if is_androflor_text(text):
         rows = parse_androflor_ocr(text)
         # Минимум строк: настоящая таблица Андрофлор даёт ~20 строк, тогда как страница-описание
@@ -287,20 +292,69 @@ def _ocr_then_structure(b64_images: list[str], doc_name: str) -> list[LabResult]
         # а отдаём пусто — страница-описание не должна вносить ложных показателей.
         if len(rows) >= _ANDROFLOR_MIN_ROWS:
             log.info("[ANDROFLOR_OCR] Doc: '%s' | строк=%d", doc_name, len(rows))
-            return rows
+            return rows, len(rows)
         log.info("[ANDROFLOR_OCR_SKIP] Doc: '%s' | не таблица Андрофлор (строк=%d) — пропуск", doc_name, len(rows))
-        return []
+        return [], 0
     if is_sibr_text(text):
         sibr_text = _call_sibr_ocr(b64_images, doc_name)
         rows = parse_sibr_ocr(sibr_text)
         if len(rows) >= _SIBR_MIN_ROWS:
             log.info("[SIBR_OCR] Doc: '%s' | строк=%d", doc_name, len(rows))
-            return rows
+            return rows, len(rows)
         log.info("[SIBR_OCR_SKIP] Doc: '%s' | не таблица СИБР (строк=%d) — пропуск", doc_name, len(rows))
-        return []
-    rows = _structure_text(text.splitlines(), doc_name)
-    log.info("[OCR_STRUCTURE] Doc: '%s' | строк=%d", doc_name, len(rows))
-    return rows
+        return [], 0
+    ocr_lines = text.splitlines()
+    structured_rows = _structure_text(ocr_lines, doc_name)
+    log.info("[OCR_STRUCTURE] Doc: '%s' | строк=%d", doc_name, len(structured_rows))
+    # Анти-пропускной добор: OCR-текст — тот же источник, что и текстовый слой PDF,
+    # только полученный через VLM. completeness_guard добирает строки, которые
+    # text-LLM пропустил при структурировании (например, СОЭ на растровом бланке).
+    recovered = completeness_guard(ocr_lines, structured_rows)
+    if recovered:
+        log.info(
+            "[OCR_COMPLETENESS_GUARD] Doc: '%s' | добрано пропущенных строк=%d: %s",
+            doc_name, len(recovered), [r.analyte_name for r in recovered],
+        )
+    rows = merge_dedup(structured_rows, recovered)
+    # Возвращаем число строк от text-LLM (до добора) — нужен _extract_once для
+    # решения: вызывать ли structured VLM как дополнительный источник. text-LLM
+    # может провалить структурирование (0 строк), и completeness_guard доберёт
+    # только то, что есть в OCR-тексте. Если OCR-текст неполон (модель не видит
+    # часть бланка), structured VLM может найти пропущенное напрямую по схеме.
+    return rows, len(structured_rows)
+
+
+def _vlm_extract_with_retry(b64_images: list[str], doc_name: str) -> tuple[list[LabResult], int]:
+    """Structured VLM-извлечение с adaptive fallback на свободный JSON.
+
+    Если structured output (XGrammar) вернул 0 строк — повторяем без grammar constraint.
+    XGrammar на плотных/сложных картинках может свалиться в пустой, но валидный по схеме
+    объект за 1–2s; без принудительной грамматики модель генерирует свободный JSON,
+    который instructor всё равно парсит и валидирует по той же схеме.
+    """
+    messages = _messages_from_images(ANALYSIS_VLM_SYSTEM, ANALYSIS_INSTRUCTION, b64_images)
+    rows, tables = _vlm_extract_attempt(messages, doc_name)
+    if not rows and VLM_STRUCTURED_OUTPUT:
+        log.info("[EXTRACT_UNSTRUCTURED_RETRY] Doc: '%s' | structured VLM пуст — повтор без grammar", doc_name)
+        rows, tables = _vlm_extract_attempt(messages, doc_name, structured=False)
+    return rows, tables
+
+
+def _supplement_with_vlm(ocr_rows: list[LabResult], b64_images: list[str], doc_name: str) -> list[LabResult]:
+    """Добор показателей прямым VLM-чтением изображения к строкам из OCR-текста.
+
+    Нужен, когда text-LLM провалил структурирование (все строки — от completeness_guard),
+    а значит OCR-текст мог быть неполон: модель не «увидела» часть бланка. Structured VLM
+    читает картинку напрямую по схеме и может найти пропущенное (например, СОЭ внизу бланка).
+    """
+    log.info("[EXTRACT_VLM_SUPPLEMENT] Doc: '%s' | text-LLM 0 строк — structured VLM как доп. источник", doc_name)
+    vlm_rows, _ = _vlm_extract_with_retry(b64_images, doc_name)
+    if not vlm_rows:
+        return ocr_rows
+    merged = merge_dedup(ocr_rows, vlm_rows)
+    log.info("[EXTRACT_VLM_SUPPLEMENTED] Doc: '%s' | OCR=%d + VLM=%d → объединено=%d",
+             doc_name, len(ocr_rows), len(vlm_rows), len(merged))
+    return merged
 
 
 def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult], int]:
@@ -312,17 +366,20 @@ def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult]
     qwen3-vl в OCR-режиме корректно. Structured VLM остаётся фолбэком для бланков, где
     свободный OCR-текст структурировать труднее, чем извлекать напрямую по схеме.
     """
+    structured_count = 0
     try:
-        rows = _ocr_then_structure(b64_images, doc_name)
+        rows, structured_count = _ocr_then_structure(b64_images, doc_name)
     except Exception as e:  # noqa: BLE001 — OCR-вызов вне instructor-ретраев; падение → фолбэк на VLM
         log.warning("[OCR_PRIMARY_FAILED] Doc: '%s' | OCR-путь упал, фолбэк на VLM: %s", doc_name, e)
         rows = []
     if rows:
+        # text-LLM дал 0 строк (всё добрано completeness_guard) → OCR-текст мог быть
+        # неполон, просим structured VLM прочитать картинку напрямую и добрать.
+        if structured_count == 0:
+            rows = _supplement_with_vlm(rows, b64_images, doc_name)
         return rows, 1
     log.info("[EXTRACT_VLM_FALLBACK] Doc: '%s' | OCR-путь пуст — structured VLM", doc_name)
-    messages = _messages_from_images(ANALYSIS_VLM_SYSTEM, ANALYSIS_INSTRUCTION, b64_images)
-    rows, tables = _vlm_extract_attempt(messages, doc_name)
-    return rows, tables
+    return _vlm_extract_with_retry(b64_images, doc_name)
 
 
 def _messages_from_text(system_prompt: str, instruction: str, text: str) -> list[dict]:
@@ -332,12 +389,18 @@ def _messages_from_text(system_prompt: str, instruction: str, text: str) -> list
     ]
 
 
-def _call_text(messages: list[dict], doc_name: str) -> RawAnalysis:
-    """Детерминированный (temp=0) text-only вызов структурирования."""
+def _call_text(messages: list[dict], doc_name: str, structured: bool | None = None) -> RawAnalysis:
+    """Детерминированный (temp=0) вызов структурирования текстового слоя через TEXT_MODEL.
+
+    structured=None → берём TEXT_STRUCTURED_OUTPUT (grammar-constrained). structured=False
+    отключает grammar для adaptive-повтора: XGrammar на части входов схлопывает вывод в
+    пустой валидный объект, а без грамматики та же модель отдаёт нормальный JSON.
+    """
+    use_structured = TEXT_STRUCTURED_OUTPUT if structured is None else structured
     t0 = time.perf_counter()
     log.info(
-        "[START_TEXT_EXTRACT] Doc: '%s' | Model: %s | ctx=%d",
-        doc_name, TEXT_MODEL, TEXT_NUM_CTX,
+        "[START_TEXT_EXTRACT] Doc: '%s' | Model: %s | ctx=%d | grammar=%s",
+        doc_name, TEXT_MODEL, TEXT_NUM_CTX, "on" if use_structured else "off",
     )
     options = {
         "keep_alive": OLLAMA_KEEP_ALIVE,
@@ -346,7 +409,6 @@ def _call_text(messages: list[dict], doc_name: str) -> RawAnalysis:
         "num_predict": TEXT_NUM_PREDICT,
         "temperature": TEXT_LAYER_TEMPERATURE,
     }
-    use_structured = TEXT_STRUCTURED_OUTPUT
     client = get_client(temperature=TEXT_LAYER_TEMPERATURE, mode=instructor.Mode.JSON)
     try:
         response = client.chat.completions.create(
@@ -370,14 +432,27 @@ def _call_text(messages: list[dict], doc_name: str) -> RawAnalysis:
 
 
 def _structure_text(lines: list[str], doc_name: str) -> list[LabResult]:
-    """Координатные строки → LabResult через text-only LLM (temp=0) + маппинг."""
+    """Координатные строки → LabResult через TEXT_MODEL (temp=0) + маппинг.
+
+    Adaptive fallback (симметрично картиночному _vlm_extract_with_retry): если structured
+    вызов вернул 0 строк — XGrammar мог схлопнуть вывод в пустой объект — повторяем без
+    grammar-ограничения. Без ретрая текстовый слой sample_001 флапал ~50% прогонов
+    (пустой ответ → мусор от completeness_guard вместо ROMA/Ca125/HE4). Пустой ответ
+    случается и без grammar, поэтому unstructured-повтор ограничен _TEXT_EMPTY_RETRIES.
+    """
     text = "\n".join(lines)
     messages = _messages_from_text(ANALYSIS_TEXT_SYSTEM, TEXT_INSTRUCTION, text)
     try:
-        raw = _call_text(messages, doc_name)
+        rows = _rows_or_harvest(_call_text(messages, doc_name))
+        for attempt in range(_TEXT_EMPTY_RETRIES):
+            if rows or not TEXT_STRUCTURED_OUTPUT:
+                break
+            log.info("[TEXT_UNSTRUCTURED_RETRY] Doc: '%s' | structured text пуст (попытка %d) — повтор без grammar",
+                     doc_name, attempt + 1)
+            rows = _rows_or_harvest(_call_text(messages, doc_name, structured=False))
+        return rows
     except ExtractionError as e:
         return _salvage_rows(e)
-    return _rows_or_harvest(raw)
 
 
 def _should_use_text_layer(source_path: Path) -> bool:

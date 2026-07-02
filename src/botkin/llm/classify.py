@@ -13,7 +13,7 @@ import instructor
 from pydantic import BaseModel
 
 from botkin.config import (
-    VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_CLASSIFY_LONG_SIDE,
+    VLM_MODEL, CLASSIFY_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_CLASSIFY_LONG_SIDE,
     VLM_STRUCTURED_OUTPUT,
 )
 from botkin.domain.models import ClassifyResult, DocType
@@ -43,6 +43,14 @@ _DOCTOR_REPORT_TITLE_KEYWORDS = (
     "мрт", "кт", "рентген", "узи", "экг", "заключение", "прием",
     "осмотр", "врач", "выписка", "эпикриз", "справка",
 )
+# Однозначные названия лабораторных бланков. Документ, озаглавленный «Общий анализ
+# крови», является анализом по определению — что бы ни выдал VLM. На растровых бланках
+# (Тонус, sample_011) модель при temperature>0 иногда путает тип с doctor_report;
+# сильный заголовок перебивает эту флуктуацию детерминированно.
+_ANALYSIS_TITLE_KEYWORDS = (
+    "общий анализ", "клинический анализ", "биохимический анализ",
+    "анализ крови", "анализ мочи", "гемограмма",
+)
 
 
 def _correct_classification_by_content(doc_type: str, title: str | None, visible_text: str | None) -> str:
@@ -54,6 +62,10 @@ def _correct_classification_by_content(doc_type: str, title: str | None, visible
     """
     title_lower = (title or "").lower()
     text_lower = (visible_text or "").lower()
+
+    # Явный лабораторный заголовок — сильнейший сигнал, проверяем первым.
+    if any(k in title_lower for k in _ANALYSIS_TITLE_KEYWORDS):
+        return "analysis"
 
     # Сначала смотрим на видимый текст — он конкретнее и реже галлюцинирует.
     if text_lower:
@@ -134,7 +146,7 @@ def run_vlm(source_path: Path) -> ClassifyResult:
 
     images = prepare_images(source_path, long_side=IMAGE_CLASSIFY_LONG_SIDE)
     b64 = to_base64_jpegs(images[:1])   # только первая страница
-    client = get_client(temperature=VLM_TEMPERATURE, mode=instructor.Mode.JSON)
+    client = get_client(temperature=CLASSIFY_TEMPERATURE, mode=instructor.Mode.JSON)
 
     content = [
         {"type": "text", "text": CLASSIFY_INSTRUCTION},

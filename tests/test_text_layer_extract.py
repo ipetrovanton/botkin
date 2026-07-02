@@ -15,12 +15,53 @@ def test_structure_text_maps_raw_to_rows(monkeypatch):
         {"parameter": "Эритроциты", "value": "4.64", "unit": "млн/мкл",
          "reference_range": "3.8 - 5.1"},
     ]})
-    monkeypatch.setattr(ex, "_call_text", lambda messages, name: raw)
+    monkeypatch.setattr(ex, "_call_text", lambda messages, name, structured=None: raw)
     rows = ex._structure_text(["Гемоглобин 13.7 г/дл 11.7 - 15.5",
                                "Эритроциты 4.64 млн/мкл 3.8 - 5.1"], "doc.pdf")
     names = [r.analyte_name for r in rows]
     assert names == ["Гемоглобин", "Эритроциты"]
     assert rows[0].unit == "г/дл" and rows[0].value_num == 13.7
+
+
+def test_structure_text_retries_without_grammar_on_empty(monkeypatch):
+    """XGrammar иногда возвращает пустой объект: structured пуст → повтор без grammar.
+
+    Регрессия sample_001 (онкомаркеры): без ретрая текстовый слой флапал ~50% прогонов,
+    пустой ответ подменялся мусором от completeness_guard. Ретрай стабилизировал до 6/6.
+    """
+    empty = RawAnalysis.model_validate({"results": []})
+    filled = RawAnalysis.model_validate({"results": [
+        {"parameter": "Гемоглобин", "value": "13.7", "unit": "г/дл", "reference_range": "11.7 - 15.5"},
+    ]})
+    calls = []
+
+    def fake_call_text(messages, name, structured=None):
+        calls.append(structured)
+        # Первый (structured) вызов пуст, повтор без grammar — с данными.
+        return empty if structured is None else filled
+
+    monkeypatch.setattr(ex, "_call_text", fake_call_text)
+    rows = ex._structure_text(["Гемоглобин 13.7 г/дл 11.7 - 15.5"], "doc.pdf")
+
+    assert calls == [None, False]  # structured, затем unstructured-повтор
+    assert [r.analyte_name for r in rows] == ["Гемоглобин"]
+
+
+def test_structure_text_stops_retrying_after_limit(monkeypatch):
+    """Пустой ответ и без grammar → ограничиваем повторы _TEXT_EMPTY_RETRIES, не зациклимся."""
+    empty = RawAnalysis.model_validate({"results": []})
+    calls = []
+
+    def fake_call_text(messages, name, structured=None):
+        calls.append(structured)
+        return empty
+
+    monkeypatch.setattr(ex, "_call_text", fake_call_text)
+    rows = ex._structure_text(["мусор без показателей"], "doc.pdf")
+
+    assert rows == []
+    # 1 structured + _TEXT_EMPTY_RETRIES unstructured-попыток.
+    assert calls == [None] + [False] * ex._TEXT_EMPTY_RETRIES
 
 
 def _make_pdf_data(pages: list[list[str]]) -> PdfTextData:
@@ -156,10 +197,12 @@ def test_merge_dedup_keeps_same_name_with_different_units():
     assert {r.value_num for r in merged} == {1.8, 36.3}
 
 
-def test_extract_unit_ref_collapses_numeric_spaces_in_thousands():
-    # "1 010 - 1 023" в токенах → unit "", ref "1010 - 1023".
-    from botkin.parsing.text_layer import _extract_unit_ref
-    unit, ref = _extract_unit_ref(["1", "010", "-", "1", "023"])
+def test_extract_unit_ref_reads_thousands_range_after_collapse():
+    # _extract_unit_ref ожидает уже свёрнутый список (см. _collapse_numeric_spaces):
+    # "1 010 - 1 023" → ["1010", "-", "1023"] → unit None, ref "1010 - 1023".
+    from botkin.parsing.text_layer import _collapse_numeric_spaces, _extract_unit_ref
+    collapsed = _collapse_numeric_spaces(["1", "010", "-", "1", "023"])
+    unit, ref, _consumed = _extract_unit_ref(collapsed)
     assert unit is None
     assert ref == "1010 - 1023"
 
@@ -184,6 +227,31 @@ def test_parse_text_line_skips_number_inside_parentheses():
     assert r.unit == "пг"
     assert r.ref_low == 27.0
     assert r.ref_high == 34.0
+
+
+def test_parse_text_line_number_in_analyte_name_is_not_value():
+    # Регрессия sample_001: «Антиген аденогенных раков Са 125 8.13 Ед/мл < 35 ...».
+    # «125» — часть имени онкомаркера Ca 125, а не значение. Настоящее значение — 8.13.
+    # Раньше completeness_guard плодил фантом «... Са = 125.0».
+    from botkin.parsing.text_layer import _parse_text_line
+    r = _parse_text_line("Антиген аденогенных раков Са 125 8.13 Ед/мл < 35 Cobas 6000 в крови")
+    assert r is not None
+    assert r.value_raw == "8.13"
+    assert r.value_num == 8.13
+    assert r.unit == "Ед/мл"
+    assert r.ref_operator == "<"
+    assert r.ref_high == 35.0
+    assert "125" in r.analyte_name  # число осталось в имени аналита
+
+
+def test_parse_text_line_all_keeps_ph_second_value_after_range():
+    # Контроль, что фикс «числа в имени» не сломал multi-result с диапазоном:
+    # «pH 5.5 5 - 8» — 5.5 значение, «5 - 8» референс (за числом идёт тире, не единица).
+    from botkin.parsing.text_layer import _parse_text_line_all
+    rows = _parse_text_line_all("Относительная плотность 1017 г/л 1003 - 1035 pH 5.5 5 - 8")
+    by_name = {r.analyte_name: r for r in rows}
+    assert by_name["pH"].value_num == 5.5
+    assert by_name["pH"].ref_low == 5.0 and by_name["pH"].ref_high == 8.0
 
 
 def test_num_tokens_extracts_range_numbers_without_sign():
