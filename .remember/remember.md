@@ -18,6 +18,8 @@
 - **docs**: `HANDOFF.md` (промпт для агента без GPU), `TEST_RESULTS.md`, дате-фактура
   `habr/2026-06-27--ollama-speed-optimization.md`.
 - **chore(bench)**: `scripts/bench/` + игнор bench-артефактов в `.gitignore`.
+- **feat(llm) warmup**: `client.warmup()` грузит модель в VRAM на старте бота/API фоном
+  (не блокирует), best-effort; первый документ не платит холодный старт ~100–120s.
 
 ### Результат
 - Unit: **313 passed** (`uv run pytest -m "not llm"`), `ruff check src/ tests/` clean.
@@ -27,8 +29,8 @@
 ### Следующий шаг
 1. Ревью/push ветки `fix/ocr-stability-accuracy` (по команде оператора).
 2. Открытый техдолг — в `HANDOFF.md` (раздел «Открытый техдолг»): HE4 unit/ref (пороги
-   пре-/постменопаузы), остаточный двойной пустой ответ, оценка warmup-прогрева Ollama.
-3. Механизм прогрева Ollama (warmup) — обсуждается, см. `HANDOFF.md`/журнал.
+   пре-/постменопаузы), остаточный двойной пустой ответ.
+3. warmup замерить на GPU: подтвердить, что первый документ после старта не платит cold start.
 
 ### Как продолжить без локальной Ollama
 Полный контекст и ограничения — в `HANDOFF.md`. Кратко: `uv run pytest -m "not llm"`,

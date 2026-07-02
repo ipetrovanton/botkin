@@ -66,6 +66,9 @@
 - **text_layer.py:** объединены `_parse_text_line` и `_parse_text_line_all` через общий
   `_parse_first_result`; multi-result парсинг склеенных строк; склейка тысяч только для целых
   (`_INT_ONLY_RE`), чтобы «5.5 5» не превращалось в «5.55».
+- **warmup (client.py):** `warmup()` грузит модель(и) в VRAM на старте (bot `main()`, API
+  `lifespan`) фоном — первый документ не платит холодный старт ~100–120s. Best-effort, без GPU
+  тестируется моком `urlopen` (см. `tests/test_client_hygiene.py`).
 
 ## Как проверять без GPU
 
