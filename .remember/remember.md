@@ -1,40 +1,38 @@
 # Текущий handoff
 
-## Завершено: P1–P6 (sample_008/009/012/016/021/024/025)
+## Ветка: fix/ocr-stability-accuracy — оптимизация скорости+точности (закоммичено)
 
-Все изменения НЕ закоммичены.
+4 коммита поверх `9537180`. Рабочее дерево чистое. НЕ запушено.
 
 ### Что сделано в этой сессии
-- P1–P4: доработан text-layer путь (многострочные имена, скобки, дедуп по размерности).
-- P5: создан специализированный СИБР-парсер (`src/botkin/parsing/sibr.py`), интегрирован в VLM/text-layer
-  пути, улучшена детекция СИБР по газовым маркерам H2+CH4+O2.
-- P6: OCR-аудит JPG выявил, что эталонные `.expected.json` для sample_021/024/025 не соответствуют
-  реальному содержимому фото; разметка обновлена под содержимое.
+- **config**: num_predict 16384→4096, num_ctx 16384→8192, temperature 0.0 (extract) /
+  0.1 (classify, ключ `vlm.classify_temperature`), repeat_penalty 1.1.
+- **fix(llm)**:
+  - adaptive fallback против пустого ответа XGrammar на текстовом пути `_structure_text`
+    (бюджет `_TEXT_EMPTY_RETRIES=2`) — устранил плавающие FAIL (sample_001 3/6 → 6/6);
+  - `classify._correct_classification_by_content`: корректор типа по заголовку
+    (`_ANALYSIS_TITLE_KEYWORDS`) — «Общий анализ крови» → analysis (чинит sample_011);
+  - `_extract_once` декомпозирован; удалён мёртвый+сломанный гибридный fallback;
+  - `text_layer._is_name_embedded_number` — «Ca 125»: число в имени, не значение
+    (устранён фантом «Са = 125.0»); парсеры строк объединены в `_parse_first_result`.
+- **docs**: `HANDOFF.md` (промпт для агента без GPU), `TEST_RESULTS.md`, дате-фактура
+  `habr/2026-06-27--ollama-speed-optimization.md`.
+- **chore(bench)**: `scripts/bench/` + игнор bench-артефактов в `.gitignore`.
 
 ### Результат
-- `sample_008.pdf`: PASS 24/24
-- `sample_009.pdf`: PASS 27/27
-- `sample_012.pdf`: PASS 47/47
-- `sample_016.pdf`: PASS 63/63
-- `sample_021.jpg`: PASS (doctor_report)
-- `sample_024.jpg`: PASS (unknown)
-- `sample_025.jpg`: PASS (unknown)
-- Unit-тесты: **309 passed**
-- `ruff check src tests`: clean
-
-### Файлы
-- `src/botkin/parsing/rows.py` — `_unit_dimension` и `_merge_key` для дедупа по размерности.
-- `src/botkin/parsing/sibr.py` — новый парсер СИБР.
-- `src/botkin/llm/extract.py` — интеграция СИБР-парсера.
-- `tests/test_sibr.py` — unit-тесты СИБР-парсера.
-- `tests/test_e2e_llm.py` — name-aware matcher для СИБР.
-- `tests/fixtures/documents/samples/sample_021.expected.json` — обновлено под doctor_report.
-- `tests/fixtures/documents/samples/sample_024.expected.json` — обновлено под unknown (рецепт).
-- `tests/fixtures/documents/samples/sample_025.expected.json` — обновлено под unknown (рецепт).
-- `habr/lab-results-journal.md` — дописаны P1–P6.
+- Unit: **313 passed** (`uv run pytest -m "not llm"`), `ruff check src/ tests/` clean.
+- E2E (реальная Ollama, оператор с GPU): **34/34 PASS, 325/325 (100%), 26.0s/док** (было 50.6),
+  score 0.0369 (было 0.0172). Все 4 исходных FAIL (001/004/011/013) закрыты, регрессий нет.
 
 ### Следующий шаг
-Полный прогон LLM e2e по всем реальным документам, чтобы убедиться, что нет новых регрессий.
+1. Ревью/push ветки `fix/ocr-stability-accuracy` (по команде оператора).
+2. Открытый техдолг — в `HANDOFF.md` (раздел «Открытый техдолг»): HE4 unit/ref (пороги
+   пре-/постменопаузы), остаточный двойной пустой ответ, оценка warmup-прогрева Ollama.
+3. Механизм прогрева Ollama (warmup) — обсуждается, см. `HANDOFF.md`/журнал.
+
+### Как продолжить без локальной Ollama
+Полный контекст и ограничения — в `HANDOFF.md`. Кратко: `uv run pytest -m "not llm"`,
+LLM-логика через моки, реальных документов в репо нет (только `*.expected.json`).
 
 ---
 
