@@ -64,6 +64,13 @@ _*.json
 _*.txt
 _*.jpg
 _*.png
+
+# Bench-артефакты прогонов: логи и текстовые дампы. Сами скрипты scripts/bench/*.py
+# и данные сравнения bench_models_results.json — версионируем.
+bench_*.log
+e2e_run.log
+scripts/bench/*.log
+scripts/bench/*.txt
 extract_text.py
 test_baseline.jpg
 test_image.jpg
