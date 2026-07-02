@@ -1,8 +1,10 @@
 """Тонкая обёртка над Ollama через OpenAI-compatible интерфейс."""
+import json
 import logging
 import os
 import platform
 import subprocess
+import time
 import urllib.request
 from json import JSONDecodeError
 
@@ -16,6 +18,7 @@ from tenacity import (
 import instructor
 from botkin.config import (
     OLLAMA_URL, OLLAMA_KEEP_ALIVE, OLLAMA_PROBE_TIMEOUT, OLLAMA_WSL_DETECT_TIMEOUT,
+    OLLAMA_WARMUP_TIMEOUT, VLM_MODEL, TEXT_MODEL,
     VLM_NUM_CTX, VLM_REPEAT_PENALTY, VLM_NUM_PREDICT,
     VLM_MAX_RETRIES, VLM_REQUEST_TIMEOUT, VLM_RETRY_INITIAL_WAIT, VLM_RETRY_MAX_SECONDS,
     VLM_RETRY_MAX_WAIT, VLM_STRUCTURED_OUTPUT,
@@ -152,3 +155,40 @@ def get_raw_client(timeout: float | None = None) -> OpenAI:
 
 def get_client(temperature: float = 0.1, mode: instructor.Mode = instructor.Mode.JSON):
     return instructor.from_openai(get_raw_client(), mode=mode)
+
+
+def _warmup_models() -> list[str]:
+    """Модели для прогрева: VLM + text (без дублей, с сохранением порядка)."""
+    seen: dict[str, None] = {}
+    for m in (VLM_MODEL, TEXT_MODEL):
+        seen.setdefault(m, None)
+    return list(seen)
+
+
+def warmup(models: list[str] | None = None) -> None:
+    """Загрузить веса модели(ей) в VRAM заранее — чтобы первый документ не платил
+    холодный старт (~100–120s на 6 ГБ). Best-effort: Ollama недоступна → лог, не падаем.
+
+    Грузим нативным Ollama `/api/generate` с пустым prompt: он лишь загружает модель
+    (`done_reason: "load"`) и не генерирует. Прокидываем num_ctx=VLM_NUM_CTX и keep_alive,
+    чтобы прогретый ранер совпал по параметрам с боевыми /v1-вызовами (иначе Ollama
+    перезагрузит модель при первом реальном запросе).
+    """
+    url = _detect_ollama_url()
+    for model in (models or _warmup_models()):
+        payload = json.dumps({
+            "model": model,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
+            "options": {"num_ctx": VLM_NUM_CTX},
+        }).encode()
+        req = urllib.request.Request(
+            f"{url}/api/generate", data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        t0 = time.perf_counter()
+        try:
+            with urllib.request.urlopen(req, timeout=OLLAMA_WARMUP_TIMEOUT):
+                pass
+            log.info("[WARMUP] '%s' загружена в VRAM за %.1fs", model, time.perf_counter() - t0)
+        except (OSError, ValueError) as e:
+            log.warning("[WARMUP] '%s' не прогрета (Ollama недоступна?): %s", model, e)

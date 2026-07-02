@@ -51,6 +51,7 @@ _DEFAULTS: dict = {
         "keep_alive": "30m",
         "probe_timeout": 1.5,
         "wsl_detect_timeout": 5.0,
+        "warmup_timeout": 300.0,
     },
     "pdf_to_image": {
         "render_dpi": 200,
@@ -216,6 +217,9 @@ OLLAMA_KEEP_ALIVE = setting("ollama.keep_alive", "OLLAMA_KEEP_ALIVE", str)
 OLLAMA_PROBE_TIMEOUT = setting("ollama.probe_timeout", "OLLAMA_PROBE_TIMEOUT", float)
 # Таймаут определения IP WSL (wsl hostname -I) на Windows.
 OLLAMA_WSL_DETECT_TIMEOUT = setting("ollama.wsl_detect_timeout", "OLLAMA_WSL_DETECT_TIMEOUT", float)
+# Таймаут прогрева (загрузки весов в VRAM): холодный старт 6 ГБ модели ~100–120s,
+# берём с запасом. Прогрев best-effort — превышение таймаута не роняет сервис.
+OLLAMA_WARMUP_TIMEOUT = setting("ollama.warmup_timeout", "OLLAMA_WARMUP_TIMEOUT", float)
 
 # PDF → изображение
 PDF_RENDER_DPI = setting("pdf_to_image.render_dpi", "PDF_RENDER_DPI", int)

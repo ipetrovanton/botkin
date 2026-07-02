@@ -9,6 +9,7 @@ from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 
 from botkin.bot.handlers import browse, dynamics, help, show, start, upload
+from botkin.llm.client import warmup
 from botkin.log_config import setup_logging
 
 try:
@@ -44,6 +45,9 @@ async def main() -> None:
         BotCommand(command="period", description="Документы и показатели за период"),
         BotCommand(command="dynamics", description="График показателя"),
     ])
+
+    # Прогрев моделей — фоном, чтобы не задерживать старт polling (см. client.warmup).
+    asyncio.create_task(asyncio.to_thread(warmup))
 
     log.info("Бот запущен, polling...")
     await dp.start_polling(bot)
