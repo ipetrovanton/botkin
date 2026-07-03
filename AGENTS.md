@@ -46,6 +46,31 @@
    uv run python -m botkin.bot.main
    ```
 
+### Шаг В. Веб-кабинет пациента (SPA, тот же FastAPI)
+
+Веб-кабинет раздаётся тем же API-сервером из Шага Б — отдельный процесс не нужен:
+
+```powershell
+# Запустить API (если ещё не запущен)
+uv run uvicorn botkin.api.app:app --host 0.0.0.0 --port 8000
+# Открыть в браузере
+start http://localhost:8000
+```
+
+Кабинет — SPA на Alpine.js (заендорено локально, без CDN/сборщика). Идентификация на demo-этапе
+— через `X-Telegram-User-Id`: на экране «Профиль» введите идентификатор или нажмите
+«Использовать demo (113521070)» (под этим пользователем в `data/botkin.db` есть реальные данные:
+32 документа, 276 показателей, 9 заключений). Значение сохраняется в `localStorage`.
+
+Экраны: Обзор (дашборд), Документы (фильтры: тип/клиника/врач/даты/статус/поиск + пагинация),
+Загрузка (drag&drop + поллинг прогресса по стадиям), Аналитика (SVG-график динамики с коридором
+нормы), Заключения (лента с фильтрами), детальная карточка документа. Тёмная тема по умолчанию,
+переключатель в шапке. Mobile-first: нижняя навигация, `safe-area-inset` под notch.
+
+API кабинета: `/api/me`, `/api/documents`, `/api/documents/{id}`, `/api/documents/{id}/status`,
+`/api/analytes`, `/api/clinics`, `/api/doctors`, `/api/dynamics?name=`, `/api/labs/period`,
+`/api/reports`, `/api/stats`. Все требуют заголовок `X-Telegram-User-Id`.
+
 ---
 
 ## 🤖 3. Инструкция по проверке функционала через Telegram-бота
@@ -82,18 +107,20 @@ wsl -u root -d Ubuntu systemctl restart ollama
 botkin/
 ├── src/botkin/              # Пакет (устанавливаемый через uv/pip)
 │   ├── api/                 # FastAPI-приложение
-│   │   ├── app.py           # Точка входа сервера
+│   │   ├── app.py           # Точка входа сервера + mount статики SPA
 │   │   ├── deps.py          # Зависимости (get_user_id)
 │   │   └── routes/          # Роуты
-│   │       └── upload.py    # POST /upload
+│   │       ├── upload.py    # POST /upload (бот и веб-кабинет)
+│   │       ├── documents.py # /api/* — лента, карточка, статус кабинета
+│   │       └── analytics.py # /api/* — селекторы, динамика, периоды, статистика
 │   ├── bot/                 # Telegram-бот (aiogram)
 │   │   ├── main.py          # Точка входа бота
 │   │   └── handlers/        # /start, /help, /show, /dynamics, upload
 │   ├── db/                  # База данных
-│   │   ├── connection.py    # Подключение, init_db
+│   │   ├── connection.py    # Подключение, init_db, Python-lower для кириллицы
 │   │   ├── schema.sql       # DDL-схема (5 таблиц)
 │   │   ├── queries.py       # Аналитические запросы
-│   │   └── repos.py         # Репозитории (DocumentRepo, UserRepo)
+│   │   └── repos.py         # Репозитории (DocumentRepo, LabRepo, ReportRepo, UserRepo)
 │   ├── domain/              # Доменные модели
 │   │   └── models.py        # LabResult, DoctorReport, ClassifyResult, etc.
 │   ├── llm/                 # VLM-интеграция (qwen3-vl)
@@ -106,11 +133,18 @@ botkin/
 │   │   └── notifications.py # Telegram-уведомления
 │   ├── viz/                 # Визуализация
 │   │   └── plots.py         # Plotly-графики динамики
+│   ├── web/                 # Веб-кабинет пациента (SPA, без сборщика)
+│   │   ├── index.html       # Каркас на Alpine.js: 7 экранов + bottom-nav
+│   │   ├── styles.css       # Дизайн-система: бренд, темы, анимации, SVG
+│   │   ├── app.js           # Компонент cabinet(): API-клиент, экраны, график
+│   │   └── vendor/alpine.min.js  # Alpine.js 3.15.12 (MIT, заендорено локально)
 │   ├── config.py            # Централизованная конфигурация
 │   └── exceptions.py        # Типизированные исключения
 ├── tests/                   # Тесты
 │   ├── conftest.py          # Фикстуры
-│   └── test_smoke.py        # 9 smoke-тестов
+│   ├── test_cabinet_repo.py # 12 тестов репозиториев кабинета
+│   ├── test_cabinet_api.py  # 13 тестов /api/* через TestClient
+│   └── test_smoke.py        # smoke-тесты
 ├── config.json              # Переопределения конфигурации
 ├── pyproject.toml           # Зависимости, entry points, tool config
 ├── .env.example             # Шаблон переменных окружения

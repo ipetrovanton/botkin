@@ -110,6 +110,11 @@ def init_db() -> None:
 def get_conn() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(str(DB_PATH), isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # Переопределяем встроенную LOWER на Python-variant: SQLite без ICU не опускает
+    # регистр для non-ASCII (кириллица). str.lower() — суперсет ASCII-lower, поэтому
+    # существующие запросы на латинице продолжат работать, а поиск по кириллице
+    # (search-фильтр кабинета, dynamics) станет регистронезависимым.
+    conn.create_function("lower", 1, lambda s: s.lower() if isinstance(s, str) else s)
     try:
         yield conn
     finally:

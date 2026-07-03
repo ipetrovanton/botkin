@@ -1,6 +1,60 @@
 # Текущий handoff
 
-## Ветка: fix/ocr-stability-accuracy — оптимизация скорости+точности (закоммичено)
+## Итерация 27: веб-кабинет пациента (НЕ закоммичено) — АКТУАЛЬНО
+
+Вынес функционал Telegram-бота в полноценный мобильный веб-кабинет (SPA). Ветка
+`fix/ocr-stability-accuracy`, поверх коммита `eb319be`. Рабочее дерево с новыми файлами,
+НЕ закоммичено, НЕ запушено.
+
+### Что сделано
+- **Фронтенд** `src/botkin/web/`:
+  - `index.html` — каркас SPA на Alpine.js: 7 экранов (Обзор, Документы, Детальная карточка,
+    Загрузка, Аналитика/динамика, Заключения, Профиль) + mobile bottom-nav (5 пунктов с
+    центральным FAB-аплоадом) + шапка с лого BOTkin и ECG-анимацией (SVG stroke-dashoffset).
+  - `styles.css` — дизайн-система: бренд teal/cyan градиент, тёмная тема дефолт + свет,
+    CSS-переменные, все иконки inline SVG, анимации CSS keyframes (пульс, float, shimmer,
+    fade-in), `prefers-reduced-motion` уважается, `env(safe-area-inset-*)` под notch.
+  - `app.js` — компонент `cabinet()`: API-клиент (fetch + X-Telegram-User-Id), все экраны,
+    SVG-график динамики в DOM (цвета из CSS-переменных, перерисовка при смене темы),
+    поллинг статуса загрузки с прогрессом по стадиям, идентификация demo (localStorage).
+  - `vendor/alpine.min.js` — Alpine.js 3.15.12 (MIT, релиз 2026-04-30), заендорено локально
+    (46 КБ), без CDN — офлайн-работа.
+- **Бэкенд** `src/botkin/api/`:
+  - `routes/documents.py` — /api/me, /api/documents (фильтры+пагинация), /api/documents/{id},
+    /api/documents/{id}/status.
+  - `routes/analytics.py` — /api/analytes, /api/clinics, /api/doctors, /api/dynamics,
+    /api/labs/period, /api/reports, /api/stats.
+  - `app.py` — роуты зарегистрированы ДО mount статики; `StaticFiles(html=True)` в `/`.
+- **Репозитории** `src/botkin/db/repos.py` — DocumentRepo.search (EXISTS по врачу),
+  distinct_clinics, date_range, stats; LabRepo.distinct_analytes;
+  ReportRepo.distinct_doctors, for_period (JOIN documents → clinic).
+- **Баг-фикс** `src/botkin/db/connection.py` — `create_function("lower",1,Python-lower)` в
+  get_conn(): SQLite без ICU не опускает регистр кириллицы, поиск `q=биохим` возвращал 0.
+  Попутно починило существующий dynamics (LIKE по analyte_name).
+- **Тесты** `tests/test_cabinet_repo.py` (12) + `tests/test_cabinet_api.py` (13) = 25 новых.
+- **Протокол** — habr/lab-results-journal.md Итерация 27 (строки 2328–2430).
+
+### Результат
+- `ruff check src tests` → clean.
+- `pytest -m "not llm"` → **341 passed** (316 + 25 новых), 35 deselected, 1 warning (httpx
+  deprecation в TestClient — не критично).
+- node `--check app.js` → синтаксис OK; структура index.html валидна.
+- Live-сервер (127.0.0.1:8000): все 11 эндпоинтов 200, статика отдаётся, поиск по кириллице
+  работает (биохим→1, инвитро→15, крови→6 на реальной БД user 113521070).
+- Запуск: `.venv\Scripts\python.exe -m uvicorn botkin.api.app:app --host 0.0.0.0 --port 8000`,
+  открыть http://localhost:8000. Demo-пользователь 113521070 (есть данные: 32 документа,
+  276 показателей, 9 заключений). Профиль → «Использовать demo».
+
+### Следующий шаг
+1. Ревью/коммит ветки (по команде оператора) — новые файлы + правки.
+2. При желании: визуальная проверка в реальном браузере (мобильный вид, анимации).
+3. Открытый техдолг: морфологический поиск (сейчас подстрочный — «кровь» ≠ «крови»);
+   полноценная авторизация вместо demo-идентификатора; SSR/SEO если понадобятся публичные
+   страницы.
+
+---
+
+## (предыдущее) Ветка: fix/ocr-stability-accuracy — оптимизация скорости+точности (закоммичено)
 
 4 коммита поверх `9537180`. Рабочее дерево чистое. НЕ запушено.
 

@@ -195,6 +195,111 @@ class DocumentRepo(BaseRepo):
         rows = self.conn.execute(sql, tuple(params)).fetchall()
         return [dict(r) for r in rows]
 
+    # --- фильтрованный поиск для веб-кабинета ---
+
+    def search(
+        self,
+        *,
+        doc_type: str | None = None,
+        clinic: str | None = None,
+        doctor: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        status: str | None = None,
+        q: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Фильтрованный список документов + total для пагинации.
+
+        Фильтры: тип, клиника, врач (EXISTS по doctor_reports), диапазон created_at,
+        статус, полнотекстовый поиск по title/clinic. Все параметры — плейсхолдеры.
+        """
+        where = ["user_id = ?"]
+        params: list = [self.user_id]
+        if doc_type:
+            where.append("doc_type = ?")
+            params.append(doc_type)
+        if clinic:
+            where.append("clinic = ?")
+            params.append(clinic)
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        if date_from:
+            where.append("created_at >= ?")
+            params.append(date_from)
+        if date_to:
+            where.append("created_at <= ?")
+            params.append(date_to)
+        if q:
+            where.append("(LOWER(title) LIKE ? OR LOWER(clinic) LIKE ?)")
+            like = f"%{q.lower()}%"
+            params += [like, like]
+        if doctor:
+            # Документ-заключение конкретного врача: EXISTS по doctor_reports.
+            where.append(
+                "EXISTS (SELECT 1 FROM doctor_reports r "
+                "WHERE r.document_id = documents.id AND r.user_id = documents.user_id "
+                "AND r.doctor_name = ?)"
+            )
+            params.append(doctor)
+        clause = " AND ".join(where)
+        total = self.conn.execute(
+            f"SELECT COUNT(*) AS c FROM documents WHERE {clause}", tuple(params)
+        ).fetchone()["c"]
+        rows = self.conn.execute(
+            f"SELECT * FROM documents WHERE {clause} "
+            "ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            tuple(params + [limit, offset]),
+        ).fetchall()
+        return [dict(r) for r in rows], total
+
+    def distinct_clinics(self) -> list[str]:
+        """Уникальные клиники пользователя (для селектора фильтра)."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT clinic FROM documents "
+            "WHERE user_id = ? AND clinic IS NOT NULL AND clinic <> '' ORDER BY clinic",
+            (self.user_id,),
+        ).fetchall()
+        return [r["clinic"] for r in rows]
+
+    def date_range(self) -> tuple[str | None, str | None]:
+        """Мин/макс created_at — границы фильтра по умолчанию."""
+        row = self.conn.execute(
+            "SELECT MIN(created_at) AS lo, MAX(created_at) AS hi FROM documents WHERE user_id = ?",
+            (self.user_id,),
+        ).fetchone()
+        return row["lo"], row["hi"]
+
+    def stats(self) -> dict:
+        """Сводка для дашборда: счётчики по типу/статусу + последний документ."""
+        by_type = {
+            r["doc_type"]: r["c"]
+            for r in self.conn.execute(
+                "SELECT doc_type, COUNT(*) AS c FROM documents WHERE user_id = ? GROUP BY doc_type",
+                (self.user_id,),
+            ).fetchall()
+        }
+        by_status = {
+            r["status"]: r["c"]
+            for r in self.conn.execute(
+                "SELECT status, COUNT(*) AS c FROM documents WHERE user_id = ? GROUP BY status",
+                (self.user_id,),
+            ).fetchall()
+        }
+        last = self.conn.execute(
+            "SELECT id, doc_type, title, clinic, created_at, status "
+            "FROM documents WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+            (self.user_id,),
+        ).fetchone()
+        return {
+            "total": sum(by_type.values()),
+            "by_type": by_type,
+            "by_status": by_status,
+            "last": dict(last) if last else None,
+        }
+
     # --- люки вне user-скоупа (точка входа pipeline) ---
 
     @staticmethod
@@ -293,6 +398,15 @@ class LabRepo(BaseRepo):
             g["points"].append(dict(r))
         return list(groups.values())
 
+    def distinct_analytes(self) -> list[dict]:
+        """Уникальные показатели для селектора динамики: каноничное имя优先, иначе исходное."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT COALESCE(analyte_canonical, analyte_name) AS name "
+            "FROM lab_results WHERE user_id = ? ORDER BY name ASC",
+            (self.user_id,),
+        ).fetchall()
+        return [r["name"] for r in rows]
+
 
 class ReportRepo(BaseRepo):
     table = "doctor_reports"
@@ -321,3 +435,51 @@ class ReportRepo(BaseRepo):
             (document_id, self.user_id),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def distinct_doctors(self) -> list[dict]:
+        """Уникальные врачи с отделением — для селектора фильтра."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT doctor_name, department FROM doctor_reports "
+            "WHERE user_id = ? AND doctor_name IS NOT NULL AND doctor_name <> '' "
+            "ORDER BY doctor_name",
+            (self.user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def for_period(
+        self, *, date_from: str | None = None, date_to: str | None = None,
+        doctor: str | None = None, clinic: str | None = None,
+        limit: int = 50, offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Заключения за период с клиникой из documents (JOIN) для отображения в ленте.
+
+        Дата — по visit_date заключения (дата приёма), клиника — по documents.clinic.
+        """
+        where = ["r.user_id = ?"]
+        params: list = [self.user_id]
+        if date_from:
+            where.append("r.visit_date >= ?")
+            params.append(date_from)
+        if date_to:
+            where.append("r.visit_date <= ?")
+            params.append(date_to)
+        if doctor:
+            where.append("r.doctor_name = ?")
+            params.append(doctor)
+        if clinic:
+            where.append("d.clinic = ?")
+            params.append(clinic)
+        clause = " AND ".join(where)
+        total = self.conn.execute(
+            f"SELECT COUNT(*) AS c FROM doctor_reports r "
+            f"LEFT JOIN documents d ON d.id = r.document_id WHERE {clause}",
+            tuple(params),
+        ).fetchone()["c"]
+        rows = self.conn.execute(
+            f"SELECT r.id, r.document_id, r.diagnosis, r.doctor_name, r.department, "
+            f"r.visit_date, r.recommendations_json, r.medications_json, d.clinic "
+            f"FROM doctor_reports r LEFT JOIN documents d ON d.id = r.document_id "
+            f"WHERE {clause} ORDER BY r.visit_date DESC, r.id DESC LIMIT ? OFFSET ?",
+            tuple(params + [limit, offset]),
+        ).fetchall()
+        return [dict(r) for r in rows], total
