@@ -230,7 +230,9 @@ class DocumentRepo(BaseRepo):
             where.append("created_at >= ?")
             params.append(date_from)
         if date_to:
-            where.append("created_at <= ?")
+            # created_at — TIMESTAMP, лексикографически больше голой даты
+            # 'YYYY-MM-DD'; строгое `< date_to + 1 день` включает весь день.
+            where.append("created_at < date(?, '+1 day')")
             params.append(date_to)
         if q:
             where.append("(LOWER(title) LIKE ? OR LOWER(clinic) LIKE ?)")
@@ -367,20 +369,36 @@ class LabRepo(BaseRepo):
         return [dict(r) for r in rows]
 
     def dynamics(self, analyte_name: str, limit: int = 30) -> list[dict]:
-        """Серия точек одного показателя по времени."""
-        rows = self.conn.execute(
-            """
+        """Серия точек одного показателя по времени (свежие, хронологический порядок).
+
+        Сначала точное совпадение по COALESCE(canonical, name) — так селектор
+        веб-кабинета (который отдаёт каноничные имена) находит и сырые строки
+        ('HGB' с каноном 'Гемоглобин'), а «Глюкоза» не подмешивает «Глюкозу в моче».
+        Если точного совпадения нет — LIKE-fallback для частичного ввода из бота
+        (/dynamics холестер). DESC + reverse: при превышении limit остаются
+        самые свежие замеры, а не самые ранние.
+        """
+        base = """
             SELECT lr.taken_at, lr.value_num, lr.unit, lr.ref_low, lr.ref_high
             FROM lab_results lr
             WHERE lr.user_id = ?
-              AND LOWER(lr.analyte_name) LIKE ?
+              AND {match}
               AND lr.value_num IS NOT NULL
-            ORDER BY lr.taken_at ASC
+            ORDER BY lr.taken_at DESC
             LIMIT ?
-            """,
-            (self.user_id, f"%{analyte_name.lower()}%", limit),
+            """
+        exact = base.format(
+            match="LOWER(COALESCE(lr.analyte_canonical, lr.analyte_name)) = ?"
+        )
+        rows = self.conn.execute(
+            exact, (self.user_id, analyte_name.lower(), limit)
         ).fetchall()
-        return [dict(r) for r in rows]
+        if not rows:
+            fuzzy = base.format(match="LOWER(lr.analyte_name) LIKE ?")
+            rows = self.conn.execute(
+                fuzzy, (self.user_id, f"%{analyte_name.lower()}%", limit)
+            ).fetchall()
+        return [dict(r) for r in reversed(rows)]
 
     def in_period(self, start, end) -> list[dict]:
         """Показатели за период, сгруппированные по analyte_name, точки по времени."""
@@ -399,7 +417,7 @@ class LabRepo(BaseRepo):
         return list(groups.values())
 
     def distinct_analytes(self) -> list[dict]:
-        """Уникальные показатели для селектора динамики: каноничное имя优先, иначе исходное."""
+        """Уникальные показатели для селектора динамики: каноничное имя, иначе исходное."""
         rows = self.conn.execute(
             "SELECT DISTINCT COALESCE(analyte_canonical, analyte_name) AS name "
             "FROM lab_results WHERE user_id = ? ORDER BY name ASC",

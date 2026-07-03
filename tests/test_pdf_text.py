@@ -1,15 +1,18 @@
 """Текстовый слой PDF: координатная сборка строк, годность, плоский текст."""
 from botkin.preprocess.pdf_text import (
     has_usable_text_layer,
-    reconstruct_lines,
+    open_pdf,
     reconstruct_pages,
-    source_text,
 )
 
 
+def _flat_lines(pdf):
+    """Все страницы PDF → плоский список физических строк (для утверждений тестов)."""
+    return [ln for pg in reconstruct_pages(pdf) for ln in pg]
+
+
 def test_reconstruct_pages_groups_lines_per_page(make_pdf, tmp_path):
-    # Многостраничный PDF: строки группируются по страницам, а reconstruct_lines —
-    # плоская склейка тех же страниц по порядку.
+    # Многостраничный PDF: строки группируются по страницам.
     pdf = tmp_path / "twopage.pdf"
     make_pdf(pdf, pages=[
         [(50, 100, "С-реактивный"), (160, 100, "белок"),
@@ -21,8 +24,6 @@ def test_reconstruct_pages_groups_lines_per_page(make_pdf, tmp_path):
     assert any("С-реактивный" in ln for ln in pages[0])
     assert all("С-реактивный" not in ln for ln in pages[1])
     assert any("Гемоглобин" in ln for ln in pages[1])
-    # Плоская склейка страниц = reconstruct_lines.
-    assert reconstruct_lines(pdf) == [ln for pg in pages for ln in pg]
 
 
 def test_reconstruct_merges_value_offset_by_one_px(make_pdf, tmp_path):
@@ -39,7 +40,7 @@ def test_reconstruct_merges_value_offset_by_one_px(make_pdf, tmp_path):
         (260, 130, "млн/мкл"),
         (320, 130, "3.8 - 5.1"),
     ])
-    lines = reconstruct_lines(pdf)
+    lines = _flat_lines(pdf)
     hb = [ln for ln in lines if "Гемоглобин" in ln]
     assert len(hb) == 1
     assert "13.7" in hb[0] and "г/дл" in hb[0] and "11.7" in hb[0] and "15.5" in hb[0]
@@ -66,10 +67,10 @@ def test_usable_false_for_blank_pdf(make_pdf, tmp_path):
     assert has_usable_text_layer(pdf) is False
 
 
-def test_source_text_is_flat_and_normalized(make_pdf, tmp_path):
+def test_flat_text_contains_page_content(make_pdf, tmp_path):
     pdf = tmp_path / "t.pdf"
     make_pdf(pdf, [(50, 100, "Гемоглобин"), (200, 100, "13.7")])
-    txt = source_text(pdf)
+    txt = open_pdf(pdf).flat_text
     assert "Гемоглобин" in txt and "13.7" in txt
 
 
@@ -93,7 +94,7 @@ def test_reconstruct_merges_multiline_analyte_names(make_pdf, tmp_path):
         (50, 280, "Гемоглобин"), (200, 280, "13.7"), (260, 280, "г/л"),
         (320, 280, "11.7-15.5"),
     ])
-    lines = reconstruct_lines(pdf)
+    lines = _flat_lines(pdf)
     # Склеенные имена присутствуют как одна строка.
     assert any("Ср." in ln and "MCH" in ln for ln in lines)
     assert any("Ширина" in ln and "RDW-SD" in ln for ln in lines)
@@ -113,7 +114,7 @@ def test_reconstruct_merges_name_parts_with_value_between(make_pdf, tmp_path):
         (300, 105, "12.00"), (360, 105, "%"), (390, 105, "11,6"), (430, 105, "-"), (450, 105, "14,8"),
         (50, 130, "эритроцитов,"), (160, 130, "КВ"), (200, 130, "(RDW-CV)"),
     ])
-    lines = reconstruct_lines(pdf)
+    lines = _flat_lines(pdf)
     assert any("Расчетное" in ln and "RDW-CV" in ln and "12.00" in ln for ln in lines)
 
 
@@ -127,7 +128,7 @@ def test_reconstruct_keeps_value_outside_unclosed_parenthesis(make_pdf, tmp_path
         (300, 105, "13.40"), (360, 105, "фл"), (390, 105, "9,8"), (430, 105, "-"), (450, 105, "16,2"),
         (50, 130, "тромбоцитов"), (160, 130, ")"),
     ])
-    lines = reconstruct_lines(pdf)
+    lines = _flat_lines(pdf)
     found = next((ln for ln in lines if "PDW" in ln), None)
     assert found
     # Значение должно быть за закрывающей скобкой, а не внутри пояснения.

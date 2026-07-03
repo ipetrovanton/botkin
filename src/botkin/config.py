@@ -76,7 +76,6 @@ _DEFAULTS: dict = {
         "sqlite_path": "./data/botkin.db",
     },
     "bot": {
-        "polling_timeout": 30,
         "api_url": "http://localhost:8000",
     },
     "upload": {
@@ -261,7 +260,6 @@ ANALYTE_SHORT_KEY_LEN = setting("analytes.short_key_len", "ANALYTE_SHORT_KEY_LEN
 SQLITE_PATH = str(_resolve_path(os.getenv("SQLITE_PATH", _get("database.sqlite_path"))))
 
 # Telegram бот
-BOT_POLLING_TIMEOUT = setting("bot.polling_timeout", "BOT_POLLING_TIMEOUT", int)
 # Историческое имя env — API_URL (не BOT_API_URL), сохраняем для совместимости.
 BOT_API_URL = setting("bot.api_url", "API_URL", str)
 # Потолок поллинга прогресса документа в боте. Увязан с потолком обработки на бэкенде:

@@ -62,20 +62,6 @@ def _is_name_continuation(head: str, current: str) -> bool:
     return False
 
 
-def _is_continuation_line(prev: str, current: str) -> bool:
-    """Является ли current продолжением prev (многострочное имя показателя)?
-
-    Устаревший вариант: prev — строка без числа, current — строка со значением.
-    """
-    if not prev or not current:
-        return False
-    if _has_number(prev):
-        return False
-    if not _has_number(current):
-        return False
-    return _is_name_continuation(prev, current)
-
-
 def _is_name_head(line: str) -> bool:
     """True, если строка начинается с имени показателя (буква).
 
@@ -241,16 +227,6 @@ def reconstruct_pages(path: Path, y_tol: float | None = None) -> list[list[str]]
     LLM-вызов вместе с большой таблицей. Постранично модель фокусируется на одной странице.
     """
     return open_pdf(path, y_tol).pages
-
-
-def reconstruct_lines(path: Path, y_tol: float | None = None) -> list[str]:
-    """Все страницы PDF → плоский список физических строк в порядке документа."""
-    return [ln for page in reconstruct_pages(path, y_tol) for ln in page]
-
-
-def source_text(path: Path) -> str:
-    """Плоский текст слоя всех страниц (для verbatim-стража)."""
-    return open_pdf(path).flat_text
 
 
 def has_usable_text_layer(path: Path) -> bool:

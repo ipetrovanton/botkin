@@ -211,7 +211,8 @@
         <div class="panel" x-show="current.kind==='analysis'">
           <div class="panel-head"><h2 class="panel-title">Показатели</h2><span class="panel-cnt" x-text="current.labs.length"></span></div>
           <div class="labs-table">
-            <template x-for="r in current.labs" :key="r.analyte_name+r.value_num">
+            <!-- key=индекс: у строк нет id, а имя+значение коллидируют на дублях панели -->
+            <template x-for="(r, ri) in current.labs" :key="ri">
               <div class="lab-row" :class="{'lab-row--warn': r.unit_mismatch}">
                 <div class="lab-name" x-text="r.analyte_canonical || r.analyte_name"></div>
                 <div class="lab-value">
@@ -228,7 +229,7 @@
 
         <!-- Заключения -->
         <div class="panel" x-show="current.kind==='doctor_report'">
-          <template x-for="rep in current.reports" :key="rep.diagnosis">
+          <template x-for="(rep, repi) in current.reports" :key="repi">
             <div class="report-block">
               <div x-show="rep.diagnosis" class="report-field">
                 <h3 class="report-h">Диагноз</h3>
@@ -244,15 +245,15 @@
               </div>
               <div x-show="rep.complaints.length" class="report-field">
                 <h3 class="report-h">Жалобы</h3>
-                <ul class="report-list"><template x-for="c in rep.complaints" :key="c"><li x-text="c"></li></template></ul>
+                <ul class="report-list"><template x-for="(c, ci) in rep.complaints" :key="ci"><li x-text="c"></li></template></ul>
               </div>
               <div x-show="rep.recommendations.length" class="report-field">
                 <h3 class="report-h">Рекомендации</h3>
-                <ul class="report-list"><template x-for="rec in rep.recommendations" :key="rec"><li x-text="rec"></li></template></ul>
+                <ul class="report-list"><template x-for="(rec, reci) in rep.recommendations" :key="reci"><li x-text="rec"></li></template></ul>
               </div>
               <div x-show="rep.medications.length" class="report-field">
                 <h3 class="report-h">Назначения</h3>
-                <ul class="report-list report-list--med"><template x-for="m in rep.medications" :key="m"><li x-text="m"></li></template></ul>
+                <ul class="report-list report-list--med"><template x-for="(m, mi) in rep.medications" :key="mi"><li x-text="m"></li></template></ul>
               </div>
             </div>
           </template>
@@ -294,9 +295,9 @@
               <div class="progress-bar" :class="'progress-bar--'+item.state" :style="`width:${progressPct(item)}%`"></div>
             </div>
             <div class="queue-stages">
-              <span class="stage" :class="{done: stageDone(item,'received'), active: item.status==='received'}">Принят</span>
+              <span class="stage" :class="{done: stageDone(item,'received'), active: item.status==='received' || item.status==='processing'}">Принят</span>
               <span class="stage-sep">›</span>
-              <span class="stage" :class="{done: stageDone(item,'normalizing'), active: item.status==='recognizing'}">Распознавание</span>
+              <span class="stage" :class="{done: stageDone(item,'recognizing'), active: item.status==='recognizing'}">Распознавание</span>
               <span class="stage-sep">›</span>
               <span class="stage" :class="{done: item.status==='extracted', active: item.status==='normalizing'}">Нормализация</span>
               <span class="stage-sep">›</span>

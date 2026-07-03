@@ -18,7 +18,9 @@ from botkin.config import (
 )
 from botkin.domain.models import ClassifyResult, DocType
 from botkin.exceptions import ClassificationError
-from botkin.llm.client import get_client, build_extra_body, build_retrying, usage_of
+from botkin.llm.client import (
+    get_client, build_extra_body, build_retrying, default_options, usage_of,
+)
 from botkin.llm.prompts import CLASSIFY_INSTRUCTION, CLASSIFY_VLM_SYSTEM, PROMPTS_VERSION
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
 from botkin.preprocess.pdf_text import open_pdf
@@ -146,7 +148,7 @@ def run_vlm(source_path: Path) -> ClassifyResult:
 
     images = prepare_images(source_path, long_side=IMAGE_CLASSIFY_LONG_SIDE)
     b64 = to_base64_jpegs(images[:1])   # только первая страница
-    client = get_client(temperature=CLASSIFY_TEMPERATURE, mode=instructor.Mode.JSON)
+    client = get_client(mode=instructor.Mode.JSON)
 
     content = [
         {"type": "text", "text": CLASSIFY_INSTRUCTION},
@@ -164,7 +166,12 @@ def run_vlm(source_path: Path) -> ClassifyResult:
             response_model=ClassifySchema,
             max_retries=build_retrying(),
             max_tokens=VLM_MAX_TOKENS,
-            extra_body=build_extra_body(ClassifySchema),
+            # CLASSIFY_TEMPERATURE (≈0.1): на дефолтной температуре Ollama растровые
+            # бланки (Тонус, sample_011) флуктуируют между analysis/doctor_report.
+            extra_body=build_extra_body(
+                ClassifySchema,
+                options={**default_options(), "temperature": CLASSIFY_TEMPERATURE},
+            ),
         )
         elapsed = time.perf_counter() - t0
         prompt_tokens, completion_tokens = usage_of(response)

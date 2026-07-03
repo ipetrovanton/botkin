@@ -7,3 +7,9 @@
 - Тесты: 341 passed (316 + 25 новых), ruff clean.
 - НЕ закоммичено, НЕ запушено.
 - Следующий шаг: ревью/коммит по команде оператора. Live-сервер запущен на 127.0.0.1:8000.
+
+2026-07-03 — refactor/web-cabinet-quality (от feature/web-cabinet). Baseline: 341 passed, ruff clean. Web-аудит агентом готов: XSS в renderChart (app.js:287, innerHTML+analyte из OCR), IDOR (нет auth), off-by-one date_to vs created_at (repos.py:233), canonical↔name рассинхрон dynamics (repos.py:381/404), LIMIT 60 ASC теряет свежие, race conditions fetch, :key коллизии, стадия processing отсутствует в STAGE_PROGRESS (app.js:363). Ждём: агент-архитектор backend, агент OCR-ресёрч. План: рефакторинг → багфиксы TDD → UI/логотип → журнал.
+
+## 14:30 | refactor/web-cabinet-quality
+Создана ветка refactor/web-cabinet-quality, выполнена полная диагностика кода (выявлены IDOR, stored XSS, race conditions, off-by-one даты, коллизии `:key`, отсутствие тестов upload/IDOR), baseline 341 тест зафиксирован.
+2026-07-03 (2) — refactor/web-cabinet-quality: фаза багфиксов+чисток готова, 345 passed, ruff clean. Сделано TDD: date_to off-by-one (repos.py search, date(?,'+1 day')), dynamics exact-канон+LIKE-fallback+DESC/reverse (5 тестов repo), XSS escapeHtml в renderChart, race-guard _req токены (docs/doc/reports/dynamics), 404-ветка pickAnalyte ожила, :key→индексы, processing в stageDone + фикс stageDone(recognizing) в HTML (5 тестов node, test_cabinet_web.py). Чистки: numbers.py+тест удалены, reconstruct_lines/source_text/_is_continuation_line удалены (тесты переписаны на open_pdf/_flat_lines), ConfigurationError/LLMError/DatabaseError удалены, get_client без мёртвого temperature, BOT_POLLING_TIMEOUT удалён. НАХОДКА: CLASSIFY_TEMPERATURE/VLM_TEMPERATURE никогда не действовали (мёртвый параметр) — теперь прокинуты в options (2 теста test_llm_calls). Осталось: UI/дизайн (task 4), журнал, OCR-отчёт (готов у агента), коммиты.

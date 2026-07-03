@@ -67,6 +67,10 @@ function cabinet() {
     // UI-состояние
     loading: { stats: false, docs: false, doc: false, reports: false, dynamics: false },
     toasts: [],
+    // Счётчики запросов по ресурсам: ответ применяется только если он от
+    // ПОСЛЕДНЕГО запроса. Иначе при быстрой смене фильтров/показателей поздно
+    // пришедший старый ответ перезатирает свежие данные (out-of-order fetch).
+    _req: { docs: 0, doc: 0, reports: 0, dynamics: 0 },
 
     // ===== Инициализация =====
     async init() {
@@ -145,6 +149,7 @@ function cabinet() {
     },
 
     async loadDocs() {
+      const req = ++this._req.docs;
       this.loading.docs = true;
       try {
         const p = new URLSearchParams();
@@ -153,36 +158,47 @@ function cabinet() {
         }
         p.set("limit", PAGE_SIZE);
         const data = await this.api(`/api/documents?${p}`);
+        if (req !== this._req.docs) return; // устаревший ответ — уже запрошено новое
         this.docs = data || { items: [], total: 0 };
-      } catch (e) { this.toast("Ошибка загрузки документов", "error"); console.error(e); }
-      finally { this.loading.docs = false; }
+      } catch (e) {
+        if (req !== this._req.docs) return;
+        this.toast("Ошибка загрузки документов", "error"); console.error(e);
+      } finally { if (req === this._req.docs) this.loading.docs = false; }
     },
 
     async openDoc(id) {
+      const req = ++this._req.doc;
       this.screen = "document";
       this.loading.doc = true;
       this.current = { doc: null, kind: null, labs: [], reports: [] };
       try {
         const data = await this.api(`/api/documents/${id}`);
+        if (req !== this._req.doc) return;
         if (!data) { this.toast("Документ не найден", "error"); this.screen = "documents"; return; }
         // API возвращает {document, kind, labs, reports}; HTML читает current.doc — мапим.
         this.current = {
           doc: data.document, kind: data.kind, labs: data.labs, reports: data.reports,
         };
-      } catch (e) { this.toast("Ошибка загрузки документа", "error"); console.error(e); }
-      finally { this.loading.doc = false; }
+      } catch (e) {
+        if (req !== this._req.doc) return;
+        this.toast("Ошибка загрузки документа", "error"); console.error(e);
+      } finally { if (req === this._req.doc) this.loading.doc = false; }
     },
 
     async loadReports() {
+      const req = ++this._req.reports;
       this.loading.reports = true;
       try {
         const p = new URLSearchParams();
         for (const [k, v] of Object.entries(this.repFilters)) if (v) p.set(k, v);
         p.set("limit", 100);
         const data = await this.api(`/api/reports?${p}`);
+        if (req !== this._req.reports) return;
         this.reports = data || { items: [], total: 0 };
-      } catch (e) { this.toast("Ошибка загрузки заключений", "error"); console.error(e); }
-      finally { this.loading.reports = false; }
+      } catch (e) {
+        if (req !== this._req.reports) return;
+        this.toast("Ошибка загрузки заключений", "error"); console.error(e);
+      } finally { if (req === this._req.reports) this.loading.reports = false; }
     },
 
     // ===== Фильтры документов =====
@@ -211,19 +227,27 @@ function cabinet() {
       this.analyteFocused = true;
     },
     async pickAnalyte(name) {
+      const req = ++this._req.dynamics;
       this.analytePicked = name;
       this.analyteQuery = name;
       this.analyteFocused = false;
       this.loading.dynamics = true;
       try {
         const data = await this.api(`/api/dynamics?name=${encodeURIComponent(name)}`);
-        this.dynamics = data || { points: [], analyte: name, unit: "", ref_low: null, ref_high: null };
+        if (req !== this._req.dynamics) return; // выбран другой показатель — ответ устарел
+        // api() возвращает null на 404 — у показателя нет числовых точек.
+        if (!data) {
+          this.dynamics = { points: [], analyte: name, unit: "", ref_low: null, ref_high: null };
+          this.toast(`Нет данных по «${name}»`, "info");
+          return;
+        }
+        this.dynamics = data;
         this.$nextTick(() => this.renderChart());
       } catch (e) {
+        if (req !== this._req.dynamics) return;
         this.dynamics = { points: [], analyte: name, unit: "", ref_low: null, ref_high: null };
-        if (e?.message?.startsWith("404")) this.toast(`Нет данных по «${name}»`, "info");
-        else this.toast("Ошибка загрузки динамики", "error");
-      } finally { this.loading.dynamics = false; }
+        this.toast("Ошибка загрузки динамики", "error"); console.error(e);
+      } finally { if (req === this._req.dynamics) this.loading.dynamics = false; }
     },
 
     // SVG-график динамики: рисуется в DOM, цвета из CSS-переменных текущей темы.
@@ -266,7 +290,7 @@ function cabinet() {
       // X-метки дат.
       const xTicks = pts.map((p, i) => {
         if (pts.length > 8 && i % Math.ceil(pts.length / 6) !== 0 && i !== pts.length - 1) return "";
-        return `<text x="${x(i)}" y="${H - padB + 20}" text-anchor="middle" font-size="11" fill="${cText}">${fmtDateShort(p.taken_at)}</text>`;
+        return `<text x="${x(i)}" y="${H - padB + 20}" text-anchor="middle" font-size="11" fill="${cText}">${escapeHtml(fmtDateShort(p.taken_at))}</text>`;
       }).join("");
 
       // Коридор нормы.
@@ -280,11 +304,11 @@ function cabinet() {
         const out = (refLo != null && p.value_num < refLo) || (refHi != null && p.value_num > refHi);
         const fill = out ? (css("--danger") || "#EF4444") : cVal;
         return `<circle cx="${x(i).toFixed(1)}" cy="${yy.toFixed(1)}" r="4.5" fill="${fill}" stroke="var(--surface)" stroke-width="2">
-                  <title>${fmtDateShort(p.taken_at)}: ${fmtNum(p.value_num)} ${this.dynamics.unit}</title>
+                  <title>${escapeHtml(fmtDateShort(p.taken_at))}: ${fmtNum(p.value_num)} ${escapeHtml(this.dynamics.unit)}</title>
                 </circle>`;
       }).join("");
 
-      wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Динамика показателя ${this.dynamics.analyte}">
+      wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Динамика показателя ${escapeHtml(this.dynamics.analyte)}">
         ${refRect}${yTicksSvg}
         <path d="${areaPath}" fill="${cVal}" fill-opacity="0.08"/>
         <path d="${linePath}" fill="none" stroke="${cVal}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -360,7 +384,9 @@ function cabinet() {
     },
     progressPct(item) { return STAGE_PROGRESS[item.status] ?? 0; },
     stageDone(item, stage) {
-      const order = ["received", "recognizing", "normalizing", "extracted"];
+      // processing — промежуточный статус между received и recognizing;
+      // без него indexOf = -1 и чекпоинты стадий «прыгали».
+      const order = ["received", "processing", "recognizing", "normalizing", "extracted"];
       const cur = order.indexOf(item.status), target = order.indexOf(stage);
       return cur > target && cur !== -1;
     },
@@ -407,6 +433,14 @@ function cabinet() {
 }
 
 // Чистые хелперы вне компонента (используются и в renderChart).
+// Экранирование для innerHTML-шаблона графика: имя/единица показателя и сырые даты
+// приходят из OCR/LLM-извлечения загруженного документа — это внешние данные,
+// крафтовое имя вида `"><script>` не должно исполняться (stored XSS).
+function escapeHtml(v) {
+  return String(v ?? "").replace(/[&<>"']/g, (ch) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]
+  ));
+}
 function fmtNum(v) {
   if (v == null) return "—";
   return Number.isInteger(v) ? String(v) : Number(v).toLocaleString("ru-RU", { maximumFractionDigits: 3 });

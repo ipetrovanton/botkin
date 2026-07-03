@@ -153,7 +153,8 @@ def get_raw_client(timeout: float | None = None) -> OpenAI:
     )
 
 
-def get_client(temperature: float = 0.1, mode: instructor.Mode = instructor.Mode.JSON):
+def get_client(mode: instructor.Mode = instructor.Mode.JSON):
+    # Температура задаётся per-request через extra_body/options, не при создании клиента.
     return instructor.from_openai(get_raw_client(), mode=mode)
 
 
