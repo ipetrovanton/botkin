@@ -17,3 +17,5 @@
 2026-07-03 (3) — сессия завершена: журнал ит. 28-30 дописан, docs/ocr-models-research-2026-07.md создан, remember.md переписан. 346 passed, ruff clean. 3 коммита на refactor/web-cabinet-quality (баги+чистка / редизайн / docs). Не запушено.
 
 2026-07-03 (4) — сессия 2 завершена: дедуп (sha256+правило количества, 6 тестов), source/delete/batch/reparse API (8 тестов), WEB_DEBUG_USER_ID, фронт (go/чипы/чекбоксы/массовое удаление/оригинал-обновить-удалить, 3 node-теста), бенч-таблица 13 OCR-моделей в docs, deploy-local-web.md. 364 passed, ruff clean. Журнал ит. 31.
+
+2026-07-03 (5) — bench_expectations.py (ожидания vs реальность, надстройка над bench_models, EXPECTATIONS из docs с URL, отчёт md+json+консоль, 3 теста) + docs/devin-prompt.md (автономный GPU-прогон + фактура для Хабра). 367 passed, ruff clean. Журнал ит. 32.
