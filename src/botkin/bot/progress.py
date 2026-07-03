@@ -1,4 +1,7 @@
 """Прогресс-бар обработки документа: рендер стадий + поллинг статуса."""
+import logging
+
+log = logging.getLogger("botkin.bot.progress")
 
 _STAGES = [
     ("received", "📥 Принято"),
@@ -40,12 +43,27 @@ async def poll_until_done(doc_id, get_status, edit, sleep, now,
     """
     start = now()
     last_rendered = None
-    while now() - start <= timeout:
+    polls = 0
+    log.info("[POLL_START] Doc %d | interval=%.1fs timeout=%.1fs", doc_id, interval, timeout)
+    while True:
+        elapsed = now() - start
+        if elapsed > timeout:
+            log.warning(
+                "[POLL_TIMEOUT] Doc %d | таймаут %.1fs | опросов=%d | последняя стадия=%r",
+                doc_id, timeout, polls, last_rendered,
+            )
+            return None
         status = await get_status()
+        polls += 1
+        log.debug("[POLL] Doc %d | опрос #%d | статус=%r | %.1fs", doc_id, polls, status, elapsed)
         if status and status != last_rendered:
             if is_terminal(status):
+                log.info(
+                    "[POLL_DONE] Doc %d | terminal=%r | опросов=%d | %.1fs",
+                    doc_id, status, polls, elapsed,
+                )
                 return status
+            log.info("[POLL_STAGE] Doc %d | стадия=%r | %.1fs", doc_id, status, elapsed)
             await edit(render_progress(status, doc_id))
             last_rendered = status
         await sleep(interval)
-    return None

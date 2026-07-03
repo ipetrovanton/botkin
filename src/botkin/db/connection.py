@@ -18,7 +18,18 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "clinic": "TEXT",
         "delivered_at": "TIMESTAMP",
     },
-    "lab_results": {"value_raw": "TEXT", "unit_raw": "TEXT", "taken_at_raw": "TEXT"},
+    "lab_results": {
+        "value_raw": "TEXT", "unit_raw": "TEXT", "taken_at_raw": "TEXT",
+        "ref_operator": "TEXT",
+        "ref_text": "TEXT",
+        "analyte_canonical": "TEXT",
+        "loinc": "TEXT",
+        "nmu_code": "TEXT",
+        "analyte_group": "TEXT",
+        "match_status": "TEXT",
+        "unit_expected": "TEXT",
+        "unit_mismatch": "INTEGER",
+    },
     "doctor_reports": {"medications_normalized_json": "TEXT"},
 }
 
@@ -103,3 +114,21 @@ def get_conn() -> Iterator[sqlite3.Connection]:
         yield conn
     finally:
         conn.close()
+
+
+@contextmanager
+def transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    """Явная транзакция поверх autocommit-коннекта: либо всё, либо ничего.
+
+    get_conn() работает в autocommit (isolation_level=None), поэтому каждая отдельная
+    INSERT фиксируется сразу. Для вставки панели целиком нужна ручная BEGIN/COMMIT —
+    при сбое на середине откатываемся, а не оставляем половину строк.
+    """
+    conn.execute("BEGIN")
+    try:
+        yield
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    else:
+        conn.execute("COMMIT")

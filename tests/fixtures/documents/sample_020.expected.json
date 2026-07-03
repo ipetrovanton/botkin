@@ -1,0 +1,29 @@
+{
+  "_comment": "Ручная разметка (ground-truth) для sample_020.pdf. Тест test_e2e_real_document_pipeline сверяет извлечённые значения с полем analytes[].value по мультимножеству. Значение 0.6 встречается дважды (моноциты абс. + базофилы %) — это регресс коллизии completeness_guard. Остальные поля (unit/ref_*) хранятся как документация и задел под более строгие проверки.",
+  "doc_type": "analysis",
+  "clinic": "Инвитро",
+  "title": "Общий анализ крови",
+  "analytes": [
+    {"name": "С-реактивный белок", "value": 1.8, "unit": "мг/л", "ref_op": "<", "ref_high": 5.0},
+    {"name": "Гематокрит", "value": 40.8, "unit": "%", "ref_low": 35.0, "ref_high": 45.0},
+    {"name": "Гемоглобин", "value": 13.7, "unit": "г/дл", "ref_low": 11.7, "ref_high": 15.5},
+    {"name": "Эритроциты", "value": 4.64, "unit": "×10¹²/л", "ref_low": 3.8, "ref_high": 5.1},
+    {"name": "MCV (ср. объём эритр.)", "value": 87.9, "unit": "фл", "ref_low": 81.0, "ref_high": 100.0},
+    {"name": "RDW (шир. распред. эритр.)", "value": 11.9, "unit": "%", "ref_low": 11.6, "ref_high": 14.8},
+    {"name": "MCH (ср. содер. Hb в эр.)", "value": 29.5, "unit": "пг", "ref_low": 27.0, "ref_high": 34.0},
+    {"name": "MCHC (ср. конц. Hb в эр.)", "value": 33.6, "unit": "г/дл", "ref_low": 32.0, "ref_high": 36.0},
+    {"name": "Тромбоциты", "value": 217.0, "unit": "×10⁹/л", "ref_low": 150.0, "ref_high": 400.0},
+    {"name": "Лейкоциты", "value": 5.15, "unit": "×10⁹/л", "ref_low": 4.5, "ref_high": 11.0},
+    {"name": "Нейтрофилы (общ. число), %", "value": 44.6, "unit": "%", "ref_low": 48.0, "ref_high": 78.0},
+    {"name": "Лимфоциты, %", "value": 40.0, "unit": "%", "ref_low": 19.0, "ref_high": 37.0},
+    {"name": "Моноциты, %", "value": 11.7, "unit": "%", "ref_low": 3.0, "ref_high": 11.0},
+    {"name": "Эозинофилы, %", "value": 3.1, "unit": "%", "ref_low": 1.0, "ref_high": 5.0},
+    {"name": "Базофилы, %", "value": 0.6, "unit": "%", "ref_op": "<", "ref_high": 1.0},
+    {"name": "Нейтрофилы, абс.", "value": 2.3, "unit": "×10⁹/л", "ref_low": 1.56, "ref_high": 6.13},
+    {"name": "Лимфоциты, абс.", "value": 2.06, "unit": "×10⁹/л", "ref_low": 1.18, "ref_high": 3.74},
+    {"name": "Моноциты, абс.", "value": 0.6, "unit": "×10⁹/л", "ref_low": 0.2, "ref_high": 0.95},
+    {"name": "Эозинофилы, абс.", "value": 0.16, "unit": "×10⁹/л", "ref_op": "<", "ref_high": 0.7},
+    {"name": "Базофилы, абс.", "value": 0.03, "unit": "×10⁹/л", "ref_op": "<", "ref_high": 0.2},
+    {"name": "СОЭ", "value": 9.0, "unit": "мм/ч", "ref_op": "<", "ref_high": 20.0}
+  ]
+}

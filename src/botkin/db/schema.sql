@@ -52,6 +52,15 @@ CREATE TABLE IF NOT EXISTS lab_results (
     value_raw TEXT,
     unit_raw TEXT,
     taken_at_raw TEXT,
+    ref_operator TEXT,
+    ref_text TEXT,
+    analyte_canonical TEXT,
+    loinc TEXT,
+    nmu_code TEXT,
+    analyte_group TEXT,
+    match_status TEXT,
+    unit_expected TEXT,
+    unit_mismatch INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_lab_user_analyte ON lab_results(user_id, analyte_name, taken_at);

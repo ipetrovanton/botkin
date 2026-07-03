@@ -14,6 +14,7 @@ dependencies = [
     "aiogram==3.28.2",
     "openai>=1.0.0",
     "instructor==1.7.2",
+    "tenacity>=8.2.0",
     "pymupdf>=1.27.2.3",
     "pillow>=10.0.0",
     "python-dotenv>=1.0.0",
@@ -44,6 +45,12 @@ package = true
 testpaths = ["tests"]
 pythonpath = ["src", "."]
 asyncio_default_fixture_loop_scope = "function"
+# По умолчанию e2e с реальной Ollama не гоняем: окружение без GPU (CI) иначе флапает.
+# Запуск явно: `uv run pytest -m llm` (командный -m переопределяет этот фильтр).
+addopts = "-m 'not llm'"
+markers = [
+    "llm: e2e-тесты, дёргающие реальную Ollama (авто-skip, если модель недоступна)",
+]
 
 [tool.ruff]
 src = ["src"]

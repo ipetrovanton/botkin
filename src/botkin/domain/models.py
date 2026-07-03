@@ -8,10 +8,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from botkin.normalize.dates import parse_date as _parse_date
 
-# ── Типы ──────────────────────────────────────────────────────────────────────
+# Типы
 
 DocType = Literal["analysis", "doctor_report", "certificate", "unknown"]
-DocStatus = Literal["received", "processing", "extracted", "failed"]
+# Должен совпадать с CHECK(status IN ...) в schema.sql. recognizing/normalizing —
+# стадии, которые проставляет pipeline; processing остаётся для legacy-строк.
+DocStatus = Literal[
+    "received", "processing", "recognizing", "normalizing", "extracted", "failed",
+]
 
 DOC_TYPE_LABELS: dict[str, str] = {
     "analysis": "Анализы 🧪",
@@ -20,7 +24,7 @@ DOC_TYPE_LABELS: dict[str, str] = {
     "unknown": "Документ 📄",
 }
 
-# ── Парсинг русских дат ───────────────────────────────────────────────────────
+# Парсинг русских дат
 
 
 def parse_ru_date(value: str | datetime | None) -> datetime | None:
@@ -29,12 +33,12 @@ def parse_ru_date(value: str | datetime | None) -> datetime | None:
     return dt
 
 
-# ── Модели ────────────────────────────────────────────────────────────────────
+# Модели
 
 
 class LabResult(BaseModel):
     """Один показатель анализа."""
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     analyte_code: Optional[str] = None
     analyte_name: str
@@ -60,7 +64,7 @@ class LabResult(BaseModel):
 
 class DoctorReport(BaseModel):
     """Заключение врача."""
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     diagnosis: Optional[str] = None
     recommendations: list[str] = Field(default_factory=list)

@@ -2,10 +2,21 @@
   "vlm": {
     "model": "qwen3-vl:8b-instruct",
     "temperature": 0.0,
-    "num_ctx": 16384,
-    "max_tokens": 8192,
-    "num_predict": 8192,
-    "repeat_penalty": 1.2
+    "classify_temperature": 0.1,
+    "num_ctx": 8192,
+    "max_tokens": 4096,
+    "num_predict": 4096,
+    "repeat_penalty": 1.1,
+    "structured_output": true
+  },
+  "text_model": {
+    "model": "qwen3-vl:8b-instruct",
+    "temperature": 0.0,
+    "num_ctx": 8192,
+    "max_tokens": 4096,
+    "num_predict": 2048,
+    "repeat_penalty": 1.1,
+    "structured_output": true
   },
   "ollama": { "keep_alive": "30m" },
   "pdf_to_image": { "render_dpi": 200, "max_pages": 50 },

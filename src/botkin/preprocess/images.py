@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 from pathlib import Path
 
 import cv2
@@ -24,15 +25,21 @@ except ImportError:  # pragma: no cover — окружение без pillow-hei
 
 from botkin.config import (
     IMAGE_CLAHE_CLIP,
+    IMAGE_CLAHE_TILE,
+    IMAGE_DESKEW_CLOSE_KERNEL,
     IMAGE_DESKEW_MAX_AREA,
     IMAGE_DESKEW_MIN_ANGLE,
     IMAGE_DESKEW_MIN_AREA,
+    IMAGE_DESKEW_OPEN_KERNEL,
     IMAGE_EXTRACT_LONG_SIDE,
     IMAGE_JPEG_QUALITY,
     IMAGE_UNSHARP_AMOUNT,
+    IMAGE_UNSHARP_SIGMA,
     MAX_PAGES,
     PDF_RENDER_DPI,
 )
+
+log = logging.getLogger(__name__)
 
 
 def _resize(img: Image.Image, long_side: int, upscale: bool) -> Image.Image:
@@ -53,9 +60,10 @@ def _enhance(arr: np.ndarray) -> np.ndarray:
     """CLAHE-контраст по L-каналу + мягкий unsharp. Вход/выход — RGB uint8."""
     lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)
     luminance, a, b = cv2.split(lab)
-    luminance = cv2.createCLAHE(clipLimit=IMAGE_CLAHE_CLIP, tileGridSize=(8, 8)).apply(luminance)
+    tile = (IMAGE_CLAHE_TILE, IMAGE_CLAHE_TILE)
+    luminance = cv2.createCLAHE(clipLimit=IMAGE_CLAHE_CLIP, tileGridSize=tile).apply(luminance)
     out = cv2.cvtColor(cv2.merge((luminance, a, b)), cv2.COLOR_LAB2RGB)
-    blur = cv2.GaussianBlur(out, (0, 0), 3)
+    blur = cv2.GaussianBlur(out, (0, 0), IMAGE_UNSHARP_SIGMA)
     return cv2.addWeighted(out, IMAGE_UNSHARP_AMOUNT, blur, 1.0 - IMAGE_UNSHARP_AMOUNT, 0)
 
 
@@ -67,8 +75,10 @@ def _doc_angle(arr: np.ndarray) -> float | None:
     hsv = cv2.cvtColor(arr, cv2.COLOR_RGB2HSV)
     saturation = hsv[:, :, 1]
     _, mask = cv2.threshold(saturation, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((9, 9), np.uint8))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((35, 35), np.uint8))
+    open_k = (IMAGE_DESKEW_OPEN_KERNEL, IMAGE_DESKEW_OPEN_KERNEL)
+    close_k = (IMAGE_DESKEW_CLOSE_KERNEL, IMAGE_DESKEW_CLOSE_KERNEL)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones(open_k, np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones(close_k, np.uint8))
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
@@ -105,27 +115,25 @@ def _encode_jpeg(img: Image.Image) -> bytes:
     return buf.getvalue()
 
 
-def _process(img: Image.Image, long_side: int, upscale: bool, deskew: bool, enhance: bool) -> bytes:
-    if deskew:
-        img = Image.fromarray(_deskew(np.asarray(img.convert("RGB"))))
-    img = _resize(img, long_side, upscale)
-    if enhance:
-        img = Image.fromarray(_enhance(np.asarray(img)))
-    return _encode_jpeg(img)
-
 
 def _pdf_pages(path: Path, long_side: int, upscale: bool, enhance: bool) -> list[bytes]:
     out: list[bytes] = []
-    doc = pymupdf.open(str(path))
-    try:
+    with pymupdf.open(str(path)) as doc:
+        log.info("[PDF] %s: страниц в документе=%d | рендер до %d @ %d dpi",
+                 path.name, doc.page_count, MAX_PAGES, PDF_RENDER_DPI)
         for index, page in enumerate(doc):
             if index >= MAX_PAGES:
                 break
             pix = page.get_pixmap(dpi=PDF_RENDER_DPI)
             img = Image.open(io.BytesIO(pix.tobytes("png")))
-            out.append(_process(img, long_side, upscale, deskew=False, enhance=enhance))
-    finally:
-        doc.close()
+            img = _resize(img, long_side, upscale)
+            if enhance:
+                img = Image.fromarray(_enhance(np.asarray(img)))
+            fw, fh = img.size
+            jpeg = _encode_jpeg(img)
+            log.info("[PDF] %s стр.%d: рендер %dx%d → итог %dx%d px, JPEG %d КБ",
+                     path.name, index + 1, pix.width, pix.height, fw, fh, len(jpeg) // 1024)
+            out.append(jpeg)
     return out
 
 
@@ -146,7 +154,15 @@ def prepare_images(
         return _pdf_pages(path, limit, upscale, enhance)
 
     with Image.open(path) as img:
-        return [_process(img, limit, upscale, deskew, enhance)]
+        if deskew:
+            img = Image.fromarray(_deskew(np.asarray(img.convert("RGB"))))
+        img = _resize(img, limit, upscale)
+        if enhance:
+            img = Image.fromarray(_enhance(np.asarray(img)))
+        fw, fh = img.size
+        jpeg = _encode_jpeg(img)
+    log.info("[IMG] %s: итог %dx%d px, JPEG %d КБ", path.name, fw, fh, len(jpeg) // 1024)
+    return [jpeg]
 
 
 def to_base64_jpegs(images: list[bytes]) -> list[str]:

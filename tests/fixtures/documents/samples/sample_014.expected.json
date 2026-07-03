@@ -1,0 +1,22 @@
+{
+  "_comment": "Ручная разметка по визуальному чтению 2 страниц PDF. Инвитро: обмен железа и укороченный клинический анализ крови; строгая e2e-сверка использует analytes[].value.",
+  "doc_type": "analysis",
+  "clinic": "Инвитро-Самара",
+  "title": "Железо, трансферрин, ферритин и клинический анализ крови",
+  "patient_name": "Саулина Инна Игоревна",
+  "analytes": [
+    {"name": "Железо", "value": 12.8, "unit": "мкмоль/л", "ref_low": 9.0, "ref_high": 30.4},
+    {"name": "Трансферрин", "value": 2.85, "unit": "г/л", "ref_low": 2.5, "ref_high": 3.8},
+    {"name": "% насыщения трансферрина", "value": 17.9, "unit": "%", "ref_low": 16.0, "ref_high": 50.0},
+    {"name": "Ферритин", "value": 31.0, "unit": "мкг/л", "ref_low": 15.0, "ref_high": 204.0},
+    {"name": "Гематокрит", "value": 37.2, "unit": "%", "ref_low": 35.0, "ref_high": 45.0},
+    {"name": "Гемоглобин", "value": 12.9, "unit": "г/дл", "ref_low": 11.7, "ref_high": 15.5},
+    {"name": "Эритроциты", "value": 4.23, "unit": "млн/мкл", "ref_low": 3.8, "ref_high": 5.1},
+    {"name": "MCV", "value": 87.9, "unit": "фл", "ref_low": 81.0, "ref_high": 100.0},
+    {"name": "RDW", "value": 11.9, "unit": "%", "ref_low": 11.6, "ref_high": 14.8},
+    {"name": "MCH", "value": 30.5, "unit": "пг", "ref_low": 27.0, "ref_high": 34.0},
+    {"name": "MCHC", "value": 34.7, "unit": "г/дл", "ref_low": 32.0, "ref_high": 36.0},
+    {"name": "Тромбоциты", "value": 211.0, "unit": "тыс/мкл", "ref_low": 150.0, "ref_high": 400.0},
+    {"name": "Лейкоциты", "value": 6.46, "unit": "тыс/мкл", "ref_low": 4.5, "ref_high": 11.0}
+  ]
+}

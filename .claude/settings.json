@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"${CLAUDE_PROJECT_DIR:-.}\"; { echo \"# Последняя остановка сессии\"; echo; echo \"- Время: $(date \"+%F %T\")\"; echo \"- Ветка: $(git -C \"$d\" rev-parse --abbrev-ref HEAD 2>/dev/null)\"; echo \"- HEAD: $(git -C \"$d\" log -1 --oneline 2>/dev/null)\"; echo; echo \"## Незакоммиченные изменения (git status --short)\"; git -C \"$d\" status --short 2>/dev/null; } > \"$d/.remember/last-stop.md\" 2>/dev/null || true",
+            "statusMessage": "Фиксирую точку восстановления…"
+          }
+        ]
+      }
+    ]
+  }
+}

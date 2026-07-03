@@ -18,7 +18,12 @@ class ClassificationError(DocumentError):
 
 
 class ExtractionError(DocumentError):
-    """Сбой извлечения данных."""
+    """Сбой извлечения данных.
+
+    raw_text — сырой ответ модели на момент сбоя (если доступен): из него можно
+    спасти полные объекты-строки при обрезанном JSON (см. extract._salvage_json_objects).
+    """
+    raw_text: str | None = None
 
 
 class LLMError(BotkinError):
