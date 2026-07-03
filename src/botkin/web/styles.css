@@ -265,6 +265,22 @@ body {
 }
 .list-count { color: var(--text-dim); font-size: 13px; margin-bottom: 12px; }
 
+/* Панель массовых действий (режим выбора документов) */
+.bulk-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); padding: 10px 14px; margin-bottom: 14px;
+}
+.bulk-count { font-size: 13px; font-weight: 600; color: var(--text-dim); margin-right: auto; }
+.doc-check {
+  width: 22px; height: 22px; border-radius: 7px; flex-shrink: 0; align-self: center;
+  border: 2px solid var(--border-strong); color: transparent;
+  display: grid; place-items: center;
+  transition: background var(--dur), border-color var(--dur), color var(--dur);
+}
+.doc-check.checked { background: var(--brand-1); border-color: var(--brand-1); color: #fff; }
+.doc-card--selected { border-color: var(--brand-1); background: var(--brand-soft); }
+
 .doc-list { display: flex; flex-direction: column; gap: 10px; }
 .doc-card {
   display: flex; align-items: flex-start; gap: 12px; padding: 14px;
@@ -298,6 +314,9 @@ body {
 .btn-primary { background: var(--brand-gradient); color: #fff; border: none; }
 .btn-primary:hover { box-shadow: 0 6px 20px rgba(20,184,166,.4); }
 .btn-ghost { background: transparent; }
+/* После .btn: шортхенд border в .btn иначе перебивает border-color. */
+.btn-danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+.btn-danger:hover { background: rgba(240,86,74,.10); border-color: var(--danger); }
 
 .link-btn {
   background: none; border: none; color: var(--brand-1);
@@ -316,6 +335,8 @@ body {
 .doc-detail-head { margin-bottom: 18px; }
 .doc-detail-head .type-badge { margin-bottom: 10px; }
 .doc-detail-meta { color: var(--text-dim); font-size: 13px; margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap; }
+.doc-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.doc-actions .btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; font-size: 13px; }
 
 .labs-table { display: flex; flex-direction: column; }
 .lab-row {
@@ -401,6 +422,7 @@ body {
 .queue-status--uploading { background: rgba(20,184,166,.16); color: var(--brand-1); }
 .queue-status--processing { background: rgba(245,166,35,.16); color: var(--warn); }
 .queue-status--done { background: rgba(52,211,153,.16); color: var(--ok); }
+.queue-status--duplicate { background: rgba(34,211,238,.14); color: var(--brand-2); }
 .queue-status--failed { background: rgba(240,86,74,.16); color: var(--danger); }
 
 .progress-track {
@@ -412,6 +434,7 @@ body {
 }
 .progress-bar--processing { background: linear-gradient(90deg, var(--warn), #FBBF24); }
 .progress-bar--done { background: linear-gradient(90deg, var(--ok), #6EE7B7); }
+.progress-bar--duplicate { background: linear-gradient(90deg, var(--brand-2), #67E8F9); }
 .progress-bar--failed { background: var(--danger); }
 
 .queue-stages { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-mut); flex-wrap: wrap; }
@@ -434,6 +457,16 @@ body {
   cursor: pointer;
 }
 .suggest-item:hover, .suggest-item:focus-visible { background: var(--brand-soft); color: var(--brand-1); }
+
+/* Чипы показателей — все анализы видны сразу, без обязательного поиска */
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  padding: 7px 13px; font-size: 13px; font-weight: 500; font-family: var(--font);
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 999px; cursor: pointer;
+  transition: border-color var(--dur), background var(--dur), color var(--dur);
+}
+.chip:hover { border-color: var(--brand-1); color: var(--brand-1); background: var(--brand-soft); }
 
 .chart-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .chart-wrap svg { width: 100%; height: auto; display: block; min-width: 320px; }

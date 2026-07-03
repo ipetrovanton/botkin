@@ -60,14 +60,54 @@ class DocumentRepo(BaseRepo):
 
     # --- запись ---
 
-    def create(self, source_path: str, doc_type: str = "unknown") -> int:
+    def create(
+        self, source_path: str, doc_type: str = "unknown", file_sha256: str | None = None,
+    ) -> int:
         cur = self.conn.execute(
-            "INSERT INTO documents(user_id, doc_type, source_path, status) "
-            "VALUES (?, ?, ?, 'received')",
-            (self.user_id, doc_type, source_path),
+            "INSERT INTO documents(user_id, doc_type, source_path, status, file_sha256) "
+            "VALUES (?, ?, ?, 'received', ?)",
+            (self.user_id, doc_type, source_path, file_sha256),
         )
         self.conn.commit()
         return cur.lastrowid
+
+    def find_duplicate_of(self, document_id: int) -> int | None:
+        """Более ранний документ-дубликат: тот же файл (sha256) либо тот же бланк
+        (совпадают doc_type, title, clinic). Возвращает id старого документа."""
+        doc = self.conn.execute(
+            "SELECT doc_type, title, clinic, file_sha256 FROM documents "
+            "WHERE id = ? AND user_id = ?",
+            (document_id, self.user_id),
+        ).fetchone()
+        if doc is None:
+            return None
+        row = self.conn.execute(
+            """
+            SELECT id FROM documents
+            WHERE user_id = ? AND id != ? AND status = 'extracted'
+              AND (
+                (file_sha256 IS NOT NULL AND file_sha256 = ?)
+                OR (doc_type = ? AND title IS NOT NULL AND title = ?
+                    AND COALESCE(clinic, '') = COALESCE(?, ''))
+              )
+            ORDER BY id ASC LIMIT 1
+            """,
+            (self.user_id, document_id, doc["file_sha256"],
+             doc["doc_type"], doc["title"], doc["clinic"]),
+        ).fetchone()
+        return row["id"] if row else None
+
+    def extracted_rows_count(self, document_id: int) -> int:
+        """Суммарное число извлечённых записей документа (показатели + заключения)."""
+        labs = self.conn.execute(
+            "SELECT COUNT(*) AS c FROM lab_results WHERE document_id = ? AND user_id = ?",
+            (document_id, self.user_id),
+        ).fetchone()["c"]
+        reports = self.conn.execute(
+            "SELECT COUNT(*) AS c FROM doctor_reports WHERE document_id = ? AND user_id = ?",
+            (document_id, self.user_id),
+        ).fetchone()["c"]
+        return labs + reports
 
     def set_status(self, document_id: int, status: str) -> None:
         self.conn.execute(
@@ -301,6 +341,51 @@ class DocumentRepo(BaseRepo):
             "by_status": by_status,
             "last": dict(last) if last else None,
         }
+
+    def delete(self, document_id: int) -> str | None:
+        """Полное удаление документа с данными (в скоупе пользователя).
+
+        Атомарно удаляет показатели, заключения и сам документ; возвращает
+        source_path для удаления файла-исходника вызывающим, либо None,
+        если документ не найден / чужой.
+        """
+        row = self.conn.execute(
+            "SELECT source_path FROM documents WHERE id = ? AND user_id = ?",
+            (document_id, self.user_id),
+        ).fetchone()
+        if row is None:
+            return None
+        with transaction(self.conn):
+            self.conn.execute(
+                "DELETE FROM lab_results WHERE document_id = ? AND user_id = ?",
+                (document_id, self.user_id),
+            )
+            self.conn.execute(
+                "DELETE FROM doctor_reports WHERE document_id = ? AND user_id = ?",
+                (document_id, self.user_id),
+            )
+            self.conn.execute(
+                "DELETE FROM documents WHERE id = ? AND user_id = ?",
+                (document_id, self.user_id),
+            )
+        return row["source_path"]
+
+    def clear_extracted_data(self, document_id: int) -> None:
+        """Очистка извлечённых данных перед повторным распознаванием (репарсингом)."""
+        with transaction(self.conn):
+            self.conn.execute(
+                "DELETE FROM lab_results WHERE document_id = ? AND user_id = ?",
+                (document_id, self.user_id),
+            )
+            self.conn.execute(
+                "DELETE FROM doctor_reports WHERE document_id = ? AND user_id = ?",
+                (document_id, self.user_id),
+            )
+            self.conn.execute(
+                "UPDATE documents SET raw_extraction = NULL, status = 'received' "
+                "WHERE id = ? AND user_id = ?",
+                (document_id, self.user_id),
+            )
 
     # --- люки вне user-скоупа (точка входа pipeline) ---
 

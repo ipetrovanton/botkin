@@ -112,3 +112,35 @@ def test_ref_position_maps_value_into_corridor():
     assert 25 < pos[0] < 75                       # в норме — внутри
     assert pos[3] == 100 and pos[4] == 0          # клэмп к краям
     assert pos[5] is None and pos[6] is None and pos[7] is None
+
+
+def test_selection_toggle_and_select_all():
+    """Режим выбора: галочки по одному, «выбрать все» и полное снятие."""
+    out = run_js(
+        "const c = cabinet();"
+        "c.docs = { items: [{id:1},{id:2},{id:3}], total: 3 };"
+        "c.toggleSel(2); c.toggleSel(3); const step1 = [...c.selected];"
+        "c.toggleSel(3); const step2 = [...c.selected];"
+        "c.selectAllDocs(); const all = [...c.selected];"
+        "const is2 = c.isSel(2);"  # в момент, когда выбраны все
+        "c.selectAllDocs(); const none = [...c.selected];"  # повторный клик = снять все
+        "console.log(JSON.stringify([step1, step2, all, none, is2]));"
+    )
+    step1, step2, all_, none_, is2 = json.loads(out)
+    assert step1 == [2, 3]
+    assert step2 == [2]
+    assert sorted(all_) == [1, 2, 3]
+    assert none_ == []
+    assert is2 is True
+
+
+def test_sel_mode_exit_clears_selection():
+    """Выход из режима выбора сбрасывает выбранное — нет «невидимых» отметок."""
+    out = run_js(
+        "const c = cabinet();"
+        "c.docs = { items: [{id:1},{id:2}], total: 2 };"
+        "c.selMode = true; c.toggleSel(1);"
+        "c.toggleSelMode();"
+        "console.log(JSON.stringify([c.selMode, c.selected]));"
+    )
+    assert json.loads(out) == [False, []]

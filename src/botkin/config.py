@@ -267,6 +267,11 @@ BOT_API_URL = setting("bot.api_url", "API_URL", str)
 # Иначе бот сдаётся раньше, чем бэкенд закончит (см. инцидент с D3).
 BOT_PROGRESS_TIMEOUT = float(os.getenv("BOT_PROGRESS_TIMEOUT", str(30 + 3 * VLM_REQUEST_TIMEOUT)))
 
+# Веб-кабинет: дебаг-вход без заголовка X-Telegram-User-Id.
+# Если задан (> 0) и заголовок отсутствует — API работает от имени этого
+# telegram_user_id. ТОЛЬКО для локального запуска/дебага; в проде не задавать.
+WEB_DEBUG_USER_ID = int(os.getenv("WEB_DEBUG_USER_ID", "0") or 0)
+
 # Загрузка файлов
 UPLOAD_MAX_BYTES = setting("upload.max_bytes", "UPLOAD_MAX_BYTES", int)
 UPLOAD_ALLOWED_EXTENSIONS: set[str] = set(_get("upload.allowed_extensions"))

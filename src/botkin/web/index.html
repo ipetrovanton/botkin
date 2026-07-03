@@ -19,7 +19,7 @@
 
   <!-- Шапка с брендом и ECG-анимацией -->
   <header class="app-header">
-    <div class="brand" @click="screen='overview'">
+    <div class="brand" @click="go('overview')">
       <!-- Логотип «значение в коридоре нормы»: пунктирные границы референса,
            кривая динамики и точка-показатель внутри коридора. -->
       <span class="brand-logo" aria-hidden="true">
@@ -45,7 +45,7 @@
         <svg x-show="theme==='dark'" viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         <svg x-show="theme==='light'" viewBox="0 0 24 24" width="20" height="20" style="display:none"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
       </button>
-      <button class="icon-btn" @click="screen='profile'" :class="{active: screen==='profile'}" title="Профиль" aria-label="Профиль">
+      <button class="icon-btn" @click="go('profile')" :class="{active: screen==='profile'}" title="Профиль" aria-label="Профиль">
         <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
     </div>
@@ -108,19 +108,19 @@
       <div class="panel">
         <div class="panel-head"><h2 class="panel-title">Быстрые действия</h2></div>
         <div class="action-grid">
-          <button class="action-tile" @click="screen='upload'">
+          <button class="action-tile" @click="go('upload')">
             <span class="action-ic action-ic--upload"><svg viewBox="0 0 24 24" width="24" height="24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
             <span class="action-tx">Загрузить документ</span>
           </button>
-          <button class="action-tile" @click="screen='documents'">
+          <button class="action-tile" @click="go('documents')">
             <span class="action-ic action-ic--list"><svg viewBox="0 0 24 24" width="24" height="24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
             <span class="action-tx">Все документы</span>
           </button>
-          <button class="action-tile" @click="screen='analytics'">
+          <button class="action-tile" @click="go('analytics')">
             <span class="action-ic action-ic--chart"><svg viewBox="0 0 24 24" width="24" height="24"><path d="M4 20V8M10 20V4M16 20v-8M22 20H4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
             <span class="action-tx">Динамика показателя</span>
           </button>
-          <button class="action-tile" @click="screen='reports'">
+          <button class="action-tile" @click="go('reports')">
             <span class="action-ic action-ic--report"><svg viewBox="0 0 24 24" width="24" height="24"><path d="M6 3h9l5 5v13H6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v6h5M9 14h6M9 18h6" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span>
             <span class="action-tx">Заключения врачей</span>
           </button>
@@ -132,9 +132,24 @@
     <section x-show="screen==='documents'" class="screen">
       <div class="screen-head">
         <h1 class="screen-title">Документы</h1>
-        <button class="icon-btn filters-toggle" @click="showFilters=!showFilters" :class="{active: hasFilters()}" aria-label="Фильтры">
-          <svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 6h16M7 12h10M10 18h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        </button>
+        <div class="header-actions">
+          <button class="icon-btn" @click="toggleSelMode()" :class="{active: selMode}"
+                  title="Выбрать документы" aria-label="Режим выбора документов">
+            <svg viewBox="0 0 24 24" width="20" height="20"><rect x="3" y="3" width="8" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 7l1.6 1.6L9.4 5.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 7h7M14 12h7M3 16h18M3 20h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+          <button class="icon-btn filters-toggle" @click="showFilters=!showFilters" :class="{active: hasFilters()}" aria-label="Фильтры">
+            <svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 6h16M7 12h10M10 18h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Панель массовых действий -->
+      <div class="bulk-bar" x-show="selMode" x-transition>
+        <span class="bulk-count" x-text="`Выбрано: ${selected.length}`"></span>
+        <button class="link-btn" @click="selectAllDocs()"
+                x-text="selected.length === docs.items.length && docs.items.length ? 'Снять все' : 'Выбрать все'"></button>
+        <button class="btn btn-danger" :disabled="!selected.length" @click="deleteSelected()">Удалить</button>
+        <button class="btn btn-ghost" @click="toggleSelMode()">Отмена</button>
       </div>
 
       <!-- Панель фильтров -->
@@ -177,7 +192,11 @@
 
       <div class="doc-list" x-show="!loading.docs">
         <template x-for="d in docs.items" :key="d.id">
-          <article class="doc-card" @click="openDoc(d.id)">
+          <article class="doc-card" :class="{'doc-card--selected': selMode && isSel(d.id)}"
+                   @click="selMode ? toggleSel(d.id) : openDoc(d.id)">
+            <span class="doc-check" x-show="selMode" :class="{checked: isSel(d.id)}" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="12" height="12"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
             <span class="type-badge" :class="'type-badge--'+d.doc_type" x-text="typeLabel(d.doc_type)"></span>
             <div class="doc-card-body">
               <div class="doc-card-title" x-text="d.title || typeLabel(d.doc_type)"></div>
@@ -206,7 +225,7 @@
 
     <!-- ====== ДЕТАЛЬНАЯ КАРТОЧКА ====== -->
     <section x-show="screen==='document'" class="screen">
-      <button class="back-btn" @click="screen='documents'">← К списку</button>
+      <button class="back-btn" @click="go('documents')">← К списку</button>
       <div x-show="loading.doc" class="skeleton-row"><div class="skeleton-card"></div></div>
       <div x-show="!loading.doc && current.doc">
         <div class="doc-detail-head">
@@ -215,6 +234,21 @@
           <div class="doc-detail-meta">
             <span x-text="current.doc?.clinic || '—'"></span>
             <span x-text="fmtDate(current.doc?.created_at)"></span>
+          </div>
+          <!-- Действия с документом: оригинал, повторное распознавание, удаление -->
+          <div class="doc-actions">
+            <button class="btn btn-ghost" @click="openSource()">
+              <svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 3h9l5 5v13H6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v6h5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+              Оригинал
+            </button>
+            <button class="btn btn-ghost" @click="reparseCurrentDoc()">
+              <svg viewBox="0 0 24 24" width="16" height="16"><path d="M20 12a8 8 0 11-2.34-5.66M20 3v4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Обновить
+            </button>
+            <button class="btn btn-danger" @click="deleteCurrentDoc()">
+              <svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Удалить
+            </button>
           </div>
         </div>
 
@@ -319,7 +353,7 @@
               <span class="stage" :class="{done: item.status==='extracted'}">Готово</span>
             </div>
             <button class="link-btn" x-show="item.status==='extracted'" @click="openDoc(item.docId)">Открыть результат →</button>
-            <button class="link-btn" x-show="item.status==='failed'" @click="screen='upload'">Повторить загрузку</button>
+            <button class="link-btn" x-show="item.status==='failed'" @click="go('upload')">Повторить загрузку</button>
           </div>
         </template>
       </div>
@@ -355,8 +389,22 @@
         <p>Данных по «<span x-text="analytePicked"></span>» пока нет.</p>
         <p class="muted">Загрузите анализ с этим показателем.</p>
       </div>
-      <div class="empty" x-show="!analytePicked">
-        <p>Выберите показатель, чтобы увидеть график динамики.</p>
+
+      <!-- Все показатели сразу — без обязательного поиска -->
+      <div class="panel" x-show="!analytePicked && analyteAll.length">
+        <div class="panel-head">
+          <h2 class="panel-title">Все показатели</h2>
+          <span class="panel-cnt" x-text="analyteAll.length"></span>
+        </div>
+        <div class="chip-row">
+          <template x-for="a in analyteAll" :key="a">
+            <button class="chip" @click="pickAnalyte(a)" x-text="a"></button>
+          </template>
+        </div>
+      </div>
+      <div class="empty" x-show="!analytePicked && !analyteAll.length">
+        <p>Показателей пока нет.</p>
+        <p class="muted">Загрузите анализ — и здесь появится динамика.</p>
       </div>
     </section>
 
@@ -429,22 +477,22 @@
 
   <!-- Нижняя навигация (mobile-first) -->
   <nav class="bottom-nav">
-    <button class="nav-item" :class="{active: screen==='overview'}" @click="screen='overview'">
+    <button class="nav-item" :class="{active: screen==='overview'}" @click="go('overview')">
       <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span>Обзор</span>
     </button>
-    <button class="nav-item" :class="{active: screen==='documents'}" @click="screen='documents'">
+    <button class="nav-item" :class="{active: screen==='documents'}" @click="go('documents')">
       <svg viewBox="0 0 24 24" width="22" height="22"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
       <span>Документы</span>
     </button>
-    <button class="nav-item nav-item--upload" :class="{active: screen==='upload'}" @click="screen='upload'">
+    <button class="nav-item nav-item--upload" :class="{active: screen==='upload'}" @click="go('upload')">
       <span class="nav-upload-ic"><svg viewBox="0 0 24 24" width="24" height="24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
     </button>
-    <button class="nav-item" :class="{active: screen==='analytics'}" @click="screen='analytics'">
+    <button class="nav-item" :class="{active: screen==='analytics'}" @click="go('analytics')">
       <svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 20V8M10 20V4M16 20v-8M22 20H4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
       <span>Аналитика</span>
     </button>
-    <button class="nav-item" :class="{active: screen==='reports'}" @click="screen='reports'">
+    <button class="nav-item" :class="{active: screen==='reports'}" @click="go('reports')">
       <svg viewBox="0 0 24 24" width="22" height="22"><path d="M6 3h9l5 5v13H6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M14 3v6h5" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
       <span>Заключения</span>
     </button>

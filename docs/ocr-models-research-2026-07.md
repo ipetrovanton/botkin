@@ -72,3 +72,122 @@ MinerU2.5-Pro — 95.69–95.75, GLM-OCR — 95.22. v1.5: GLM-OCR — 94.62 (#1)
 `ollama pull glm-ocr` → прогнать корпус из 34 документов, замерить точность и с/документ
 против qwen3-vl; отдельно собрать мини-корпус рукописных рецептов и сравнить
 qwen3-vl vs qwen3.6:27b.
+
+---
+
+# Часть 2 (03.07.2026): бенчмарки локальных моделей — «ожидания» для будущей сверки с реальностью
+
+*Все числа — из первоисточников (model cards HF, GitHub README, arXiv, официальные блоги),
+проверены 03.07.2026. Размеры весов и лицензии — из HuggingFace API (точные байты
+`usedStorage` / параметры safetensors). Числа из вторичных обзоров помечены
+**[вторичный источник]**. Раздел собран для статьи на Хабр: после локального прогона
+на корпусе русских меддокументов сюда добавится колонка «реальность».*
+
+## Контекст по версиям OmniDocBench
+
+v1.5 (25.09.2025, 1355 стр.), v1.6 (10.04.2026: +296 сложных страниц, новый матчинг MGAM),
+v1.7 (30.04.2026, добавлен только Qianfan-OCR). Официальный лидерборд v1.6 — в README
+[github.com/opendatalab/OmniDocBench](https://github.com/opendatalab/OmniDocBench).
+Overall = ((1−TextEdit)×100 + TableTEDS + FormulaCDM)/3.
+**Языки бенча: только en / simplified_chinese / en-zh mixed — русского в OmniDocBench НЕТ.**
+
+## Сводная таблица
+
+| Модель | Лицензия | Диск (формат) | Мин. VRAM | OmniDocBench (версия!) | Другие бенчи | Скорость (GPU) | Русский язык | Источники |
+|---|---|---|---|---|---|---|---|---|
+| **GLM-OCR** (zai-org, 0.9B декодер, всего 1.33B) | Веса: MIT (HF card); код: Apache-2.0 | 2.65 ГБ (safetensors BF16) | н/д от вендора; ~4 ГБ оценочно (есть Ollama/MLX) | **94.62 на v1.5** (№1 на момент релиза); **95.22 на v1.6** (официальный лидерборд: TextEdit 0.044, TableTEDS 92.83, CDM 97.18) | внутренние оценки Z.ai: код, печати, счета | **1.86 стр/с PDF, 0.67 изобр/с** — Z.ai, конкурентность 1, *GPU не указан* | заявлена поддержка ru (Z.ai docs: zh/en/fr/es/ru/de/ja/ko); бенчей по кириллице нет | [1][2][3][4] |
+| **PaddleOCR-VL-1.6** (Baidu, 0.9B) | Apache-2.0 | 1.93 ГБ (BF16); INT8 ~1 ГБ [вторичный: Spheron] | ~2–4 ГБ | **96.33 на v1.6 (self-reported, 03.06.2026)** — SOTA; в официальном лидерборде v1.6 пока только v1.5 = 94.93; SOTA на Real5-OmniDocBench (бенч самого Baidu) | olmOCR-bench: 80.0 для v1.0 [замер dots.mocr] | н/д для 1.6 | 109 языков заявлено (arXiv 2510.14528); Хабр-тест: «МОСКВА»→«MOCKBA» | [5][6][7][22] |
+| **MinerU2.5-Pro-2605-1.2B** (OpenDataLab) | Apache-2.0 | ~2.3 ГБ BF16 (1.156B параметров) | ~4 ГБ оценочно | **95.75 на v1.6 (официальный лидерборд — №1 среди опубликованных)**; TextEdit 0.036, CDM 97.45, TEDS 93.42 | 5 табличных бенчей — №1 (свой замер) | **2.12 fps на 1×A100** (vllm-async, конкурентно) | «native multilingual OCR» в релизе 2605; ru явно — н/д | [8][9][2] |
+| **DeepSeek-OCR-2** (3.39B) | Apache-2.0 | 6.78 ГБ BF16 | ~8–10 ГБ оценочно | **91.09 на v1.5** (self-reported); **90.25 на v1.6** (официальный лидерборд) | экономия визуальных токенов: ≈ до 1120 ток./стр. | н/д для v2 | н/д (у v1 ~100 языков, v2 карточка молчит) | [10][11][2] |
+| **Qwen3-VL-8B-Instruct** (8.77B) | Apache-2.0 | 17.5 ГБ BF16 (Q4 ~5–6 ГБ) | 24 ГБ BF16 / ~8 ГБ Q4 | 8B не мерили (235B: 89.78 на v1.6) | **olmOCR-bench: 64.6±1.1** [независимый замер Datalab] — ниже спец-моделей | н/д | OCR на 32 языках заявлен, кириллица входит | [12][13][14] |
+| **Qwen2.5-VL-7B** (8.29B, база сравнения) | Apache-2.0 | 16.6 ГБ BF16 | 24 ГБ / ~6–8 ГБ Q4 | v1.0: overall edit 0.226 EN / 0.324 ZH (tech report) | DocVQA 96.4 (свой отчёт) | н/д | мультиязычный OCR заявлен, ru без цифр | [15] |
+| **Qwen3.5-9B** (9.65B, 02.03.2026) | Apache-2.0 | 19.3 ГБ BF16 | 24 ГБ / ~7 ГБ Q4 | **87.7 на v1.5** (self-reported) | **OCRBench: 89.2** (self-reported) | н/д; MTP-спекулятивный декодинг | 201 язык (текст); OCR-языки — н/д | [16] |
+| **Qwen3.6-27B** (27.8B, 22.04.2026) | Apache-2.0 | 55.6 ГБ BF16; **в 24 ГБ только Q4 GGUF (~15–17 ГБ)** | ~20 ГБ Q4 | н/д | **OCRBench: 89.4**, CC-OCR: 81.2 (self-reported) | н/д | как Qwen3.5 — н/д | [17] |
+| **HunyuanOCR** (Tencent, 1B) | **«other»: не действует в ЕС/UK/Ю.Корее** | 1.99 ГБ BF16 | ~3–4 ГБ | **94.10 self-reported** → **89.95 на официальном v1.6** (−4.15 — показательный разрыв!) | OCRBench 860 (SOTA <3B на релиз, self-reported) | н/д | ~130 языков заявлено | [18][19][2] |
+| **Surya 2** (Datalab, 686M) | Код Apache-2.0; **веса OpenRAIL-M** (бесплатно: research/personal/стартапы <$5M) | ~1.4 ГБ BF16 + GGUF | ~2 ГБ; CPU/Apple Silicon | не участвует | **olmOCR-bench: 83.3%** (топ среди <3B, self-reported); 87.2% на внутреннем 91-языковом | **5.35 стр/с на RTX 5090** при 128 конкурентных | ru в 91 языке внутреннего бенча (разбивки нет) | [20][21] |
+| **Chandra 2** (Datalab; «4B» = 5.30B на HF) | Код Apache-2.0; **веса OpenRAIL-M** (<$2M; нельзя конкурировать с их API) | 10.6 ГБ BF16 | ~16 ГБ оценочно | не участвует | **olmOCR-bench: 85.8±0.8 (SOTA open, 18.03.2026)**; 43-языковый бенч: 77.8% | **1.44 стр/с на 1×H100** (96 конкурентных) | **ru: 85.5%** (внутр. бенч; у Chandra 1 было 88.7% — v2 на русском просела!) | [22][23] |
+| **dots.mocr** (rednote-hilab, 3.04B) | MIT | 6.08 ГБ BF16 | ~8 ГБ оценочно | v1.5 self-reported: TextEdit 0.031, ReadOrder 0.029 — лучшие; overall не публикуют | **olmOCR-bench: 83.9±0.9**; сильная сторона — графики/схемы → SVG | н/д | мультиязычный; поязычных цифр по ru нет | [24][25] |
+| **Nanonets-OCR-s** (3.75B) | не указана в карточке | 7.52 ГБ BF16 | ~8 ГБ | не участвует | заморожен (посл. обновление 20.06.2025); преемник OCR2-3B: olmOCR-bench 69.5 [замер dots.mocr] | н/д | англоцентричная | [26][25] |
+| **GOT-OCR2** (stepfun-ai, 716M) | Apache-2.0 | 1.43 ГБ BF16 | ~2–3 ГБ | отсутствует в v1.5/v1.6 (модель 09.2024) | формулы CDM 74.1 (модульная таблица) | н/д | **нет**: en/zh, кириллица не заявлена | [2][27] |
+
+*«Мин. VRAM ~оценочно» — вендоры почти не публикуют минимум; оценка = веса BF16 +
+KV-cache/активации. В статью выносить как расчёт, а не как факт.*
+
+### Источники к таблице
+
+1. https://github.com/zai-org/GLM-OCR
+2. https://github.com/opendatalab/OmniDocBench (лидерборд v1.6_full)
+3. https://docs.z.ai/guides/vlm/glm-ocr
+4. https://huggingface.co/zai-org/GLM-OCR + arXiv:2603.10910
+5. https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6
+6. https://arxiv.org/abs/2606.03264
+7. https://arxiv.org/abs/2510.14528
+8. https://huggingface.co/opendatalab/MinerU2.5-Pro-2605-1.2B (arXiv:2604.04771)
+9. https://github.com/opendatalab/MinerU
+10. https://huggingface.co/deepseek-ai/DeepSeek-OCR-2 (arXiv:2601.20552)
+11. https://comfyui-wiki.com/en/news/2026-01-27-deepseek-ocr-2-release [вторичный]
+12. https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct
+13. https://huggingface.co/datalab-to/chandra-ocr-2 (таблица olmOCR-bench)
+14. https://github.com/QwenLM/Qwen3-VL
+15. arXiv:2502.13923 (Qwen2.5-VL tech report)
+16. https://huggingface.co/Qwen/Qwen3.5-9B
+17. https://huggingface.co/Qwen/Qwen3.6-27B + https://github.com/QwenLM/Qwen3.6
+18. https://arxiv.org/abs/2511.19575 (HunyuanOCR tech report)
+19. https://huggingface.co/tencent/HunyuanOCR (текст лицензии)
+20. https://github.com/datalab-to/surya
+21. https://www.datalab.to/blog/surya-2
+22. https://huggingface.co/datalab-to/chandra-ocr-2
+23. https://www.datalab.to/blog/chandra-2
+24. https://huggingface.co/rednote-hilab/dots.mocr (arXiv:2603.13032)
+25. там же — таблица olmOCR-bench
+26. https://huggingface.co/nanonets/Nanonets-OCR-s и /Nanonets-OCR2-3B
+27. https://huggingface.co/stepfun-ai/GOT-OCR2_0
+
+## Независимые исследования 2025–2026
+
+1. **«OmniDocBench is Saturated, What's Next for OCR Benchmarks?»** — Jerry Liu (LlamaIndex),
+   24.02.2026, https://www.llamaindex.ai/blog/omnidocbench-is-saturated-what-s-next-for-ocr-benchmarks.
+   Методика: разбор метрик на конкретных фейлах LlamaParse. Вывод: бенч насыщен (>94% у топов)
+   и штрафует семантически корректные, но иначе отформатированные ответы.
+2. **«Современные OCR для сложных документов: сравниваем 6 open-source моделей»** — Хабр,
+   aak204, 16.11.2025, https://habr.com/ru/articles/966846/. Методика: 3 русскоязычных
+   документа (скан+рукопись, печать, рукопись), 6 моделей, единый промпт. Выводы: на печати
+   все норм, PaddleOCR-VL подменяет кириллицу латиницей; русскую рукопись вытянули только
+   Qwen3-VL/Omni.
+3. **«Как мы оценивали OCR на русских документах»** — Хабр, блог «Честного знака» (43Tech),
+   24.04.2026, https://habr.com/ru/companies/chestnyznak/articles/1027484/. Методика:
+   6 датасетов из реальных DOCX → PDF без текстового слоя, метрики Левенштейна + структурные
+   + производительность. Вывод: на русских документах со сложной геометрией композиция
+   специализированных лёгких компонентов обошла универсальные VLM; VLM выигрывают только
+   в пакетной параллельной обработке.
+4. **OCR Arena** — краудсорсинговый Elo-лидерборд «вслепую», https://www.ocrarena.ai/.
+   Вывод (ссылка rednote-hilab, март 2026): порядок «Gemini 3 Pro > dots.mocr > HunyuanOCR >
+   PaddleOCR-VL/GLM-OCR» на реальных документах не совпадает с порядком OmniDocBench.
+
+Бонус (VRAM/throughput): «Best Open-Source OCR and Document VLMs to Self-Host» — Spheron, 2026,
+https://www.spheron.network/blog/best-open-source-ocr-vlm-self-host-gpu-cloud-2026/ [вторичный, вендор облака].
+
+## Каверзные места при сравнении бенчей (для честного «ожидания vs реальность»)
+
+1. **Версии OmniDocBench несравнимы.** v1.5→v1.6 сменил датасет (+296 страниц) и матчинг
+   (MGAM). GLM-OCR: 94.62 (v1.5) и 95.22 (v1.6). Смешивать колонки разных версий —
+   главный способ соврать таблицей.
+2. **Self-reported vs официальная переоценка.** HunyuanOCR: 94.1 в своём tech report →
+   89.95 в официальном v1.6 (−4.15). PaddleOCR-VL-1.6 (96.33) в официальном лидерборде
+   пока отсутствует — SOTA только self-reported.
+3. **Скорость меряют на разном железе и конкурентности.** GLM-OCR 1.86 стр/с (GPU не назван,
+   b=1), MinerU2.5-Pro 2.12 fps (A100, async), Chandra 2 1.44 стр/с (H100, 96 параллельных),
+   Surya 5.35 стр/с (RTX 5090, 128 параллельных). На бытовой карте с batch=1 всё упадёт в разы.
+4. **Насыщение метрик.** При 94–96% overall различия меньше шума разметки; edit distance
+   штрафует безобидные различия (HTML vs Markdown таблиц).
+5. **Скан vs фото.** OmniDocBench — «чистые» рендеры/сканы; фото с перекосом — отдельный
+   Real5-OmniDocBench (сделан самим Baidu — учитывать конфликт интересов).
+6. **Русского нет ни в одном крупном публичном OCR-бенче.** Кириллица — только во внутренних
+   бенчах Datalab (Chandra 2: ru 85.5%, хуже Chandra 1 — 88.7%!) и в claims карточек.
+   Ожидания по OmniDocBench на русские меддокументы не переносятся — главный тезис
+   раздела «ожидания vs реальность».
+7. **«Размер модели» — маркетинг.** Chandra 2 «4B» = 5.30B на HF (10.6 ГБ); GLM-OCR «0.9B» =
+   1.33B суммарно. Считать по safetensors, не по названию.
+8. **Лицензии весов ≠ лицензии кода.** Datalab: код Apache-2.0, веса OpenRAIL-M с порогом
+   выручки; HunyuanOCR не лицензируется в ЕС/UK/Корее; GLM-OCR: GitHub Apache-2.0 vs HF MIT.
+9. **Elo-оценки судятся LLM** (судья Gemini-3-Flash у dots.mocr) — у LLM-judge свои смещения.

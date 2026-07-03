@@ -1,8 +1,9 @@
 """API загрузки документов."""
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 
 from botkin.config import UPLOAD_ALLOWED_EXTENSIONS, UPLOAD_MAX_BYTES, UPLOAD_SOURCES_DIR
 from botkin.db.connection import get_conn
@@ -11,7 +12,7 @@ from botkin.domain.models import UploadResponse
 from botkin.pipeline.orchestrator import process_document
 from botkin.preprocess.formats import resolve_extension
 
-from ..deps import get_user_id
+from ..deps import get_telegram_user_id, get_user_id
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
@@ -21,7 +22,7 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     user_id: int = Depends(get_user_id),
-    x_telegram_user_id: int = Header(..., alias="X-Telegram-User-Id"),
+    x_telegram_user_id: int = Depends(get_telegram_user_id),
 ) -> UploadResponse:
     body = await file.read()
     if len(body) > UPLOAD_MAX_BYTES:
@@ -46,7 +47,11 @@ async def upload_document(
     dest.write_bytes(body)
 
     with get_conn() as conn:
-        doc_id = DocumentRepo(conn, user_id).create(source_path=str(dest))
+        doc_id = DocumentRepo(conn, user_id).create(
+            source_path=str(dest),
+            # sha256 содержимого — точный признак повторной загрузки того же файла.
+            file_sha256=hashlib.sha256(body).hexdigest(),
+        )
 
     background_tasks.add_task(process_document, doc_id, x_telegram_user_id)
     return UploadResponse(document_id=doc_id, status="received")

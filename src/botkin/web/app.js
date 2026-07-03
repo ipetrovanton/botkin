@@ -64,6 +64,10 @@ function cabinet() {
     uploading: false,
     _seq: 0,
 
+    // Режим выбора (массовое удаление документов)
+    selMode: false,
+    selected: [],
+
     // UI-состояние
     loading: { stats: false, docs: false, doc: false, reports: false, dynamics: false },
     toasts: [],
@@ -107,6 +111,92 @@ function cabinet() {
       if (this.dynamics.points.length) this.$nextTick(() => this.renderChart());
     },
 
+    // ===== Навигация =====
+    // Списки загружаются сразу при входе на экран (без ожидания фильтров).
+    go(s) {
+      this.screen = s;
+      if (s === "documents") this.loadDocs();
+      else if (s === "reports") this.loadReports();
+      else if (s === "overview") this.loadStats();
+      if (s !== "documents" && this.selMode) this.toggleSelMode();
+    },
+
+    // ===== Режим выбора и массовое удаление =====
+    toggleSelMode() {
+      this.selMode = !this.selMode;
+      this.selected = [];
+    },
+    toggleSel(id) {
+      this.selected = this.isSel(id)
+        ? this.selected.filter((x) => x !== id)
+        : [...this.selected, id];
+    },
+    isSel(id) { return this.selected.includes(id); },
+    selectAllDocs() {
+      // Все на текущей странице; повторный клик — снять все.
+      const ids = this.docs.items.map((d) => d.id);
+      this.selected = this.selected.length === ids.length ? [] : ids;
+    },
+    async deleteSelected() {
+      const n = this.selected.length;
+      if (!n || !window.confirm(`Удалить документы (${n}) вместе со всеми данными?`)) return;
+      try {
+        const data = await this.api("/api/documents/delete-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: this.selected }),
+        });
+        this.toast(`Удалено: ${data?.deleted ?? 0}`, "success");
+      } catch (e) { this.toast("Не удалось удалить документы", "error"); console.error(e); }
+      this.toggleSelMode();
+      this.loadDocs(); this.loadStats(); this.loadSelectors();
+    },
+
+    // ===== Действия с открытым документом =====
+    async deleteCurrentDoc() {
+      const id = this.current.doc?.id;
+      if (!id || !window.confirm("Удалить документ со всеми показателями и заключениями?")) return;
+      try {
+        await this.api(`/api/documents/${id}`, { method: "DELETE" });
+        this.toast("Документ удалён", "success");
+        this.go("documents"); this.loadStats(); this.loadSelectors();
+      } catch (e) { this.toast("Не удалось удалить документ", "error"); console.error(e); }
+    },
+    async reparseCurrentDoc() {
+      const doc = this.current.doc;
+      if (!doc) return;
+      try {
+        await this.api(`/api/documents/${doc.id}/reparse`, { method: "POST" });
+      } catch (e) {
+        const gone = String(e?.message || "").startsWith("409");
+        this.toast(gone ? "Файл-исходник утрачен — обновить невозможно"
+                        : "Не удалось запустить обновление", "error");
+        return;
+      }
+      // Прогресс повторного распознавания виден в очереди на экране загрузки.
+      this.queue.unshift({
+        id: ++this._seq, name: doc.title || `Документ #${doc.id}`,
+        state: "processing", status: "received", docId: doc.id, progress: 0,
+      });
+      this.pollStatus(this.queue[0]);
+      this.toast("Документ отправлен на повторное распознавание", "info");
+      this.go("upload");
+    },
+    async openSource() {
+      // Файл открывается через blob: заголовок идентификации нельзя передать в window.open.
+      const id = this.current.doc?.id;
+      if (!id) return;
+      try {
+        const res = await fetch(`/api/documents/${id}/source`, {
+          headers: { "X-Telegram-User-Id": this.tgUserId },
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const url = URL.createObjectURL(await res.blob());
+        window.open(url, "_blank");
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (e) { this.toast("Оригинал недоступен", "error"); console.error(e); }
+    },
+
     // ===== Идентификация =====
     setDemoUser() {
       const v = String(this.demoUserId || "").trim();
@@ -114,8 +204,8 @@ function cabinet() {
       this.tgUserId = v;
       localStorage.setItem("botkin.tgUserId", v);
       this.toast("Идентификатор применён", "success");
-      this.screen = "overview";
-      this.loadStats(); this.loadSelectors(); this.loadDocs();
+      this.loadSelectors();
+      this.go("overview");
     },
     useDemoUser() {
       this.demoUserId = "113521070";
@@ -365,7 +455,14 @@ function cabinet() {
         }
         try {
           const data = await this.api(`/api/documents/${item.docId}/status`);
-          if (!data) return;
+          if (!data) {
+            // Документ исчез: повторная загрузка схлопнута дедупликацией,
+            // данные объединены с уже существующим документом.
+            item.state = "duplicate"; item.status = "extracted";
+            this.toast(`${item.name}: уже был загружен — данные объединены`, "info");
+            this.loadStats();
+            return;
+          }
           item.status = data.status;
           if (data.status === "extracted") {
             item.state = "done";
@@ -394,6 +491,7 @@ function cabinet() {
       if (item.state === "uploading") return "Загрузка…";
       if (item.state === "processing") return STATUS_LABELS[item.status] || "Обработка";
       if (item.state === "done") return "Готово";
+      if (item.state === "duplicate") return "Уже был загружен";
       if (item.state === "failed") return "Ошибка";
       return "";
     },
