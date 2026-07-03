@@ -429,6 +429,15 @@ function cabinet() {
       if (r.ref_high != null && r.value_num > r.ref_high) return "high";
       return "";
     },
+    // Позиция значения на мини-шкале нормы (0–100%). Коридор занимает середину
+    // шкалы (25–75%): норма видна как «внутри», выходы — слева/справа, с клэмпом.
+    refPosition(r) {
+      if (r.value_num == null || r.ref_low == null || r.ref_high == null) return null;
+      const span = r.ref_high - r.ref_low;
+      if (span <= 0) return null;
+      const pos = 25 + ((r.value_num - r.ref_low) / span) * 50;
+      return Math.max(0, Math.min(100, pos));
+    },
   };
 }
 

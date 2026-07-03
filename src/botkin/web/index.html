@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0A0F1C">
+  <meta name="theme-color" content="#081311">
   <meta name="description" content="BOTkin — кабинет пациента: загрузка медицинских документов, анализы, динамика показателей, заключения врачей.">
   <title>BOTkin — кабинет пациента</title>
   <link rel="stylesheet" href="styles.css">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230A0F1C'/%3E%3Cpath d='M4 17h6l2-6 4 12 2-7h10' fill='none' stroke='%2314B8A6' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230F1D1A'/%3E%3Cpath d='M6 11.5h20M6 20.5h20' stroke='%2334D399' stroke-width='1' stroke-dasharray='2 3' opacity='.55'/%3E%3Cpath d='M5 22c4 0 5-7 10-7s7 4 12-1' fill='none' stroke='%2314B8A6' stroke-width='2.2' stroke-linecap='round'/%3E%3Ccircle cx='15' cy='15' r='2.6' fill='%23fff'/%3E%3C/svg%3E">
   <!-- Порядок важен: app.js (определяет глобальную cabinet()) должен идти ДО Alpine,
        иначе Alpine стартует до того, как cabinet() существует, и x-data бросает
        "cabinet is not defined" — корневой компонент не биндится, кнопки мертвы.
@@ -20,11 +20,22 @@
   <!-- Шапка с брендом и ECG-анимацией -->
   <header class="app-header">
     <div class="brand" @click="screen='overview'">
+      <!-- Логотип «значение в коридоре нормы»: пунктирные границы референса,
+           кривая динамики и точка-показатель внутри коридора. -->
       <span class="brand-logo" aria-hidden="true">
         <svg viewBox="0 0 40 40" width="34" height="34">
-          <rect width="40" height="40" rx="10" fill="var(--brand-gradient)"/>
-          <path class="ecg-mini" d="M5 21h7l2.5-8 5 16 2.5-9H35" fill="none"
-                stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+          <defs>
+            <linearGradient id="bk-logo-bg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#0FA593"/>
+              <stop offset="1" stop-color="#22D3EE"/>
+            </linearGradient>
+          </defs>
+          <rect width="40" height="40" rx="10" fill="url(#bk-logo-bg)"/>
+          <path d="M8 14.5h24M8 25.5h24" stroke="#fff" stroke-width="1.1"
+                stroke-dasharray="2.4 3.2" opacity=".5"/>
+          <path d="M6.5 27.5c5 0 6.5-9 12.5-9s8.5 5.5 14.5-1.5" fill="none"
+                stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+          <circle class="logo-dot" cx="19" cy="18.5" r="3.1" fill="#fff"/>
         </svg>
       </span>
       <span class="brand-name">BOT<span class="brand-accent">kin</span></span>
@@ -218,10 +229,14 @@
                 <div class="lab-value">
                   <span class="val" :class="labValueClass(r)" x-text="fmtValue(r)"></span>
                   <span class="unit" x-text="r.unit"></span>
-                  <span class="trend-arrow" x-show="labValueClass(r)==='high'">⬆️</span>
-                  <span class="trend-arrow" x-show="labValueClass(r)==='low'">⬇️</span>
                 </div>
                 <div class="lab-ref" x-text="fmtRef(r)"></div>
+                <!-- Мини-шкала: положение значения в коридоре нормы -->
+                <div class="ref-scale" x-show="refPosition(r) !== null" aria-hidden="true">
+                  <span class="ref-scale-dot"
+                        :class="labValueClass(r) ? 'ref-scale-dot--'+labValueClass(r) : ''"
+                        :style="`left:${refPosition(r)}%`"></span>
+                </div>
               </div>
             </template>
           </div>
@@ -363,7 +378,7 @@
         <input type="date" x-model="repFilters.date_to" @change="loadReports()" class="filter-select" title="До">
       </div>
 
-      <div class="report-list" x-show="!loading.reports">
+      <div class="report-feed" x-show="!loading.reports">
         <template x-for="r in reports.items" :key="r.id">
           <article class="report-card" @click="openDoc(r.document_id)">
             <div class="report-card-head">
@@ -435,8 +450,8 @@
     </button>
   </nav>
 
-  <!-- Тосты -->
-  <div class="toasts">
+  <!-- Тосты: aria-live, чтобы скринридер озвучивал ошибки и подтверждения -->
+  <div class="toasts" role="status" aria-live="polite">
     <template x-for="t in toasts" :key="t.id">
       <div class="toast" :class="'toast--'+t.type" x-text="t.msg" x-transition.duration.300ms></div>
     </template>

@@ -86,3 +86,29 @@ def test_render_chart_escapes_all_external_interpolations():
         # Неэкранированные допустимы только вне шаблонных строк (присваивания и т.п.).
         for m in bare:
             assert "${" + m not in src, f"неэкранированная вставка в шаблоне: {m}"
+
+
+def test_ref_position_maps_value_into_corridor():
+    """refPosition: положение значения на мини-шкале нормы (проценты, клэмп).
+
+    Коридор занимает середину шкалы (25-75%): значение в норме попадает внутрь,
+    выходы за референс видны слева/справа, экстремумы прижимаются к краям.
+    """
+    out = run_js(
+        "const c = cabinet();"
+        "console.log(JSON.stringify(["
+        "c.refPosition({value_num: 130, ref_low: 120, ref_high: 160}),"
+        "c.refPosition({value_num: 120, ref_low: 120, ref_high: 160}),"
+        "c.refPosition({value_num: 160, ref_low: 120, ref_high: 160}),"
+        "c.refPosition({value_num: 200, ref_low: 120, ref_high: 160}),"
+        "c.refPosition({value_num: 0,   ref_low: 120, ref_high: 160}),"
+        "c.refPosition({value_num: null, ref_low: 120, ref_high: 160}),"
+        "c.refPosition({value_num: 130, ref_low: null, ref_high: 160}),"
+        "c.refPosition({value_num: 130, ref_low: 130, ref_high: 130}),"
+        "]));"
+    )
+    pos = json.loads(out)
+    assert pos[1] == 25 and pos[2] == 75          # границы коридора
+    assert 25 < pos[0] < 75                       # в норме — внутри
+    assert pos[3] == 100 and pos[4] == 0          # клэмп к краям
+    assert pos[5] is None and pos[6] is None and pos[7] is None
