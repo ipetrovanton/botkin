@@ -19,3 +19,9 @@
 2026-07-03 (4) — сессия 2 завершена: дедуп (sha256+правило количества, 6 тестов), source/delete/batch/reparse API (8 тестов), WEB_DEBUG_USER_ID, фронт (go/чипы/чекбоксы/массовое удаление/оригинал-обновить-удалить, 3 node-теста), бенч-таблица 13 OCR-моделей в docs, deploy-local-web.md. 364 passed, ruff clean. Журнал ит. 31.
 
 2026-07-03 (5) — bench_expectations.py (ожидания vs реальность, надстройка над bench_models, EXPECTATIONS из docs с URL, отчёт md+json+консоль, 3 теста) + docs/devin-prompt.md (автономный GPU-прогон + фактура для Хабра). 367 passed, ruff clean. Журнал ит. 32.
+
+2026-07-03 (6) — GPU-бенчмарк завершён. Ветка refactor/web-cabinet-quality, HEAD 07c49dc. Железо: RTX 3080 Laptop 16GB, Ollama 0.31.1. 3 модели прогнаны на корпусе 34 доков:
+- qwen3-vl:8b-instruct: 100% (325/325), 34/34 PASS, 25.7с/док, 895с
+- glm-ocr: 81.8% (248/303), 28/34 PASS, 13.7с/док, 703с
+- qwen2.5vl:7b: 76.3% (248/325), 27/34 PASS, 27.3с/док, 995с
+Обновлено: docs/ocr-models-research-2026-07.md (Часть 3 «Реальность»), habr/lab-results-journal.md (итерация 33). Отчёт: scripts/bench/bench_expectations_report.md. 367 passed, ruff clean. Следующий шаг: коммит, затем Task 3 (HE4 на sample_001) если останется время.
