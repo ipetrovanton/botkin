@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ru" :data-theme="theme" x-data="cabinet()" x-init="init()" x-cloak>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#081311">
+  <meta name="description" content="BOTkin — кабинет пациента: загрузка медицинских документов, анализы, динамика показателей, заключения врачей.">
+  <title>BOTkin — кабинет пациента</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230F1D1A'/%3E%3Cpath d='M6 11.5h20M6 20.5h20' stroke='%2334D399' stroke-width='1' stroke-dasharray='2 3' opacity='.55'/%3E%3Cpath d='M5 22c4 0 5-7 10-7s7 4 12-1' fill='none' stroke='%2314B8A6' stroke-width='2.2' stroke-linecap='round'/%3E%3Ccircle cx='15' cy='15' r='2.6' fill='%23fff'/%3E%3C/svg%3E">
+  <!-- Порядок важен: app.js (определяет глобальную cabinet()) должен идти ДО Alpine,
+       иначе Alpine стартует до того, как cabinet() существует, и x-data бросает
+       "cabinet is not defined" — корневой компонент не биндится, кнопки мертвы.
+       defer сохраняет порядок выполнения = порядок в документе. -->
+  <script defer src="app.js"></script>
+  <script defer src="vendor/alpine.min.js"></script>
+</head>
+<body>
+
+  <!-- Шапка с брендом и ECG-анимацией -->
+  <header class="app-header">
+    <div class="brand" @click="go('overview')">
+      <!-- Логотип «значение в коридоре нормы»: пунктирные границы референса,
+           кривая динамики и точка-показатель внутри коридора. -->
+      <span class="brand-logo" aria-hidden="true">
+        <svg viewBox="0 0 40 40" width="34" height="34">
+          <defs>
+            <linearGradient id="bk-logo-bg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#0FA593"/>
+              <stop offset="1" stop-color="#22D3EE"/>
+            </linearGradient>
+          </defs>
+          <rect width="40" height="40" rx="10" fill="url(#bk-logo-bg)"/>
+          <path d="M8 14.5h24M8 25.5h24" stroke="#fff" stroke-width="1.1"
+                stroke-dasharray="2.4 3.2" opacity=".5"/>
+          <path d="M6.5 27.5c5 0 6.5-9 12.5-9s8.5 5.5 14.5-1.5" fill="none"
+                stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+          <circle class="logo-dot" cx="19" cy="18.5" r="3.1" fill="#fff"/>
+        </svg>
+      </span>
+      <span class="brand-name">BOT<span class="brand-accent">kin</span></span>
+    </div>
+    <div class="header-actions">
+      <button class="icon-btn" @click="toggleTheme()" :title="theme==='dark'?'Светлая тема':'Тёмная тема'" aria-label="Переключить тему">
+        <svg x-show="theme==='dark'" viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <svg x-show="theme==='light'" viewBox="0 0 24 24" width="20" height="20" style="display:none"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="icon-btn" @click="go('profile')" :class="{active: screen==='profile'}" title="Профиль" aria-label="Профиль">
+        <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Основной контент -->
+  <main class="app-main">
+
+    <!-- ====== ОБЗОР ====== -->
+    <section x-show="screen==='overview'" class="screen">
+      <div class="screen-head">
+        <h1 class="screen-title">Обзор</h1>
+        <p class="screen-sub" x-text="greeting()"></p>
+      </div>
+
+      <div class="stat-grid" x-show="!loading.stats">
+        <div class="stat-card stat-card--primary">
+          <div class="stat-icon"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 7h16M4 12h10M4 17h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+          <div class="stat-val" x-text="stats.total ?? 0"></div>
+          <div class="stat-lbl">Документов</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon stat-icon--lab"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M9 3v6l-5 9a2 2 0 002 3h12a2 2 0 002-3l-5-9V3M8 3h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></div>
+          <div class="stat-val" x-text="stats.labs ?? 0"></div>
+          <div class="stat-lbl">Показателей</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon stat-icon--doc"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M6 3h9l5 5v13H6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v6h5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></div>
+          <div class="stat-val" x-text="stats.reports ?? 0"></div>
+          <div class="stat-lbl">Заключений</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon stat-icon--chart"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 20V8M10 20V4M16 20v-8M22 20H4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+          <div class="stat-val" x-text="analytesCount"></div>
+          <div class="stat-lbl">Видов анализов</div>
+        </div>
+      </div>
+
+      <div class="skeleton-row" x-show="loading.stats">
+        <div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>
+      </div>
+
+      <!-- Последний документ -->
+      <div class="panel" x-show="stats.last">
+        <div class="panel-head">
+          <h2 class="panel-title">Последний документ</h2>
+          <button class="link-btn" @click="openDoc(stats.last.id)" x-show="stats.last">Открыть →</button>
+        </div>
+        <div class="last-doc" x-show="stats.last">
+          <span class="type-badge" :class="'type-badge--'+(stats.last?.doc_type||'unknown')" x-text="typeLabel(stats.last?.doc_type)"></span>
+          <div class="last-doc-title" x-text="stats.last?.title || typeLabel(stats.last?.doc_type)"></div>
+          <div class="last-doc-meta">
+            <span x-text="stats.last?.clinic || '—'"></span>
+            <span x-text="fmtDate(stats.last?.created_at)"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Быстрые действия -->
+      <div class="panel">
+        <div class="panel-head"><h2 class="panel-title">Быстрые действия</h2></div>
+        <div class="action-grid">
+          <button class="action-tile" @click="go('upload')">
+            <span class="action-ic action-ic--upload"><svg viewBox="0 0 24 24" width="24" height="24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <span class="action-tx">Загрузить документ</span>
+          </button>
+          <button class="action-tile" @click="go('documents')">
+            <span class="action-ic action-ic--list"><svg viewBox="0 0 24 24" width="24" height="24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+            <span class="action-tx">Все документы</span>
+          </button>
+          <button class="action-tile" @click="go('analytics')">
+            <span class="action-ic action-ic--chart"><svg viewBox="0 0 24 24" width="24" height="24"><path d="M4 20V8M10 20V4M16 20v-8M22 20H4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+            <span class="action-tx">Динамика показателя</span>
+          </button>
+          <button class="action-tile" @click="go('reports')">
+            <span class="action-ic action-ic--report"><svg viewBox="0 0 24 24" width="24" height="24"><path d="M6 3h9l5 5v13H6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v6h5M9 14h6M9 18h6" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span>
+            <span class="action-tx">Заключения врачей</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== ДОКУМЕНТЫ ====== -->
+    <section x-show="screen==='documents'" class="screen">
+      <div class="screen-head">
+        <h1 class="screen-title">Документы</h1>
+        <div class="header-actions">
+          <button class="icon-btn" @click="toggleSelMode()" :class="{active: selMode}"
+                  title="Выбрать документы" aria-label="Режим выбора документов">
+            <svg viewBox="0 0 24 24" width="20" height="20"><rect x="3" y="3" width="8" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 7l1.6 1.6L9.4 5.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 7h7M14 12h7M3 16h18M3 20h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+          <button class="icon-btn filters-toggle" @click="showFilters=!showFilters" :class="{active: hasFilters()}" aria-label="Фильтры">
+            <svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 6h16M7 12h10M10 18h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Панель массовых действий -->
+      <div class="bulk-bar" x-show="selMode" x-transition>
+        <span class="bulk-count" x-text="`Выбрано: ${selected.length}`"></span>
+        <button class="link-btn" @click="selectAllDocs()"
+                x-text="selected.length === docs.items.length && docs.items.length ? 'Снять все' : 'Выбрать все'"></button>
+        <button class="btn btn-danger" :disabled="!selected.length" @click="deleteSelected()">Удалить</button>
+        <button class="btn btn-ghost" @click="toggleSelMode()">Отмена</button>
+      </div>
+
+      <!-- Панель фильтров -->
+      <div class="filters" x-show="showFilters" x-transition>
+        <div class="filter-row">
+          <select x-model="filters.doc_type" @change="resetPage(); loadDocs()" class="filter-select">
+            <option value="">Все типы</option>
+            <option value="analysis">Анализы</option>
+            <option value="doctor_report">Заключения</option>
+            <option value="unknown">Прочее</option>
+          </select>
+          <select x-model="filters.clinic" @change="resetPage(); loadDocs()" class="filter-select">
+            <option value="">Все клиники</option>
+            <template x-for="c in clinics" :key="c"><option :value="c" x-text="c"></option></template>
+          </select>
+        </div>
+        <div class="filter-row">
+          <select x-model="filters.doctor" @change="resetPage(); loadDocs()" class="filter-select">
+            <option value="">Все врачи</option>
+            <template x-for="d in doctors" :key="d.doctor_name"><option :value="d.doctor_name" x-text="d.doctor_name"></option></template>
+          </select>
+          <select x-model="filters.status" @change="resetPage(); loadDocs()" class="filter-select">
+            <option value="">Любой статус</option>
+            <option value="extracted">Готов</option>
+            <option value="failed">Ошибка</option>
+            <option value="recognizing">В обработке</option>
+          </select>
+        </div>
+        <div class="filter-row">
+          <input type="date" x-model="filters.date_from" @change="resetPage(); loadDocs()" class="filter-select" :max="filters.date_to||stats.date_max?.slice(0,10)" title="От">
+          <input type="date" x-model="filters.date_to" @change="resetPage(); loadDocs()" class="filter-select" :min="filters.date_from" title="До">
+        </div>
+        <div class="filter-row">
+          <input type="search" x-model="filters.q" @input.debounce.300ms="resetPage(); loadDocs()" placeholder="Поиск по названию или клинике…" class="filter-input">
+        </div>
+        <button class="link-btn" @click="clearFilters()" x-show="hasFilters()">Сбросить фильтры</button>
+      </div>
+
+      <p class="list-count" x-show="!loading.docs" x-text="`Всего: ${docs.total}`"></p>
+
+      <div class="doc-list" x-show="!loading.docs">
+        <template x-for="d in docs.items" :key="d.id">
+          <article class="doc-card" :class="{'doc-card--selected': selMode && isSel(d.id)}"
+                   @click="selMode ? toggleSel(d.id) : openDoc(d.id)">
+            <span class="doc-check" x-show="selMode" :class="{checked: isSel(d.id)}" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="12" height="12"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            <span class="type-badge" :class="'type-badge--'+d.doc_type" x-text="typeLabel(d.doc_type)"></span>
+            <div class="doc-card-body">
+              <div class="doc-card-title" x-text="d.title || typeLabel(d.doc_type)"></div>
+              <div class="doc-card-meta">
+                <span x-text="d.clinic || '—'"></span>
+                <span x-text="fmtDate(d.created_at)"></span>
+              </div>
+            </div>
+            <span class="status-dot" :class="'status-dot--'+d.status" :title="statusLabel(d.status)"></span>
+          </article>
+        </template>
+        <div class="empty" x-show="docs.items.length===0">
+          <p>Документов не найдено.</p>
+          <p x-show="hasFilters()">Попробуйте изменить фильтры.</p>
+        </div>
+      </div>
+
+      <div class="skeleton-row" x-show="loading.docs"><div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div></div>
+
+      <div class="pager" x-show="docs.total > docs.items.length">
+        <button class="btn btn-ghost" @click="prevPage()" :disabled="filters.offset===0">← Назад</button>
+        <span class="pager-info" x-text="pageInfo()"></span>
+        <button class="btn btn-ghost" @click="nextPage()" :disabled="filters.offset+PAGE_SIZE >= docs.total">Вперёд →</button>
+      </div>
+    </section>
+
+    <!-- ====== ДЕТАЛЬНАЯ КАРТОЧКА ====== -->
+    <section x-show="screen==='document'" class="screen">
+      <button class="back-btn" @click="go('documents')">← К списку</button>
+      <div x-show="loading.doc" class="skeleton-row"><div class="skeleton-card"></div></div>
+      <div x-show="!loading.doc && current.doc">
+        <div class="doc-detail-head">
+          <span class="type-badge" :class="'type-badge--'+current.doc?.doc_type" x-text="typeLabel(current.doc?.doc_type)"></span>
+          <h1 class="screen-title" x-text="current.doc?.title || typeLabel(current.doc?.doc_type)"></h1>
+          <div class="doc-detail-meta">
+            <span x-text="current.doc?.clinic || '—'"></span>
+            <span x-text="fmtDate(current.doc?.created_at)"></span>
+          </div>
+          <!-- Действия с документом: оригинал, повторное распознавание, удаление -->
+          <div class="doc-actions">
+            <button class="btn btn-ghost" @click="openSource()">
+              <svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 3h9l5 5v13H6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v6h5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+              Оригинал
+            </button>
+            <button class="btn btn-ghost" @click="reparseCurrentDoc()">
+              <svg viewBox="0 0 24 24" width="16" height="16"><path d="M20 12a8 8 0 11-2.34-5.66M20 3v4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Обновить
+            </button>
+            <button class="btn btn-danger" @click="deleteCurrentDoc()">
+              <svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Удалить
+            </button>
+          </div>
+        </div>
+
+        <!-- Анализы -->
+        <div class="panel" x-show="current.kind==='analysis'">
+          <div class="panel-head"><h2 class="panel-title">Показатели</h2><span class="panel-cnt" x-text="current.labs.length"></span></div>
+          <div class="labs-table">
+            <!-- key=индекс: у строк нет id, а имя+значение коллидируют на дублях панели -->
+            <template x-for="(r, ri) in current.labs" :key="ri">
+              <div class="lab-row" :class="{'lab-row--warn': r.unit_mismatch}">
+                <div class="lab-name" x-text="r.analyte_canonical || r.analyte_name"></div>
+                <div class="lab-value">
+                  <span class="val" :class="labValueClass(r)" x-text="fmtValue(r)"></span>
+                  <span class="unit" x-text="r.unit"></span>
+                </div>
+                <div class="lab-ref" x-text="fmtRef(r)"></div>
+                <!-- Мини-шкала: положение значения в коридоре нормы -->
+                <div class="ref-scale" x-show="refPosition(r) !== null" aria-hidden="true">
+                  <span class="ref-scale-dot"
+                        :class="labValueClass(r) ? 'ref-scale-dot--'+labValueClass(r) : ''"
+                        :style="`left:${refPosition(r)}%`"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Заключения -->
+        <div class="panel" x-show="current.kind==='doctor_report'">
+          <template x-for="(rep, repi) in current.reports" :key="repi">
+            <div class="report-block">
+              <div x-show="rep.diagnosis" class="report-field">
+                <h3 class="report-h">Диагноз</h3>
+                <p x-text="rep.diagnosis"></p>
+              </div>
+              <div class="report-grid">
+                <div x-show="rep.doctor_name" class="report-field">
+                  <h3 class="report-h">Врач</h3><p x-text="rep.doctor_name"></p>
+                </div>
+                <div x-show="rep.department" class="report-field">
+                  <h3 class="report-h">Отделение</h3><p x-text="rep.department"></p>
+                </div>
+              </div>
+              <div x-show="rep.complaints.length" class="report-field">
+                <h3 class="report-h">Жалобы</h3>
+                <ul class="report-list"><template x-for="(c, ci) in rep.complaints" :key="ci"><li x-text="c"></li></template></ul>
+              </div>
+              <div x-show="rep.recommendations.length" class="report-field">
+                <h3 class="report-h">Рекомендации</h3>
+                <ul class="report-list"><template x-for="(rec, reci) in rep.recommendations" :key="reci"><li x-text="rec"></li></template></ul>
+              </div>
+              <div x-show="rep.medications.length" class="report-field">
+                <h3 class="report-h">Назначения</h3>
+                <ul class="report-list report-list--med"><template x-for="(m, mi) in rep.medications" :key="mi"><li x-text="m"></li></template></ul>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div class="empty" x-show="current.kind!=='analysis' && current.kind!=='doctor_report'">
+          <p>Распознавание этого типа документа пока не поддерживается.</p>
+          <p class="muted">Файл сохранён, его можно обработать позже.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== ЗАГРУЗКА ====== -->
+    <section x-show="screen==='upload'" class="screen">
+      <div class="screen-head"><h1 class="screen-title">Загрузить документ</h1></div>
+
+      <div class="dropzone" :class="{'dropzone--over': dragOver, 'dropzone--busy': uploading}"
+           @dragover.prevent="dragOver=true" @dragleave.prevent="dragOver=false"
+           @drop.prevent="handleDrop($event)" @click="$refs.fileInput.click()">
+        <input type="file" x-ref="fileInput" class="file-input"
+               accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,image/*,application/pdf" multiple
+               @change="handleFiles($event.target.files)">
+        <div class="dropzone-content">
+          <div class="dropzone-ic"><svg viewBox="0 0 24 24" width="40" height="40"><path d="M12 16V4M7 9l5-5 5 5M4 20h16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <p class="dropzone-title">Перетащите файл сюда или нажмите</p>
+          <p class="dropzone-sub">PDF, JPG, PNG, HEIC · до 20 МБ</p>
+        </div>
+      </div>
+
+      <!-- Очередь загрузок -->
+      <div class="upload-queue" x-show="queue.length">
+        <template x-for="item in queue" :key="item.id">
+          <div class="queue-item">
+            <div class="queue-head">
+              <span class="queue-name" x-text="item.name"></span>
+              <span class="queue-status" :class="'queue-status--'+item.state" x-text="queueStateText(item)"></span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-bar" :class="'progress-bar--'+item.state" :style="`width:${progressPct(item)}%`"></div>
+            </div>
+            <div class="queue-stages">
+              <span class="stage" :class="{done: stageDone(item,'received'), active: item.status==='received' || item.status==='processing'}">Принят</span>
+              <span class="stage-sep">›</span>
+              <span class="stage" :class="{done: stageDone(item,'recognizing'), active: item.status==='recognizing'}">Распознавание</span>
+              <span class="stage-sep">›</span>
+              <span class="stage" :class="{done: item.status==='extracted', active: item.status==='normalizing'}">Нормализация</span>
+              <span class="stage-sep">›</span>
+              <span class="stage" :class="{done: item.status==='extracted'}">Готово</span>
+            </div>
+            <button class="link-btn" x-show="item.status==='extracted'" @click="openDoc(item.docId)">Открыть результат →</button>
+            <button class="link-btn" x-show="item.status==='failed'" @click="go('upload')">Повторить загрузку</button>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <!-- ====== АНАЛИТИКА / ДИНАМИКА ====== -->
+    <section x-show="screen==='analytics'" class="screen">
+      <div class="screen-head"><h1 class="screen-title">Динамика показателя</h1></div>
+
+      <div class="analyte-picker">
+        <input type="search" x-model="analyteQuery" @input.debounce.200ms="filterAnalytes()"
+               placeholder="Начните вводить название…" class="filter-input">
+        <div class="analyte-suggest" x-show="analyteSuggestions.length && analyteFocused" @focusin="analyteFocused=true">
+          <template x-for="a in analyteSuggestions" :key="a">
+            <button class="suggest-item" @click="pickAnalyte(a)" x-text="a"></button>
+          </template>
+        </div>
+      </div>
+
+      <div class="panel" x-show="dynamics.points.length">
+        <div class="panel-head">
+          <h2 class="panel-title" x-text="dynamics.analyte"></h2>
+          <span class="panel-cnt" x-text="dynamics.unit"></span>
+        </div>
+        <div class="chart-wrap" x-ref="chart"></div>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-dot legend-dot--val"></span>Значения</span>
+          <span class="legend-item" x-show="dynamics.ref_low!=null"><span class="legend-dot legend-dot--ref"></span>Норма <span x-text="`${dynamics.ref_low}–${dynamics.ref_high}`"></span></span>
+        </div>
+      </div>
+
+      <div class="empty" x-show="analytePicked && !dynamics.points.length && !loading.dynamics">
+        <p>Данных по «<span x-text="analytePicked"></span>» пока нет.</p>
+        <p class="muted">Загрузите анализ с этим показателем.</p>
+      </div>
+
+      <!-- Все показатели сразу — без обязательного поиска -->
+      <div class="panel" x-show="!analytePicked && analyteAll.length">
+        <div class="panel-head">
+          <h2 class="panel-title">Все показатели</h2>
+          <span class="panel-cnt" x-text="analyteAll.length"></span>
+        </div>
+        <div class="chip-row">
+          <template x-for="a in analyteAll" :key="a">
+            <button class="chip" @click="pickAnalyte(a)" x-text="a"></button>
+          </template>
+        </div>
+      </div>
+      <div class="empty" x-show="!analytePicked && !analyteAll.length">
+        <p>Показателей пока нет.</p>
+        <p class="muted">Загрузите анализ — и здесь появится динамика.</p>
+      </div>
+    </section>
+
+    <!-- ====== ЗАКЛЮЧЕНИЯ ====== -->
+    <section x-show="screen==='reports'" class="screen">
+      <div class="screen-head"><h1 class="screen-title">Заключения врачей</h1></div>
+      <div class="filter-row" style="margin-bottom:16px">
+        <select x-model="repFilters.doctor" @change="loadReports()" class="filter-select">
+          <option value="">Все врачи</option>
+          <template x-for="d in doctors" :key="d.doctor_name"><option :value="d.doctor_name" x-text="d.doctor_name"></option></template>
+        </select>
+        <select x-model="repFilters.clinic" @change="loadReports()" class="filter-select">
+          <option value="">Все клиники</option>
+          <template x-for="c in clinics" :key="c"><option :value="c" x-text="c"></option></template>
+        </select>
+      </div>
+      <div class="filter-row" style="margin-bottom:16px">
+        <input type="date" x-model="repFilters.date_from" @change="loadReports()" class="filter-select" title="От">
+        <input type="date" x-model="repFilters.date_to" @change="loadReports()" class="filter-select" title="До">
+      </div>
+
+      <div class="report-feed" x-show="!loading.reports">
+        <template x-for="r in reports.items" :key="r.id">
+          <article class="report-card" @click="openDoc(r.document_id)">
+            <div class="report-card-head">
+              <span class="report-doctor" x-text="r.doctor_name || '—'"></span>
+              <span class="report-date" x-text="fmtDate(r.visit_date)"></span>
+            </div>
+            <p class="report-diagnosis" x-text="r.diagnosis"></p>
+            <div class="report-card-foot">
+              <span x-text="r.department || ''"></span>
+              <span x-text="r.clinic || ''"></span>
+            </div>
+          </article>
+        </template>
+        <div class="empty" x-show="reports.items.length===0"><p>Заключений не найдено.</p></div>
+      </div>
+      <div class="skeleton-row" x-show="loading.reports"><div class="skeleton-card"></div><div class="skeleton-card"></div></div>
+    </section>
+
+    <!-- ====== ПРОФИЛЬ ====== -->
+    <section x-show="screen==='profile'" class="screen">
+      <div class="screen-head"><h1 class="screen-title">Профиль</h1></div>
+      <div class="panel">
+        <div class="profile-row">
+          <span class="profile-lbl">Идентификатор</span>
+          <span class="profile-val" x-text="user?.telegram_user_id || '—'"></span>
+        </div>
+        <div class="profile-row">
+          <span class="profile-lbl">С нами с</span>
+          <span class="profile-val" x-text="fmtDate(user?.created_at)"></span>
+        </div>
+        <div class="profile-row">
+          <span class="profile-lbl">Документов</span>
+          <span class="profile-val" x-text="stats.total ?? 0"></span>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2 class="panel-title">Идентификация (demo)</h2></div>
+        <p class="muted" style="margin-bottom:12px;font-size:13px">На этапе разработки кабинет привязывается к идентификатору пользователя. Введите значение или используйте демонстрационный аккаунт.</p>
+        <div class="filter-row">
+          <input type="text" x-model="demoUserId" placeholder="X-Telegram-User-Id" class="filter-input">
+          <button class="btn btn-primary" @click="setDemoUser()">Применить</button>
+        </div>
+        <button class="btn btn-ghost" style="margin-top:10px;width:100%" @click="useDemoUser()">Использовать demo (113521070)</button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Нижняя навигация (mobile-first) -->
+  <nav class="bottom-nav">
+    <button class="nav-item" :class="{active: screen==='overview'}" @click="go('overview')">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Обзор</span>
+    </button>
+    <button class="nav-item" :class="{active: screen==='documents'}" @click="go('documents')">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      <span>Документы</span>
+    </button>
+    <button class="nav-item nav-item--upload" :class="{active: screen==='upload'}" @click="go('upload')">
+      <span class="nav-upload-ic"><svg viewBox="0 0 24 24" width="24" height="24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    </button>
+    <button class="nav-item" :class="{active: screen==='analytics'}" @click="go('analytics')">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 20V8M10 20V4M16 20v-8M22 20H4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      <span>Аналитика</span>
+    </button>
+    <button class="nav-item" :class="{active: screen==='reports'}" @click="go('reports')">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M6 3h9l5 5v13H6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M14 3v6h5" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+      <span>Заключения</span>
+    </button>
+  </nav>
+
+  <!-- Тосты: aria-live, чтобы скринридер озвучивал ошибки и подтверждения -->
+  <div class="toasts" role="status" aria-live="polite">
+    <template x-for="t in toasts" :key="t.id">
+      <div class="toast" :class="'toast--'+t.type" x-text="t.msg" x-transition.duration.300ms></div>
+    </template>
+  </div>
+
+</body>
+</html>

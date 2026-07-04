@@ -138,7 +138,10 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
               structured: bool | None = None) -> BaseModel:
     t0 = time.perf_counter()
     log.info("[START_EXTRACT] Doc: '%s' | Type: '%s' | Model: %s", doc_name, doc_type, VLM_MODEL)
-    client = get_client(temperature=VLM_TEMPERATURE, mode=instructor.Mode.JSON)
+    client = get_client(mode=instructor.Mode.JSON)
+    # Температура из конфига: без неё Ollama берёт свой дефолт, и извлечение флуктуирует.
+    if options is None:
+        options = {**default_options(), "temperature": VLM_TEMPERATURE}
     try:
         response = client.chat.completions.create(
             model=VLM_MODEL,
@@ -409,7 +412,7 @@ def _call_text(messages: list[dict], doc_name: str, structured: bool | None = No
         "num_predict": TEXT_NUM_PREDICT,
         "temperature": TEXT_LAYER_TEMPERATURE,
     }
-    client = get_client(temperature=TEXT_LAYER_TEMPERATURE, mode=instructor.Mode.JSON)
+    client = get_client(mode=instructor.Mode.JSON)
     try:
         response = client.chat.completions.create(
             model=TEXT_MODEL,

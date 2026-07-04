@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS documents (
     user_id INTEGER NOT NULL REFERENCES users(id),
     doc_type TEXT CHECK(doc_type IN ('analysis','doctor_report','certificate','unknown')),
     source_path TEXT NOT NULL,
+    file_sha256 TEXT,
     raw_text TEXT,
     status TEXT NOT NULL DEFAULT 'received'
         CHECK(status IN ('received','processing','recognizing','normalizing','extracted','failed')),

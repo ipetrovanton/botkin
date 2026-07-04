@@ -24,7 +24,8 @@ from botkin.normalize.analytes import (
 from botkin.normalize.analytes import load_default as load_analytes
 from botkin.normalize.units import canonical_unit
 from botkin.pipeline.notifications import (
-    classify_failed, document_processed, extract_failed, notify_user, pipeline_failed,
+    classify_failed, document_processed, duplicate_document, extract_failed,
+    notify_user, pipeline_failed,
 )
 
 log = logging.getLogger("botkin.pipeline")
@@ -121,6 +122,15 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
             await notify_user(telegram_user_id, extract_failed(document_id))
             return
 
+    # 3.5. Дедупликация: повторная загрузка того же документа схлопывается
+    # до одного экземпляра с наиболее достоверными данными (см. dedupe_document).
+    with get_conn() as conn:
+        survived = dedupe_document(conn, document_id, user_id)
+    if not survived:
+        log.info("Doc %d: дубликат — оставлены прежние данные", document_id)
+        await notify_user(telegram_user_id, duplicate_document(document_id))
+        return
+
     # 4. Финал
     with get_conn() as conn:
         DocumentRepo(conn, user_id).set_status(document_id, "extracted")
@@ -175,6 +185,38 @@ _EXTRACTORS = {
     "analysis": _extract_analysis,
     "doctor_report": _extract_doctor_report,
 }
+
+
+# Дедупликация
+
+def dedupe_document(conn, document_id: int, user_id: int) -> bool:
+    """Схлопывает повторную загрузку того же документа до одного экземпляра.
+
+    Правило достоверности (см. tests/test_dedupe.py): если новый прогон дал
+    столько же или больше записей — новые данные достовернее (старый документ
+    удаляется целиком); если меньше — новый прогон потерял строки, остаются
+    старые (удаляется новый). Возвращает True, если новый документ выжил.
+    Файл проигравшего удаляет вызывающий (source_path пишется в лог).
+    """
+    repo = DocumentRepo(conn, user_id)
+    old_id = repo.find_duplicate_of(document_id)
+    if old_id is None:
+        return True
+    new_count = repo.extracted_rows_count(document_id)
+    old_count = repo.extracted_rows_count(old_id)
+    loser_id, winner_id = (
+        (old_id, document_id) if new_count >= old_count else (document_id, old_id)
+    )
+    winner = repo.get(winner_id)
+    loser_path = repo.delete(loser_id)
+    log.info(
+        "[DEDUPE] Doc %d дублирует doc %d | строк: new=%d old=%d | удалён doc %d (%s)",
+        document_id, old_id, new_count, old_count, loser_id, loser_path,
+    )
+    # Файл проигравшего удаляем, только если победитель ссылается на другой файл.
+    if loser_path and (not winner or winner["source_path"] != loser_path):
+        Path(loser_path).unlink(missing_ok=True)
+    return loser_id == old_id
 
 
 # Хелперы

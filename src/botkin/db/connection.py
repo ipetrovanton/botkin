@@ -13,6 +13,7 @@ SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 # Колонки, добавляемые поверх существующих таблиц (идемпотентно).
 _MIGRATIONS: dict[str, dict[str, str]] = {
     "documents": {
+        "file_sha256": "TEXT",
         "raw_extraction": "TEXT",
         "title": "TEXT",
         "clinic": "TEXT",
@@ -110,6 +111,11 @@ def init_db() -> None:
 def get_conn() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(str(DB_PATH), isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # Переопределяем встроенную LOWER на Python-variant: SQLite без ICU не опускает
+    # регистр для non-ASCII (кириллица). str.lower() — суперсет ASCII-lower, поэтому
+    # существующие запросы на латинице продолжат работать, а поиск по кириллице
+    # (search-фильтр кабинета, dynamics) станет регистронезависимым.
+    conn.create_function("lower", 1, lambda s: s.lower() if isinstance(s, str) else s)
     try:
         yield conn
     finally:

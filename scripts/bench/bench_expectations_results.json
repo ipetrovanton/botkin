@@ -1,0 +1,965 @@
+[
+  {
+    "model": "qwen3-vl:8b-instruct",
+    "docs": [
+      {
+        "name": "sample_001.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 11.7,
+        "total_s": 11.7,
+        "matched": 3,
+        "expected": 3
+      },
+      {
+        "name": "sample_002.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 14.9,
+        "total_s": 14.9,
+        "matched": 6,
+        "expected": 6
+      },
+      {
+        "name": "sample_003.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 28.0,
+        "total_s": 28.0,
+        "matched": 11,
+        "expected": 11
+      },
+      {
+        "name": "sample_004.pdf",
+        "status": "PASS",
+        "classify_s": 6.7,
+        "extract_s": 17.1,
+        "total_s": 23.8,
+        "matched": 1,
+        "expected": 1
+      },
+      {
+        "name": "sample_005.pdf",
+        "status": "PASS",
+        "classify_s": 6.0,
+        "extract_s": 13.0,
+        "total_s": 19.0,
+        "matched": 1,
+        "expected": 1
+      },
+      {
+        "name": "sample_006.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 72.1,
+        "total_s": 72.1,
+        "matched": 20,
+        "expected": 20
+      },
+      {
+        "name": "sample_007.pdf",
+        "status": "PASS",
+        "classify_s": 4.4,
+        "extract_s": 22.8,
+        "total_s": 27.2,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_008.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 33.1,
+        "total_s": 33.1,
+        "matched": 24,
+        "expected": 24
+      },
+      {
+        "name": "sample_009.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 91.0,
+        "total_s": 91.0,
+        "matched": 27,
+        "expected": 27
+      },
+      {
+        "name": "sample_010.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 34.8,
+        "total_s": 34.8,
+        "matched": 4,
+        "expected": 4
+      },
+      {
+        "name": "sample_011.pdf",
+        "status": "PASS",
+        "classify_s": 6.1,
+        "extract_s": 70.2,
+        "total_s": 76.3,
+        "matched": 20,
+        "expected": 20
+      },
+      {
+        "name": "sample_012.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 99.7,
+        "total_s": 99.7,
+        "matched": 47,
+        "expected": 47
+      },
+      {
+        "name": "sample_013.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 72.7,
+        "total_s": 72.7,
+        "matched": 36,
+        "expected": 36
+      },
+      {
+        "name": "sample_014.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 24.6,
+        "total_s": 24.7,
+        "matched": 13,
+        "expected": 13
+      },
+      {
+        "name": "sample_015.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 4.2,
+        "total_s": 4.2,
+        "matched": 2,
+        "expected": 2
+      },
+      {
+        "name": "sample_016.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 69.3,
+        "total_s": 69.3,
+        "matched": 63,
+        "expected": 63
+      },
+      {
+        "name": "sample_017.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 2.9,
+        "total_s": 2.9,
+        "matched": 1,
+        "expected": 1
+      },
+      {
+        "name": "sample_018.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 9.1,
+        "total_s": 9.1,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_019.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 57.2,
+        "total_s": 57.3,
+        "matched": 25,
+        "expected": 25
+      },
+      {
+        "name": "sample_020.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 30.2,
+        "total_s": 30.2,
+        "matched": 21,
+        "expected": 21
+      },
+      {
+        "name": "sample_021.jpg",
+        "status": "PASS",
+        "classify_s": 4.0,
+        "extract_s": 0.0,
+        "total_s": 4.0,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_022.jpg",
+        "status": "PASS",
+        "classify_s": 3.9,
+        "extract_s": 0.0,
+        "total_s": 3.9,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_023.jpg",
+        "status": "PASS",
+        "classify_s": 4.2,
+        "extract_s": 0.0,
+        "total_s": 4.2,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_024.jpg",
+        "status": "PASS",
+        "classify_s": 3.7,
+        "extract_s": 0.0,
+        "total_s": 3.7,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_025.jpg",
+        "status": "PASS",
+        "classify_s": 3.6,
+        "extract_s": 0.0,
+        "total_s": 3.6,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_027.jpg",
+        "status": "PASS",
+        "classify_s": 4.5,
+        "extract_s": 0.0,
+        "total_s": 4.5,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_028.jpg",
+        "status": "PASS",
+        "classify_s": 4.1,
+        "extract_s": 0.0,
+        "total_s": 4.1,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_029.jpg",
+        "status": "PASS",
+        "classify_s": 4.8,
+        "extract_s": 0.0,
+        "total_s": 4.8,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_030.jpg",
+        "status": "PASS",
+        "classify_s": 4.3,
+        "extract_s": 0.0,
+        "total_s": 4.3,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_031.jpg",
+        "status": "PASS",
+        "classify_s": 4.9,
+        "extract_s": 0.0,
+        "total_s": 4.9,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_032.jpg",
+        "status": "PASS",
+        "classify_s": 4.6,
+        "extract_s": 0.0,
+        "total_s": 4.6,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_033.jpg",
+        "status": "PASS",
+        "classify_s": 5.1,
+        "extract_s": 0.0,
+        "total_s": 5.1,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_034.jpg",
+        "status": "PASS",
+        "classify_s": 4.4,
+        "extract_s": 0.0,
+        "total_s": 4.4,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_035.jpg",
+        "status": "PASS",
+        "classify_s": 4.3,
+        "extract_s": 0.0,
+        "total_s": 4.3,
+        "matched": 0,
+        "expected": 0
+      }
+    ],
+    "total_classify_s": 83.6,
+    "total_extract_s": 778.6000000000001,
+    "total_s": 862.4000000000001,
+    "passed": 34,
+    "failed": 0,
+    "skipped": 0,
+    "total_matched": 325,
+    "total_expected": 325,
+    "error": null,
+    "wall_s": 880.9096395000233
+  },
+  {
+    "model": "qwen3.5:9b",
+    "docs": [
+      {
+        "name": "sample_001.pdf",
+        "status": "FAIL",
+        "classify_s": 0.0,
+        "extract_s": 93.9,
+        "total_s": 93.9,
+        "matched": 2,
+        "expected": 3
+      },
+      {
+        "name": "sample_002.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 94.2,
+        "total_s": 94.2,
+        "matched": 6,
+        "expected": 6
+      },
+      {
+        "name": "sample_003.pdf",
+        "status": "FAIL",
+        "classify_s": 0.0,
+        "extract_s": 187.5,
+        "total_s": 187.5,
+        "matched": 6,
+        "expected": 11
+      },
+      {
+        "name": "sample_004.pdf",
+        "status": "PASS",
+        "classify_s": 8.7,
+        "extract_s": 115.4,
+        "total_s": 124.2,
+        "matched": 1,
+        "expected": 1
+      },
+      {
+        "name": "sample_005.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 0.0,
+        "total_s": 0.0,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_006.pdf",
+        "status": "FAIL",
+        "classify_s": 0.0,
+        "extract_s": 537.7,
+        "total_s": 537.7,
+        "matched": 0,
+        "expected": 20
+      },
+      {
+        "name": "sample_007.pdf",
+        "status": "PASS",
+        "classify_s": 20.9,
+        "extract_s": 302.2,
+        "total_s": 323.1,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_008.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 92.2,
+        "total_s": 92.3,
+        "matched": 24,
+        "expected": 24
+      },
+      {
+        "name": "sample_009.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 189.5,
+        "total_s": 189.5,
+        "matched": 27,
+        "expected": 27
+      },
+      {
+        "name": "sample_010.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 190.0,
+        "total_s": 190.0,
+        "matched": 4,
+        "expected": 4
+      },
+      {
+        "name": "sample_011.pdf",
+        "status": "FAIL",
+        "classify_s": 15.2,
+        "extract_s": 201.2,
+        "total_s": 216.4,
+        "matched": 0,
+        "expected": 20
+      },
+      {
+        "name": "sample_012.pdf",
+        "status": "FAIL",
+        "classify_s": 0.0,
+        "extract_s": 459.9,
+        "total_s": 459.9,
+        "matched": 44,
+        "expected": 47
+      },
+      {
+        "name": "sample_013.pdf",
+        "status": "FAIL",
+        "classify_s": 0.0,
+        "extract_s": 225.0,
+        "total_s": 225.0,
+        "matched": 35,
+        "expected": 36
+      },
+      {
+        "name": "sample_014.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 184.0,
+        "total_s": 184.0,
+        "matched": 13,
+        "expected": 13
+      },
+      {
+        "name": "sample_015.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 111.6,
+        "total_s": 111.6,
+        "matched": 2,
+        "expected": 2
+      },
+      {
+        "name": "sample_016.pdf",
+        "status": "FAIL",
+        "classify_s": 0.0,
+        "extract_s": 483.0,
+        "total_s": 483.0,
+        "matched": 31,
+        "expected": 63
+      },
+      {
+        "name": "sample_017.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 18.2,
+        "total_s": 18.2,
+        "matched": 1,
+        "expected": 1
+      },
+      {
+        "name": "sample_018.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 123.5,
+        "total_s": 123.5,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_019.pdf",
+        "status": "FAIL",
+        "classify_s": 0.0,
+        "extract_s": 184.4,
+        "total_s": 184.5,
+        "matched": 23,
+        "expected": 25
+      },
+      {
+        "name": "sample_020.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 184.6,
+        "total_s": 184.6,
+        "matched": 21,
+        "expected": 21
+      },
+      {
+        "name": "sample_021.jpg",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 0.0,
+        "total_s": 0.0,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_022.jpg",
+        "status": "PASS",
+        "classify_s": 16.2,
+        "extract_s": 0.0,
+        "total_s": 16.2,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_023.jpg",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 0.0,
+        "total_s": 0.0,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_024.jpg",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 0.0,
+        "total_s": 0.0,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_025.jpg",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 0.0,
+        "total_s": 0.0,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_027.jpg",
+        "status": "PASS",
+        "classify_s": 76.4,
+        "extract_s": 0.0,
+        "total_s": 76.4,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_028.jpg",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 0.0,
+        "total_s": 0.0,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_029.jpg",
+        "status": "PASS",
+        "classify_s": 61.9,
+        "extract_s": 0.0,
+        "total_s": 61.9,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_030.jpg",
+        "status": "PASS",
+        "classify_s": 19.9,
+        "extract_s": 0.0,
+        "total_s": 19.9,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_031.jpg",
+        "status": "PASS",
+        "classify_s": 17.1,
+        "extract_s": 0.0,
+        "total_s": 17.1,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_032.jpg",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 0.0,
+        "total_s": 0.0,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_033.jpg",
+        "status": "PASS",
+        "classify_s": 19.8,
+        "extract_s": 0.0,
+        "total_s": 19.8,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_034.jpg",
+        "status": "PASS",
+        "classify_s": 29.6,
+        "extract_s": 0.0,
+        "total_s": 29.6,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_035.jpg",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 0.0,
+        "total_s": 0.0,
+        "matched": 0,
+        "expected": 0
+      }
+    ],
+    "total_classify_s": 285.70000000000005,
+    "total_extract_s": 3978.0,
+    "total_s": 4263.999999999999,
+    "passed": 26,
+    "failed": 8,
+    "skipped": 0,
+    "total_matched": 240,
+    "total_expected": 324,
+    "error": null,
+    "wall_s": 5106.821005299978
+  },
+  {
+    "model": "haervwe/GLM-4.6V-Flash-9B",
+    "docs": [
+      {
+        "name": "sample_001.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 87.5,
+        "total_s": 87.5,
+        "matched": 3,
+        "expected": 3
+      },
+      {
+        "name": "sample_002.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 63.6,
+        "total_s": 63.6,
+        "matched": 6,
+        "expected": 6
+      },
+      {
+        "name": "sample_003.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 132.6,
+        "total_s": 132.6,
+        "matched": 11,
+        "expected": 11
+      },
+      {
+        "name": "sample_004.pdf",
+        "status": "PASS",
+        "classify_s": 17.4,
+        "extract_s": 52.3,
+        "total_s": 69.7,
+        "matched": 1,
+        "expected": 1
+      },
+      {
+        "name": "sample_005.pdf",
+        "status": "PASS",
+        "classify_s": 18.1,
+        "extract_s": 53.0,
+        "total_s": 71.1,
+        "matched": 1,
+        "expected": 1
+      },
+      {
+        "name": "sample_006.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 235.4,
+        "total_s": 235.4,
+        "matched": 20,
+        "expected": 20
+      },
+      {
+        "name": "sample_007.pdf",
+        "status": "PASS",
+        "classify_s": 15.7,
+        "extract_s": 57.8,
+        "total_s": 73.5,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_008.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 79.7,
+        "total_s": 79.7,
+        "matched": 24,
+        "expected": 24
+      },
+      {
+        "name": "sample_009.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 194.7,
+        "total_s": 194.7,
+        "matched": 27,
+        "expected": 27
+      },
+      {
+        "name": "sample_010.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 134.2,
+        "total_s": 134.2,
+        "matched": 4,
+        "expected": 4
+      },
+      {
+        "name": "sample_011.pdf",
+        "status": "FAIL",
+        "classify_s": 9.8,
+        "extract_s": 118.7,
+        "total_s": 128.6,
+        "matched": 19,
+        "expected": 20
+      },
+      {
+        "name": "sample_012.pdf",
+        "status": "FAIL",
+        "classify_s": 0.0,
+        "extract_s": 413.9,
+        "total_s": 414.0,
+        "matched": 45,
+        "expected": 47
+      },
+      {
+        "name": "sample_013.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 256.9,
+        "total_s": 256.9,
+        "matched": 36,
+        "expected": 36
+      },
+      {
+        "name": "sample_014.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 111.7,
+        "total_s": 111.7,
+        "matched": 13,
+        "expected": 13
+      },
+      {
+        "name": "sample_015.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 72.9,
+        "total_s": 72.9,
+        "matched": 2,
+        "expected": 2
+      },
+      {
+        "name": "sample_016.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 458.8,
+        "total_s": 458.8,
+        "matched": 63,
+        "expected": 63
+      },
+      {
+        "name": "sample_017.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 33.3,
+        "total_s": 33.3,
+        "matched": 1,
+        "expected": 1
+      },
+      {
+        "name": "sample_018.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 184.6,
+        "total_s": 184.6,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_019.pdf",
+        "status": "FAIL",
+        "classify_s": 0.0,
+        "extract_s": 198.9,
+        "total_s": 198.9,
+        "matched": 23,
+        "expected": 25
+      },
+      {
+        "name": "sample_020.pdf",
+        "status": "PASS",
+        "classify_s": 0.0,
+        "extract_s": 140.0,
+        "total_s": 140.0,
+        "matched": 21,
+        "expected": 21
+      },
+      {
+        "name": "sample_021.jpg",
+        "status": "PASS",
+        "classify_s": 16.0,
+        "extract_s": 0.0,
+        "total_s": 16.0,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_022.jpg",
+        "status": "PASS",
+        "classify_s": 6.1,
+        "extract_s": 0.0,
+        "total_s": 6.1,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_023.jpg",
+        "status": "PASS",
+        "classify_s": 19.0,
+        "extract_s": 0.0,
+        "total_s": 19.0,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_024.jpg",
+        "status": "PASS",
+        "classify_s": 24.6,
+        "extract_s": 0.0,
+        "total_s": 24.6,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_025.jpg",
+        "status": "PASS",
+        "classify_s": 7.6,
+        "extract_s": 0.0,
+        "total_s": 7.6,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_027.jpg",
+        "status": "PASS",
+        "classify_s": 17.3,
+        "extract_s": 0.0,
+        "total_s": 17.3,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_028.jpg",
+        "status": "PASS",
+        "classify_s": 14.1,
+        "extract_s": 0.0,
+        "total_s": 14.1,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_029.jpg",
+        "status": "PASS",
+        "classify_s": 15.9,
+        "extract_s": 0.0,
+        "total_s": 15.9,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_030.jpg",
+        "status": "PASS",
+        "classify_s": 9.6,
+        "extract_s": 0.0,
+        "total_s": 9.6,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_031.jpg",
+        "status": "PASS",
+        "classify_s": 10.1,
+        "extract_s": 0.0,
+        "total_s": 10.1,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_032.jpg",
+        "status": "PASS",
+        "classify_s": 10.6,
+        "extract_s": 0.0,
+        "total_s": 10.6,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_033.jpg",
+        "status": "PASS",
+        "classify_s": 11.4,
+        "extract_s": 0.0,
+        "total_s": 11.4,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_034.jpg",
+        "status": "PASS",
+        "classify_s": 15.2,
+        "extract_s": 0.0,
+        "total_s": 15.2,
+        "matched": 0,
+        "expected": 0
+      },
+      {
+        "name": "sample_035.jpg",
+        "status": "PASS",
+        "classify_s": 13.1,
+        "extract_s": 0.0,
+        "total_s": 13.1,
+        "matched": 0,
+        "expected": 0
+      }
+    ],
+    "total_classify_s": 251.59999999999997,
+    "total_extract_s": 3080.5000000000005,
+    "total_s": 3332.2999999999997,
+    "passed": 31,
+    "failed": 3,
+    "skipped": 0,
+    "total_matched": 320,
+    "total_expected": 325,
+    "error": null,
+    "wall_s": 3411.90293760004
+  }
+]

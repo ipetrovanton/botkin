@@ -88,6 +88,11 @@ def build_extra_body(
     body: dict = {"options": options or default_options()}
     if use_format:
         body["format"] = response_model.model_json_schema()
+    # Qwen3.5+ имеет thinking mode включённый по умолчанию; для vision/OCR задач
+    # весь вывод уходит в thinking field, content остаётся пустым (ollama/ollama#14502).
+    # Отключаем через chat_template_kwargs, когда env VLM_DISABLE_THINKING=1.
+    if os.getenv("VLM_DISABLE_THINKING", "").lower() in ("1", "true", "yes", "on"):
+        body["chat_template_kwargs"] = {"enable_thinking": False}
     return body
 
 
@@ -153,7 +158,8 @@ def get_raw_client(timeout: float | None = None) -> OpenAI:
     )
 
 
-def get_client(temperature: float = 0.1, mode: instructor.Mode = instructor.Mode.JSON):
+def get_client(mode: instructor.Mode = instructor.Mode.JSON):
+    # Температура задаётся per-request через extra_body/options, не при создании клиента.
     return instructor.from_openai(get_raw_client(), mode=mode)
 
 

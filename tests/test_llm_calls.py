@@ -402,3 +402,51 @@ def test_run_analysis_singlepage_no_backfill(tmp_path):
 
     assert len(items) == 1 and items[0].analyte_name == "Глюкоза"
     assert calls == [1]                            # ровно один вызов, без добора
+
+
+def test_classify_sends_configured_temperature(tmp_path):
+    """CLASSIFY_TEMPERATURE из конфига доезжает до Ollama-вызова классификации.
+
+    Раньше температура передавалась в мёртвый параметр get_client(temperature=...),
+    который игнорировался, — классификация шла на дефолтной температуре Ollama,
+    и растровые бланки (Тонус, sample_011) флуктуировали между типами.
+    """
+    from botkin.config import CLASSIFY_TEMPERATURE
+    from botkin.llm import classify
+
+    resp = MagicMock()
+    resp.doc_type = "analysis"
+    resp.confidence = 0.9
+    resp.title = None
+    resp.clinic = None
+    resp._raw_response.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+    fake = MagicMock()
+    fake.chat.completions.create.return_value = resp
+
+    with patch("botkin.llm.classify.get_client", return_value=fake), \
+         patch("botkin.llm.classify.prepare_images", return_value=[b"\xff\xd8fakejpeg"]):
+        classify.run_vlm(_tiny_pdf(tmp_path))
+
+    _, kwargs = fake.chat.completions.create.call_args
+    assert kwargs["extra_body"]["options"]["temperature"] == CLASSIFY_TEMPERATURE
+
+
+def test_extract_sends_configured_vlm_temperature(tmp_path):
+    """VLM_TEMPERATURE из конфига доезжает до VLM-вызова извлечения (не хардкод)."""
+    from botkin.config import VLM_TEMPERATURE
+    from botkin.llm import extract
+    from botkin.llm.extract import RawAnalysis
+
+    raw = RawAnalysis.model_validate({
+        "results": [{"parameter": "Гемоглобин", "value": "145", "unit": "г/л"}]})
+    object.__setattr__(raw, "_raw_response",
+                       MagicMock(usage=MagicMock(prompt_tokens=1, completion_tokens=1)))
+    fake = MagicMock()
+    fake.chat.completions.create.return_value = raw
+
+    with patch("botkin.llm.extract.get_client", return_value=fake), \
+         patch("botkin.llm.extract.prepare_images", return_value=[b"\xff\xd8fakejpeg"]):
+        extract.run_analysis(_tiny_pdf(tmp_path))
+
+    _, kwargs = fake.chat.completions.create.call_args
+    assert kwargs["extra_body"]["options"]["temperature"] == VLM_TEMPERATURE

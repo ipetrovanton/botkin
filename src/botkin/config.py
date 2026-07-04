@@ -76,7 +76,6 @@ _DEFAULTS: dict = {
         "sqlite_path": "./data/botkin.db",
     },
     "bot": {
-        "polling_timeout": 30,
         "api_url": "http://localhost:8000",
     },
     "upload": {
@@ -261,13 +260,17 @@ ANALYTE_SHORT_KEY_LEN = setting("analytes.short_key_len", "ANALYTE_SHORT_KEY_LEN
 SQLITE_PATH = str(_resolve_path(os.getenv("SQLITE_PATH", _get("database.sqlite_path"))))
 
 # Telegram бот
-BOT_POLLING_TIMEOUT = setting("bot.polling_timeout", "BOT_POLLING_TIMEOUT", int)
 # Историческое имя env — API_URL (не BOT_API_URL), сохраняем для совместимости.
 BOT_API_URL = setting("bot.api_url", "API_URL", str)
 # Потолок поллинга прогресса документа в боте. Увязан с потолком обработки на бэкенде:
 # classify + общий extract + добор страниц, каждый VLM-вызов ограничен VLM_REQUEST_TIMEOUT.
 # Иначе бот сдаётся раньше, чем бэкенд закончит (см. инцидент с D3).
 BOT_PROGRESS_TIMEOUT = float(os.getenv("BOT_PROGRESS_TIMEOUT", str(30 + 3 * VLM_REQUEST_TIMEOUT)))
+
+# Веб-кабинет: дебаг-вход без заголовка X-Telegram-User-Id.
+# Если задан (> 0) и заголовок отсутствует — API работает от имени этого
+# telegram_user_id. ТОЛЬКО для локального запуска/дебага; в проде не задавать.
+WEB_DEBUG_USER_ID = int(os.getenv("WEB_DEBUG_USER_ID", "0") or 0)
 
 # Загрузка файлов
 UPLOAD_MAX_BYTES = setting("upload.max_bytes", "UPLOAD_MAX_BYTES", int)

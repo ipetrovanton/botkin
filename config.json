@@ -32,7 +32,7 @@
     "lowres_warn": 1500
   },
   "database": { "sqlite_path": "./data/botkin.db" },
-  "bot": { "polling_timeout": 30, "api_url": "http://localhost:8000" },
+  "bot": { "api_url": "http://localhost:8000" },
   "upload": {
     "max_bytes": 20971520,
     "allowed_extensions": [".pdf", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"],

@@ -58,6 +58,13 @@ def pipeline_failed(document_id: int) -> str:
     )
 
 
+def duplicate_document(document_id: int) -> str:
+    return (
+        f"♻️ <b>Документ #{document_id} уже был загружен ранее</b>.\n"
+        f"Сохранены наиболее полные данные — дубликат не создан."
+    )
+
+
 def document_processed(document_id: int, doc_type: str) -> str:
     label = DOC_TYPE_LABELS.get(doc_type, "Документ 📄")
     return (
