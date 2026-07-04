@@ -92,6 +92,19 @@ _DEFAULTS: dict = {
         "ratio_floor": 75,
         "short_key_len": 3,
     },
+    "rag": {
+        "embed_model": "bge-m3",
+        "embed_batch": 64,
+        "top_k": 8,
+        "recommend_model": "qwen3:8b",
+        "recommend_num_ctx": 8192,
+        "recommend_num_predict": 2048,
+    },
+    "health": {
+        "tokens_dir": "./data/health_tokens",
+        "sync_days": 30,
+        "request_pause": 0.5,
+    },
 }
 
 
@@ -279,3 +292,21 @@ UPLOAD_SOURCES_DIR = _resolve_path(os.getenv("SOURCES_DIR", _get("upload.sources
 
 # Задержка перед push-fallback доставки финала (> таймаута поллинга бота 120с).
 DELIVERY_FALLBACK_DELAY = float(os.getenv("DELIVERY_FALLBACK_DELAY", "130"))
+
+# RAG: эмбеддинги (bge-m3 через Ollama /api/embed, 1024-dim) и векторный поиск.
+RAG_EMBED_MODEL = setting("rag.embed_model", "RAG_EMBED_MODEL", str)
+RAG_EMBED_BATCH = setting("rag.embed_batch", "RAG_EMBED_BATCH", int)
+RAG_TOP_K = setting("rag.top_k", "RAG_TOP_K", int)
+# Text-only модель для генерации рекомендаций с RAG-контекстом.
+RAG_RECOMMEND_MODEL = setting("rag.recommend_model", "RAG_RECOMMEND_MODEL", str)
+RAG_RECOMMEND_NUM_CTX = setting("rag.recommend_num_ctx", "RAG_RECOMMEND_NUM_CTX", int)
+RAG_RECOMMEND_NUM_PREDICT = setting("rag.recommend_num_predict", "RAG_RECOMMEND_NUM_PREDICT", int)
+
+# Health-sync: каталог OAuth-токенов (вне git), глубина первичной синхронизации (дней)
+# и пауза между запросами к провайдеру (бережём rate limit Garmin).
+HEALTH_TOKENS_DIR = _resolve_path(os.getenv("HEALTH_TOKENS_DIR", _get("health.tokens_dir")))
+HEALTH_SYNC_DAYS = setting("health.sync_days", "HEALTH_SYNC_DAYS", int)
+HEALTH_REQUEST_PAUSE = setting("health.request_pause", "HEALTH_REQUEST_PAUSE", float)
+# Strava OAuth (опционально): без client_id/secret подключение Strava отключено.
+STRAVA_CLIENT_ID = os.getenv("STRAVA_CLIENT_ID", "")
+STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET", "")

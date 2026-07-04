@@ -12,6 +12,25 @@ const TYPE_LABELS = {
   certificate: "Справка",
   unknown: "Документ",
 };
+const METRIC_LABELS = {
+  heart_rate: "Пульс",
+  resting_heart_rate: "Пульс покоя",
+  blood_pressure_systolic: "Давление (систолич.)",
+  blood_pressure_diastolic: "Давление (диастолич.)",
+  bp_pulse: "Пульс при измерении АД",
+  steps: "Шаги",
+  steps_interval: "Шаги (интервалы)",
+  sleep_seconds: "Сон",
+  stress_avg: "Стресс (средний)",
+  body_battery_max: "Body Battery (макс)",
+  hrv_last_night: "HRV за ночь",
+  hrv_sdnn: "HRV (SDNN)",
+  spo2: "SpO2",
+  spo2_avg: "SpO2 (среднее)",
+  weight_kg: "Вес",
+};
+const PROVIDER_LABELS = { garmin: "Garmin Connect", strava: "Strava", apple_health: "Apple Health" };
+
 const STATUS_LABELS = {
   received: "Принят",
   processing: "В обработке",
@@ -68,6 +87,16 @@ function cabinet() {
     selMode: false,
     selected: [],
 
+    // Здоровье (Garmin/Strava/Apple Health) и ассистент
+    health: {
+      accounts: [], stravaConfigured: false, metrics: [], stats: {},
+      activities: [], series: { metric: "", unit: "", points: [] },
+      picked: "", syncState: { state: "idle" },
+      garminEmail: "", garminPassword: "", connecting: false,
+    },
+    assistant: { question: "", answer: "", chunks: [], busy: false },
+    ragIndex: { chunks: {}, reindex: { state: "idle" } },
+
     // UI-состояние
     loading: { stats: false, docs: false, doc: false, reports: false, dynamics: false },
     toasts: [],
@@ -118,6 +147,7 @@ function cabinet() {
       if (s === "documents") this.loadDocs();
       else if (s === "reports") this.loadReports();
       else if (s === "overview") this.loadStats();
+      else if (s === "health") this.loadHealth();
       if (s !== "documents" && this.selMode) this.toggleSelMode();
     },
 
@@ -496,6 +526,176 @@ function cabinet() {
       return "";
     },
 
+    // ===== Здоровье (Garmin/Strava/Apple Health) =====
+    async loadHealth() {
+      try {
+        const [acc, met, act, rag] = await Promise.all([
+          this.api("/api/health/accounts"),
+          this.api("/api/health/metrics"),
+          this.api("/api/health/activities"),
+          this.api("/api/rag/status"),
+        ]);
+        this.health.accounts = acc?.items || [];
+        this.health.stravaConfigured = acc?.strava_configured || false;
+        this.health.metrics = met?.items || [];
+        this.health.stats = met?.stats || {};
+        this.health.activities = act?.items || [];
+        if (rag) this.ragIndex = rag;
+      } catch (e) { console.error("health", e); }
+    },
+    healthAccount(provider) {
+      return this.health.accounts.find((a) => a.provider === provider && a.status !== "disconnected");
+    },
+    async connectGarmin() {
+      const { garminEmail: email, garminPassword: password } = this.health;
+      if (!email || !password) { this.toast("Введите e-mail и пароль Garmin", "error"); return; }
+      this.health.connecting = true;
+      try {
+        const data = await this.api("/api/health/connect/garmin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        this.toast(`Garmin подключён: ${data?.full_name || email}`, "success");
+        this.health.garminPassword = ""; // пароль больше не нужен — живём на токенах
+        this.loadHealth();
+      } catch (e) { this.toast("Не удалось войти в Garmin", "error"); console.error(e); }
+      finally { this.health.connecting = false; }
+    },
+    async syncGarmin() {
+      try {
+        await this.api("/api/health/sync/garmin?days=30", { method: "POST" });
+        this.health.syncState = { state: "running", done: 0, total: 32 };
+        this.pollSync();
+      } catch (e) { this.toast("Не удалось запустить синхронизацию", "error"); console.error(e); }
+    },
+    async pollSync() {
+      try {
+        const st = await this.api("/api/health/sync/status");
+        this.health.syncState = st || { state: "idle" };
+        if (st?.state === "running") { setTimeout(() => this.pollSync(), 2500); return; }
+        if (st?.state === "done") {
+          this.toast(`Синхронизировано: ${st.metrics} метрик, ${st.activities} активностей`, "success");
+          this.loadHealth();
+        } else if (st?.state === "error") {
+          this.toast(`Синхронизация не удалась: ${st.error}`, "error");
+        }
+      } catch (e) { console.error(e); }
+    },
+    syncPct() {
+      const s = this.health.syncState;
+      return s.total ? Math.round((s.done / s.total) * 100) : 0;
+    },
+    async pickHealthMetric(metric) {
+      this.health.picked = metric;
+      try {
+        const data = await this.api(`/api/health/series?metric=${encodeURIComponent(metric)}&limit=1000`);
+        if (!data) { this.health.series = { metric, unit: "", points: [] }; return; }
+        // Внутрисуточные метрики (сотни точек в день) сворачиваем в дневные средние.
+        this.health.series = { ...data, points: dailyAverage(data.points) };
+        this.$nextTick(() => this.renderHealthChart());
+      } catch (e) { this.toast("Ошибка загрузки метрики", "error"); console.error(e); }
+    },
+    renderHealthChart() {
+      const wrap = this.$refs.healthChart;
+      const pts = this.health.series.points;
+      if (!wrap || !pts.length) return;
+      const isSleep = this.health.series.metric === "sleep_seconds";
+      const vals = pts.map((p) => isSleep ? p.value_num / 3600 : p.value_num);
+      const W = Math.max(320, Math.min(680, wrap.clientWidth));
+      const H = 260, padL = 48, padR = 16, padT = 16, padB = 36;
+      const innerW = W - padL - padR, innerH = H - padT - padB;
+      let lo = Math.min(...vals), hi = Math.max(...vals);
+      const span = hi - lo || 1; lo -= span * 0.1; hi += span * 0.1;
+      const x = (i) => padL + (pts.length === 1 ? innerW / 2 : (i / (pts.length - 1)) * innerW);
+      const y = (v) => padT + innerH - ((v - lo) / (hi - lo)) * innerH;
+      const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+      const cVal = css("--brand-1") || "#14B8A6";
+      const cText = css("--text-dim") || "#94A3B8";
+      const cGrid = css("--border") || "rgba(255,255,255,.08)";
+      const line = vals.map((v, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ");
+      const yTicks = [0, 1, 2, 3, 4].map((i) => {
+        const v = lo + (hi - lo) * i / 4, yy = y(v);
+        return `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="${cGrid}" stroke-dasharray="3 4"/>
+                <text x="${padL - 8}" y="${yy + 4}" text-anchor="end" font-size="11" fill="${cText}">${fmtNum(v)}</text>`;
+      }).join("");
+      const xTicks = pts.map((p, i) => {
+        if (pts.length > 8 && i % Math.ceil(pts.length / 6) !== 0 && i !== pts.length - 1) return "";
+        return `<text x="${x(i)}" y="${H - padB + 18}" text-anchor="middle" font-size="11" fill="${cText}">${escapeHtml(fmtDateShort(p.taken_at))}</text>`;
+      }).join("");
+      const dots = vals.map((v, i) =>
+        `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="4" fill="${cVal}" stroke="var(--surface)" stroke-width="2">
+           <title>${escapeHtml(fmtDateShort(pts[i].taken_at))}: ${fmtNum(v)}${isSleep ? " ч" : " " + escapeHtml(this.health.series.unit || "")}</title>
+         </circle>`).join("");
+      wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Динамика метрики">
+        ${yTicks}<path d="${line}" fill="none" stroke="${cVal}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>${dots}${xTicks}
+      </svg>`;
+    },
+    async uploadAppleExport(e) {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const fd = new FormData();
+      fd.append("file", file);
+      this.toast("Импорт экспорта Apple Health…", "info");
+      try {
+        const res = await fetch("/api/health/apple/import", {
+          method: "POST", headers: { "X-Telegram-User-Id": this.tgUserId }, body: fd,
+        });
+        if (!res.ok) throw new Error(`import ${res.status}`);
+        const data = await res.json();
+        this.toast(`Импортировано метрик: ${data.metrics}`, "success");
+        this.loadHealth();
+      } catch (err) { this.toast("Не удалось импортировать экспорт", "error"); console.error(err); }
+      finally { e.target.value = ""; }
+    },
+    metricLabel(m) { return METRIC_LABELS[m] || m; },
+    providerLabel(p) { return PROVIDER_LABELS[p] || p; },
+    fmtMetricValue(p) {
+      if (this.health.series.metric === "sleep_seconds") return `${fmtNum(p.value_num / 3600)} ч`;
+      return `${fmtNum(p.value_num)} ${this.health.series.unit || ""}`;
+    },
+    fmtDuration(s) {
+      if (s == null) return "—";
+      const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+      return h ? `${h} ч ${m} мин` : `${m} мин`;
+    },
+
+    // ===== Ассистент (RAG) =====
+    async askAssistant() {
+      const q = this.assistant.question.trim();
+      if (q.length < 3) { this.toast("Сформулируйте вопрос", "error"); return; }
+      this.assistant.busy = true;
+      this.assistant.answer = "";
+      try {
+        const data = await this.api("/api/rag/recommend", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: q }),
+        });
+        this.assistant.answer = data?.answer || "Ответ пуст.";
+        this.assistant.chunks = data?.chunks || [];
+      } catch (e) { this.toast("Ассистент недоступен (проверьте Ollama)", "error"); console.error(e); }
+      finally { this.assistant.busy = false; }
+    },
+    async ragReindex() {
+      try {
+        await this.api("/api/rag/reindex", { method: "POST" });
+        this.toast("Индексация справочников запущена (займёт несколько минут)", "info");
+        this.pollRag();
+      } catch (e) { this.toast("Не удалось запустить индексацию", "error"); console.error(e); }
+    },
+    async pollRag() {
+      try {
+        const st = await this.api("/api/rag/status");
+        if (st) this.ragIndex = st;
+        if (st?.reindex?.state === "running") setTimeout(() => this.pollRag(), 5000);
+        else if (st?.reindex?.state === "done") this.toast("Справочники проиндексированы", "success");
+      } catch (e) { console.error(e); }
+    },
+    ragTotalChunks() {
+      return Object.values(this.ragIndex.chunks || {}).reduce((a, b) => a + b, 0);
+    },
+
     // ===== Форматтеры =====
     typeLabel(t) { return TYPE_LABELS[t] || "Документ"; },
     statusLabel(s) { return STATUS_LABELS[s] || s; },
@@ -548,6 +748,22 @@ function escapeHtml(v) {
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]
   ));
 }
+// Свёртка внутрисуточных точек в дневные средние: график месяца из 20 000 точек
+// пульса нечитаем, а тренд виден по дневным значениям.
+function dailyAverage(points) {
+  const byDay = new Map();
+  for (const p of points) {
+    const day = String(p.taken_at).slice(0, 10);
+    const acc = byDay.get(day) || { sum: 0, n: 0 };
+    acc.sum += p.value_num; acc.n += 1;
+    byDay.set(day, acc);
+  }
+  if (byDay.size === points.length) return points; // уже дневные
+  return [...byDay.entries()].map(([day, a]) => ({
+    taken_at: day, value_num: Math.round((a.sum / a.n) * 10) / 10,
+  }));
+}
+
 function fmtNum(v) {
   if (v == null) return "—";
   return Number.isInteger(v) ? String(v) : Number(v).toLocaleString("ru-RU", { maximumFractionDigits: 3 });

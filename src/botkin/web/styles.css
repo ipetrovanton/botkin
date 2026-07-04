@@ -467,6 +467,7 @@ body {
   transition: border-color var(--dur), background var(--dur), color var(--dur);
 }
 .chip:hover { border-color: var(--brand-1); color: var(--brand-1); background: var(--brand-soft); }
+.chip.active { border-color: var(--brand-1); color: var(--brand-1); background: var(--brand-soft); }
 
 .chart-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .chart-wrap svg { width: 100%; height: auto; display: block; min-width: 320px; }
@@ -502,7 +503,7 @@ body {
 /* ===== Навигация (снизу на мобильных, рельса слева на десктопе) ===== */
 .bottom-nav {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
-  display: grid; grid-template-columns: repeat(5, 1fr); align-items: center;
+  display: grid; grid-template-columns: repeat(6, 1fr); align-items: center;
   background: var(--nav-bg);
   backdrop-filter: saturate(180%) blur(14px); -webkit-backdrop-filter: saturate(180%) blur(14px);
   border-top: 1px solid var(--border);
