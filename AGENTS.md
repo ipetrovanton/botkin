@@ -315,3 +315,55 @@ ollama ps
 - **Разделить text-only и VLM модели**: для `_structure_text` (координатные строки → JSON) использовать лёгкий text-only LLM (например, `qwen3:8b` или `huihui_ai/qwen3-abliterated:8b`), освободив vision-модель для картинок. Это потребует отдельного `TEXT_MODEL` конфига и fallback-механики.
 - **Параллельная обработка страниц**: если страницы независимы, можно запускать несколько VLM-запросов параллельно (`OLLAMA_NUM_PARALLEL` + `asyncio.gather`), но это увеличивает пиковое потребление VRAM и требует аккуратного дедупа.
 - **Профилирование**: запустить `nvidia-smi dmon` и `ollama ps` в отдельных терминалах во время обработки одного документа, чтобы увидеть, на каких этапах GPU падает в 0%.
+
+---
+
+## 9. RAG (справочники + health) и синхронизация Garmin/Strava/Apple Health
+
+### Архитектура
+
+- **RAG** (`src/botkin/rag/`): эмбеддинги — `bge-m3` через Ollama `/api/embed` (1024-dim);
+  вектора — sqlite-vec (vec0-таблица `rag_vectors`) в основной `data/botkin.db`, чанки —
+  таблица `rag_chunks`. Индексируются: справочник ГРЛС (20 948 лекарств), ФСЛИ (5 924 анализа)
+  и недельные сводки health-метрик пациента. Ассистент (`rag/recommend.py`) отвечает моделью
+  `qwen3:8b` с контекстом из отклонений анализов, назначенных лекарств, health-агрегатов и
+  RAG-выдачи; промпт запрещает назначать лечение.
+- **Health-sync** (`src/botkin/health/`): Garmin — неофициальная библиотека `garminconnect`
+  (логин по паролю ОДИН раз при подключении, дальше OAuth-токены в
+  `data/health_tokens/<user_id>/garmin/`, вне git); Apple Health — импорт `export.zip`
+  (потоковый iterparse) и приём JSON от Health Auto Export; Strava — OAuth за конфигом
+  `STRAVA_CLIENT_ID/SECRET` (отдаёт только тренировки). Хранение: `health_accounts`,
+  `health_metrics` (идемпотентный upsert по user+provider+metric+taken_at),
+  `health_activities` (идемпотентно по external_id).
+
+### Важно про Garmin rate limit
+
+SSO-логин Garmin агрессивно лимитируется (429 → блок аккаунта на ~48 ч, привязан к email).
+Поэтому НЕ логиниться повторно по паролю: сессия восстанавливается из токенов
+(`garmin.resume`), refresh живёт ~30 дней и ротируется при каждом синке. Между запросами
+данных выдерживается пауза `HEALTH_REQUEST_PAUSE` (0.5 с).
+
+### Первичная настройка и проверка
+
+`powershell
+# Эмбеддер (однократно, в WSL2)
+wsl -d Ubuntu -- ollama pull bge-m3
+
+# Живой прогон по шагам (см. docstring скрипта)
+uv run python scripts/live_check_rag_health.py index    # индексация справочников (~8 мин на RTX 3080)
+uv run python scripts/live_check_rag_health.py sync     # Garmin за 30 дней (~2 мин, ~21k метрик)
+uv run python scripts/live_check_rag_health.py search   # смоук семантического поиска
+uv run python scripts/live_check_rag_health.py ask      # рекомендация LLM
+`
+
+Через кабинет: экран «Здоровье» — подключение Garmin (email/пароль), синк с прогрессом,
+импорт Apple export.zip, графики метрик, тренировки и ассистент. API: `/api/health/*`,
+`/api/rag/*` (см. `src/botkin/api/routes/health_sync.py` и `rag.py`).
+
+### Ловушки, уже наступленные
+
+- `.gitignore`-паттерн `_*.py` без якоря матчил `src/**/__init__.py` — заякорен (`/_*.py`).
+- `node -e` со всем app.js в аргументе упирается в лимит командной строки Windows
+  (32 767 симв., WinError 206) — тесты пишут скрипт во временный файл.
+- PowerShell глотает кириллицу UTF-8-файлов: ad-hoc проверки делать через
+  `uv run python` с `PYTHONIOENCODING=utf-8`.
