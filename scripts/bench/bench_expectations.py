@@ -37,11 +37,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 REPORT_FILE = Path(__file__).resolve().parent / "bench_expectations_report.md"
 RESULTS_FILE = Path(__file__).resolve().parent / "bench_expectations_results.json"
 
-# Модели по умолчанию: текущая боевая, кандидат №1 из ресёрча, прошлая база.
+# Модели по умолчанию: текущая боевая, новый кандидат qwen3.5:9b, GLM-4.6V-Flash-9B.
+# qwen2.5vl:7b исключена — 76.3% на корпусе, слишком слабая (итерация 33).
 DEFAULT_MODELS = [
     "qwen3-vl:8b-instruct",
-    "glm-ocr",
-    "qwen2.5vl:7b",
+    "qwen3.5:9b",
+    "haervwe/GLM-4.6V-Flash-9B",
 ]
 
 
@@ -97,6 +98,28 @@ EXPECTATIONS: dict[str, Expectation] = {
         disk="~5.5 ГБ (8B, Q4 в Ollama)",
         russian="н/д",
         sources=["https://ollama.com/library/minicpm-v"],
+    ),
+    "qwen3.5": Expectation(
+        omnidocbench="87.7 (v1.5, self-reported; превосходит qwen3-vl-30b: 86.8)",
+        claimed_speed="н/д; ~40–80 tok/s на 16GB GPU (oamazonasgabriel/qwen3.5-9b)",
+        disk="19.3 ГБ BF16 / ~6.6 ГБ Q4_K_M (9.65B параметров, dense)",
+        russian="201 язык (текст); OCR-языки — н/д, но кириллица в составе мультиязычного OCR",
+        sources=[
+            "https://huggingface.co/Qwen/Qwen3.5-9B",
+            "https://ollama.com/library/qwen3.5:9b",
+            "https://github.com/QwenLM/Qwen3.5",
+        ],
+    ),
+    "GLM-4.6V-Flash-9B": Expectation(
+        omnidocbench="н/д (GLM-V серия не мерилась на OmniDocBench публично)",
+        claimed_speed="н/д",
+        disk="~6 ГБ Q4 (9B параметров, Flash-вариант — облегченный)",
+        russian="zh/en заявлены; ru — н/д (GLM-4V-9B имел zh/en, GLM-4.6V расширил)",
+        sources=[
+            "https://github.com/zai-org/GLM-V",
+            "https://ollama.com/haervwe/GLM-4.6V-Flash-9B",
+            "https://huggingface.co/zai-org/GLM-4.1V-9B-Thinking",
+        ],
     ),
 }
 

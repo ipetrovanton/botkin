@@ -88,6 +88,11 @@ def build_extra_body(
     body: dict = {"options": options or default_options()}
     if use_format:
         body["format"] = response_model.model_json_schema()
+    # Qwen3.5+ имеет thinking mode включённый по умолчанию; для vision/OCR задач
+    # весь вывод уходит в thinking field, content остаётся пустым (ollama/ollama#14502).
+    # Отключаем через chat_template_kwargs, когда env VLM_DISABLE_THINKING=1.
+    if os.getenv("VLM_DISABLE_THINKING", "").lower() in ("1", "true", "yes", "on"):
+        body["chat_template_kwargs"] = {"enable_thinking": False}
     return body
 
 

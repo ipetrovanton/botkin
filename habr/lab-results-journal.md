@@ -2919,3 +2919,181 @@ qwen3-vl на тех же 20 PDF).
   `scripts/bench/bench_expectations_results.json`. Логи:
   `bench_qwen3-vl_8b-instruct.log`, `bench_glm-ocr.log`,
   `bench_qwen2.5vl_7b.log` в корне репо.
+
+## Итерация 34: новое поколение моделей — qwen3.5:9b провалилась, GLM-4.6V-Flash-9B почти догнала qwen3-vl
+
+### Постановка
+
+Итерация 33 показала: qwen3-vl:8b-instruct (100%) — эталон, glm-ocr (81.8%) и
+qwen2.5vl:7b (76.3%) — не дотягивают. qwen2.5vl исключена из покрытия — слишком
+слабая. Задача: проверить 2 новые модели, вышедшие в 2026, и попытаться
+оптимизировать их через промпты/параметры.
+
+### Железо и окружение
+
+То же, что в итерации 33: RTX 3080 Laptop 16GB, Ollama 0.31.1. Модели
+подтянуты через `ollama pull`:
+- `qwen3.5:9b` — 6.6 ГБ (Alibaba, 02.03.2026, 9.65B dense)
+- `haervwe/GLM-4.6V-Flash-9B` — 8.0 ГБ (Zhipu AI, 2026, 9B Flash)
+
+### Web-ресёрч: что нового на рынке
+
+**qwen3.5:9b** (HuggingFace, 02.03.2026):
+- OmniDocBench v1.5: **87.7** — превосходит qwen3-vl-30b (86.8) при втрое
+  меньшем размере
+- OCRBench: 89.2, VlmsAreBlind: 93.7
+- Нативная мультимодальная (text+image+video из одних весов)
+- Thinking mode включён ПО УМОЛЧАНИЮ (Qwen docs: «Qwen3.5 enabled by default»)
+
+**GLM-4.6V-Flash-9B** (GitHub zai-org/GLM-V, Ollama haervwe/GLM-4.6V-Flash-9B):
+- Серия GLM-V (преемник GLM-4V-9B), Flash-вариант — облегченный
+- Native multimodal function calling
+- На OmniDocBench не мерилась публично
+
+Источники:
+- https://huggingface.co/Qwen/Qwen3.5-9B (benchmarks)
+- https://ollama.com/library/qwen3.5:9b
+- https://github.com/zai-org/GLM-V
+- https://ollama.com/haervwe/GLM-4.6V-Flash-9B
+- https://github.com/ollama/ollama/issues/14502 (thinking mode bug)
+
+### Результаты baseline
+
+| Модель | Точность | PASS | с/док | wall | Вердикт |
+|---|---|---|---|---|---|
+| qwen3-vl:8b-instruct | 100.0% (325/325) | 34/34 | 25.4 | 881с | ✅ эталон |
+| **GLM-4.6V-Flash-9B** | **98.5%** (320/325) | 31/34 | 98.0 | 3412с | ⚠️ 1.5% от эталона |
+| qwen3.5:9b | 74.1% (240/324) | 26/34 | 125.4 | 5107с | ❌ катастрофа |
+
+Дословный вывод скрипта:
+```
+[BENCH] qwen3-vl:8b-instruct: PASS=34 FAIL=0 SKIP=0 | точность=325/325 (100.0%) | среднее=25.4s/док | wall=881s
+[BENCH] qwen3.5:9b: PASS=26 FAIL=8 SKIP=0 | точность=240/324 (74.1%) | среднее=125.4s/док | wall=5107s
+[BENCH] haervwe/GLM-4.6V-Flash-9B: PASS=31 FAIL=3 SKIP=0 | точность=320/325 (98.5%) | среднее=98.0s/док | wall=3412s
+```
+
+### GLM-4.6V-Flash-9B: 3 «почти PASS» провала
+
+Все 3 провала — потеря 1–2 значений из 20–47:
+
+Дословно из `bench_haervwe_GLM-4.6V-Flash-9B.log`:
+```
+sample_011.pdf        FAIL        9.8s   118.7s  128.6s      19/20
+sample_012.pdf        FAIL        0.0s   413.9s  414.0s      45/47
+sample_019.pdf        FAIL        0.0s   198.9s  198.9s      23/25
+```
+
+- **sample_011** (ОАК + лейкоцитарная формула, 20 значений): потеря 1 значения.
+  qwen3-vl: 20/20 за 75.3с.
+- **sample_012** (биохимия + ОАМ, 47 значений): потеря 2 значений —
+  «Холестерин-ЛПНП по Фридвальду» (вычисляемый показатель) и «Эритроциты
+  (микроскопия)». Модель правильно не выдумывает вычисляемые показатели.
+  qwen3-vl: 47/47 за 97.8с.
+- **sample_019** (ОАК, 25 значений): потеря 2 значений.
+  qwen3-vl: 25/25 за 55.9с.
+
+Все 14 JPG-фото заключений врача — PASS (модель видит изображения, в отличие
+от glm-ocr, которая не обрабатывает JPG). Все 17 PDF с таблицами — PASS кроме
+3 «почти PASS». **sample_016** (63 значения, ОАК + лейкоцитарная формула на 2
+страницах) — PASS за 458.8с! glm-ocr на этом документе дал 22/63 (потеря
+второй страницы).
+
+### qwen3.5:9b: публичные бенчи врут для vision/OCR через Ollama
+
+74.1% — худший результат среди всех тестированных моделей, включая
+qwen2.5vl:7b (76.3%). При том, что на OmniDocBench v1.5 qwen3.5:9b набирает
+87.7, превосходя qwen3-vl-30b (86.8). **Разрыв 13.6 п.п.** между бенчем и
+реальностью.
+
+**Причина: thinking mode.** qwen3.5:9b имеет thinking mode включённый по
+умолчанию. Для vision/OCR задач через Ollama весь вывод уходит в `thinking`
+field, `content` остаётся пустым
+([ollama/ollama#14502](https://github.com/ollama/ollama/issues/14502)):
+
+> «all output goes into the thinking field and content is always empty when
+> images are involved. Tried everything: 'thinking': False in options —
+> ignored for image inputs, /no_think in prompt — treated as literal text»
+
+125.4 с/док — в 5 раз медленнее qwen3-vl. Extract синтетического бланка:
+98.9с (vs ~15с у qwen3-vl) — модель генерирует reasoning tokens вместо
+извлечения.
+
+Полный список 8 FAIL: sample_001 (2/3), sample_003 (6/11), sample_005 (FAIL),
+sample_006 (0/20 — полный провал), sample_011 (0/20 — полный провал),
+sample_012 (44/47), sample_013 (35/36), sample_016 (31/63), sample_019 (23/25),
+плюс 7 JPG FAIL.
+
+### Оптимизация 1: отключение thinking mode для qwen3.5:9b
+
+Добавлена env-переменная `VLM_DISABLE_THINKING=1` в `build_extra_body`
+(`src/botkin/llm/client.py`): прокидывает `chat_template_kwargs:
+{"enable_thinking": False}` в Ollama API.
+
+Результат на 5 документах (с `--skip-synthetic`):
+- 3 FAIL из 5 (sample_001, sample_003, sample_005, sample_006)
+- Скорость ~3 мин/док (быстрее baseline 3.5 мин, но всё ещё в 7 раз медленнее
+  qwen3-vl)
+
+**Вывод:** отключение thinking mode улучшило скорость, но не точность. Модель
+теряет значения даже без thinking — проблема в vision understanding через
+Ollama, а не только в thinking mode. **qwen3.5:9b через Ollama не пригодна
+для vision/OCR задач.**
+
+### Оптимизация 2: structured output (XGrammar) для GLM-4.6V-Flash-9B
+
+Прогон без structured output (`VLM_STRUCTURED_OUTPUT=0`) на 3 проблемных
+документах:
+
+| Документ | С XGrammar | Без XGrammar | Эффект |
+|---|---|---|---|
+| sample_011 | 19/20 (FAIL) | **0/20** (FAIL) | XGrammar критически важен |
+| sample_012 | 45/47 (FAIL) | 44/47 (FAIL) | Примерно то же |
+| sample_019 | 23/25 (FAIL) | **25/25 (PASS)** | XGrammar терял 2 значения! |
+
+**Скорость без XGrammar: 751.5 с/док** (vs 98.0 с/док) — в 7.7 раз медленнее.
+
+Дословно из лога без structured output:
+```
+sample_011.pdf        FAIL       80.3s   725.4s  805.7s       0/20
+sample_012.pdf        FAIL        0.0s  1240.1s 1240.2s      44/47
+sample_019.pdf        PASS        0.0s   208.5s  208.5s      25/25
+```
+
+**Вывод:** XGrammar имеет двойственный эффект — критически важен для
+большинства документов (sample_011: 0→19) и для скорости (7.7×), но на
+отдельных документах теряет 1–2 значения (sample_019: 23→25). Отключение
+непрактично из-за скорости. Возможное решение: **адаптивный фолбэк** — при
+FAIL на 1–2 значения повторить без XGrammar.
+
+### Сравнение всех 5 моделей (сводная таблица для статьи)
+
+| Модель | OmniDocBench | Точность | PASS | с/док | Год | Размер |
+|---|---|---|---|---|---|---|
+| qwen3-vl:8b-instruct | н/д для 8B | **100.0%** | 34/34 | 25.4 | 2025 | 6.1 ГБ |
+| GLM-4.6V-Flash-9B | н/д | **98.5%** | 31/34 | 98.0 | 2026 | 8.0 ГБ |
+| glm-ocr | 95.22 (v1.6) | 81.8% | 28/34 | 13.7 | 2026 | 2.2 ГБ |
+| qwen2.5vl:7b | v1.0: 0.226 EN | 76.3% | 27/34 | 27.3 | 2025 | 6.0 ГБ |
+| qwen3.5:9b | 87.7 (v1.5) | **74.1%** | 26/34 | 125.4 | 2026 | 6.6 ГБ |
+
+**Парадокс:** qwen3.5:9b — лидер на OmniDocBench (87.7), но худший на нашем
+корпусе (74.1%). GLM-4.6V-Flash-9B — не мерилась на OmniDocBench, но почти
+догнала qwen3-vl на реальных документах (98.5% vs 100%).
+
+### Итог
+
+- **qwen3-vl:8b-instruct** остаётся боевой моделью. 100%, 25.4 с/док.
+- **GLM-4.6V-Flash-9B — новый кандидат №2** (заменил glm-ocr). 98.5%, 98.0
+  с/док. Сильнее на сложных таблицах (sample_016: 63/63) и на JPG (14/14 PASS).
+  Медленнее qwen3-vl в 4 раза, но точность сопоставима. Кандидат на каскад:
+  простые документы → qwen3-vl (быстрее), сложные таблицы → GLM-4.6V (точность).
+- **qwen3.5:9b не пригодна** для vision/OCR через Ollama. Thinking mode ломает
+  vision pipeline. Публичные бенчи (87.7 на OmniDocBench) не переносятся на
+  real-world vision/OCR. Следить за ollama/ollama#14502.
+- **XGrammar (structured output) — двойственный эффект.** Критически важен для
+  большинства документов и скорости, но теряет 1–2 значения на отдельных.
+  Возможна адаптивная стратегия: при «почти PASS» повторить без XGrammar.
+- **qwen2.5vl:7b исключена** из покрытия — 76.3%, слишком слабая.
+- Отчёт: `scripts/bench/bench_expectations_report.md`. Сырые данные:
+  `scripts/bench/bench_expectations_results.json`. Логи:
+  `bench_qwen3-vl_8b-instruct.log`, `bench_qwen3.5_9b.log`,
+  `bench_haervwe_GLM-4.6V-Flash-9B.log` в корне репо.

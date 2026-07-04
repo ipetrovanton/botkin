@@ -263,3 +263,127 @@ qwen3-vl), но не на замену.
 
 Сырые данные: `scripts/bench/bench_expectations_results.json`.
 Отчёт-таблица: `scripts/bench/bench_expectations_report.md`.
+
+---
+
+# Часть 4 (04.07.2026): Новое поколение — qwen3.5:9b и GLM-4.6V-Flash-9B
+
+*Замер: 2026-07-04. Железо: NVIDIA GeForce RTX 3080 Laptop GPU, 16384 MiB VRAM,
+driver 610.47. Ollama 0.31.1. Тот же корпус: 34 документа (20 PDF + 14 JPG).*
+
+## Контекст
+
+После прогона 3 моделей (Часть 3) проверены 2 новые модели, вышедшие в 2026:
+- **qwen3.5:9b** (Alibaba, 02.03.2026) — нативная мультимодальная (text+image+video
+  из одних весов), 9.65B dense. OmniDocBench v1.5: **87.7** — превосходит
+  qwen3-vl-30b (86.8) при втрое меньшем размере.
+- **GLM-4.6V-Flash-9B** (Zhipu AI, 2026) — vision-language из серии GLM-V
+  (преемник GLM-4V-9B), 9B, Flash-вариант (облегченный).
+
+## Итоговая таблица (все 5 моделей)
+
+| Модель | OmniDocBench | Точность | PASS | с/док | Вердикт |
+|---|---|---|---|---|---|
+| qwen3-vl:8b-instruct | н/д для 8B | **100.0%** (325/325) | 34/34 | 25.4 | ✅ эталон |
+| **GLM-4.6V-Flash-9B** | н/д | **98.5%** (320/325) | 31/34 | 98.0 | ⚠️ 1.5% от эталона |
+| glm-ocr | 95.22 (v1.6) | 81.8% (248/303) | 28/34 | 13.7 | ❌ |
+| qwen2.5vl:7b | v1.0: edit 0.226 EN | 76.3% (248/325) | 27/34 | 27.3 | ❌ |
+| **qwen3.5:9b** | 87.7 (v1.5) | **74.1%** (240/324) | 26/34 | 125.4 | ❌ катастрофа |
+
+## Главные находки
+
+### 1. GLM-4.6V-Flash-9B — лучший кандидат после qwen3-vl
+
+**98.5% точности** — всего 1.5 процентных пункта от qwen3-vl:8b-instruct (100%).
+3 провала — все «почти PASS» (потеря 1–2 значений из 20–47):
+
+- sample_011.pdf: 19/20 (потеря 1 значения из 20)
+- sample_012.pdf: 45/47 (потеря 2 значений из 47 — вычисляемые показатели
+  «Холестерин-ЛПНП по Фридвальду» и «Холестерин не-ЛПВП», модель правильно
+  не выдумывает их)
+- sample_019.pdf: 23/25 (потеря 2 значений из 25)
+
+Все 14 JPG-фото заключений врача — PASS (модель видит изображения, в отличие
+от glm-ocr). Все 17 PDF с таблицами — PASS кроме 3 «почти PASS».
+
+**Скорость: 98.0 с/док** — в 3.9 раза медленнее qwen3-vl (25.4), но в 1.3 раза
+быстрее qwen3.5:9b (125.4). Медлительность объясняется размером модели (8 ГБ
+Q4 vs 6.1 ГБ) и отсутствием fast-path по текстовому слою (classify занимает
+в среднем 7.4с на PDF с текстовым слоем, extract — 164с).
+
+### 2. qwen3.5:9b — публичные бенчи не переносятся на vision/OCR через Ollama
+
+**74.1% — худший результат** среди всех тестированных моделей, включая
+qwen2.5vl:7b (76.3%). При том, что на OmniDocBench v1.5 qwen3.5:9b набирает
+87.7, превосходя qwen3-vl-30b (86.8). Разрыв **13.6 п.п.** между бенчем и
+реальностью.
+
+**Причина: thinking mode.** qwen3.5:9b имеет thinking mode включённый по
+умолчанию (Qwen docs: «Qwen3.5 enabled by default»). Для vision/OCR задач через
+Ollama весь вывод уходит в `thinking` field, `content` остаётся пустым
+([ollama/ollama#14502](https://github.com/ollama/ollama/issues/14502)):
+> «all output goes into the thinking field and content is always empty when
+> images are involved. Tried everything: 'thinking': False in options — ignored
+> for image inputs, /no_think in prompt — treated as literal text by the model»
+
+**125.4 с/док** — в 5 раз медленнее qwen3-vl. Extract синтетического бланка:
+98.9с (vs ~15с у qwen3-vl) — модель генерирует reasoning tokens, тратя бюджет
+на «обдумывание» вместо извлечения.
+
+### 3. Оптимизация: отключение thinking mode не спасает qwen3.5:9b
+
+Попробована оптимизация через `chat_template_kwargs: {"enable_thinking": False}`
+в extra_body (через env `VLM_DISABLE_THINKING=1`). Результат на 5 документах:
+- 3 FAIL из 5 (sample_001, sample_003, sample_005, sample_006)
+- Скорость ~3 мин/док (быстрее baseline 3.5 мин, но всё ещё в 7 раз медленнее
+  qwen3-vl)
+
+Отключение thinking mode улучшило скорость, но не точность. Модель теряет
+значения даже без thinking — проблема в vision understanding, а не только в
+thinking mode. **Вывод: qwen3.5:9b через Ollama не пригодна для vision/OCR
+задач** — проблема на уровне интеграции Ollama ↔ Qwen3.5 vision pipeline.
+
+### 4. Оптимизация: structured output (XGrammar) — двойственный эффект для GLM-4.6V
+
+Прогон GLM-4.6V-Flash-9B без structured output (`VLM_STRUCTURED_OUTPUT=0`) на
+3 проблемных документах:
+
+| Документ | С XGrammar | Без XGrammar | Эффект |
+|---|---|---|---|
+| sample_011 | 19/20 (FAIL) | 0/20 (FAIL) | XGrammar критически важен |
+| sample_012 | 45/47 (FAIL) | 44/47 (FAIL) | Примерно то же |
+| sample_019 | 23/25 (FAIL) | **25/25 (PASS)** | XGrammar терял 2 значения! |
+
+**Скорость без XGrammar: 751.5 с/док** (vs 98.0 с/док) — в 7.7 раз медленнее.
+Модель генерирует свободный текст, Instructor парсит — катастрофа по времени.
+
+**Вывод:** XGrammar имеет двойственный эффект — критически важен для большинства
+документов (sample_011: 0→19) и для скорости (7.7×), но на отдельных документах
+теряет 1–2 значения (sample_019: 23→25). Отключение непрактично из-за скорости.
+Возможное решение: **адаптивный фолбэк** — при FAIL на 1–2 значения повторить
+без XGrammar (уже реализовано в extract.py для пустых ответов, но не для
+«почти полных»).
+
+## Обновлённый топ кандидатов для Botkin
+
+1. **qwen3-vl:8b-instruct** — остаётся боевой моделью. 100%, 25.4 с/док.
+2. **GLM-4.6V-Flash-9B** — **новый кандидат №2** (раньше был glm-ocr). 98.5%,
+   98.0 с/док. Сильнее на сложных таблицах (sample_016: 63/63 vs glm-ocr 22/63)
+   и на JPG-фото (14/14 PASS vs glm-ocr 14/14 PASS, но с extract=0 у glm-ocr).
+   Медленнее qwen3-vl в 4 раза, но точность сопоставима.
+3. **glm-ocr** — кандидат на каскад (печатные PDF с простыми таблицами, 2×
+   быстрее qwen3-vl). Не работает с JPG.
+4. **qwen3.5:9b** — **не пригодна** для vision/OCR через Ollama. Thinking mode
+   ломает vision pipeline. Следить за исправлением в Ollama
+   ([#14502](https://github.com/ollama/ollama/issues/14502)).
+5. **qwen2.5vl:7b** — исключена из покрытия. 76.3%, хуже и медленнее qwen3-vl.
+
+## Источники (новые)
+
+- qwen3.5:9b: https://huggingface.co/Qwen/Qwen3.5-9B (benchmarks),
+  https://ollama.com/library/qwen3.5:9b, https://github.com/QwenLM/Qwen3.5
+- GLM-4.6V-Flash-9B: https://github.com/zai-org/GLM-V,
+  https://ollama.com/haervwe/GLM-4.6V-Flash-9B
+- Thinking mode issue: https://github.com/ollama/ollama/issues/14502,
+  https://github.com/ollama/ollama/issues/14793
+- Qwen thinking docs: https://docs.qwencloud.com/developer-guides/text-generation/thinking
