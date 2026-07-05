@@ -169,6 +169,33 @@ RAG-слой для анализа локальной LLM.
   Garmin, прокомментировал реальные препараты пациента из заключений и закончил
   напоминанием про врача. 397 unit-тестов зелёные, ruff чист.
 
+### Шаг 7: аудит безопасности неофициального доступа к Garmin
+
+Отдельный ресёрч по безопасности сторонних библиотек (полная инструкция + оценка —
+`docs/garmin-integration-guide.md`). Главные находки:
+
+- **У самой garminconnect была реальная уязвимость** GHSA-wjhr-76vg-2hvc (CWE-732):
+  до v0.3.5 файл токенов создавался world-readable (0o644) — на shared-хосте любой
+  локальный пользователь мог украсть refresh-токен. Исправлено в 0.3.5 (0o700/0o600),
+  у нас 0.3.6.
+- **curl_cffi** (обход Cloudflare TLS fingerprinting) — две HIGH-уязвимости в истории:
+  CVE-2023-38545 (heap overflow в SOCKS5, «probably the worst curl security flaw in a
+  long time») и CVE-2026-33752 (SSRF через нефильтрованные редиректы, CVSS 8.6).
+  Обе закрыты ровно в той версии, что стоит у нас (0.15.0).
+- **Разобрал живой JWT из garmin_tokens.json**: access-токен живёт ~20.5 ч, а его скоуп —
+  ~33 разрешения, включая `CONNECT_WRITE`, `GARMINPAY_READ/WRITE`, `DI_COACHING_WRITE`.
+  Read-only токенов Garmin не выдаёт: утечка файла токенов = компрометация аккаунта
+  вплоть до записи данных. Отсюда: файл вне git, по каталогу на пользователя, пароль
+  не персистится, отзыв — сменой пароля Garmin.
+- **ToS Garmin** формально запрещают reverse engineering и автоматизацию вне
+  официального API. Практика: временные блоки 429/1015 на 24–72 ч — обычное дело;
+  подтверждённая деактивация аккаунта — один случай (синхронизация каждый час,
+  поддержка Garmin прямо попросила выключить скрипт). Вывод: 1–2 синка в сутки,
+  никогда не ретраить логин, для экспериментов — отдельный аккаунт.
+- **garth** (предыдущий стандарт авторизации) официально DEPRECATED — Garmin сломал
+  mobile-auth флоу; garminconnect 0.3.x перешёл на собственную DI OAuth реализацию.
+  Ландшафт нестабилен: библиотеку нужно обновлять и следить за issue-трекером.
+
 ## Архитектурные решения
 
 ### Решение: векторное хранилище — sqlite-vec в основной botkin.db
@@ -243,3 +270,10 @@ RAG-слой для анализа локальной LLM.
 - [HealthKit HKQuantityTypeIdentifier](https://developer.apple.com/documentation/healthkit/hkquantitytypeidentifier) — 2026-07-04. Типы записей export.xml.
 - [Health Auto Export REST API](https://help.healthyapps.dev/en/health-auto-export/automations/rest-api/) — 2026-07-04. Автоматическая отправка JSON на свой эндпоинт.
 - [GarminDB](https://github.com/tcgoetz/GarminDB) — 2026-07-04. Референс схемы хранения Garmin-данных в SQLite.
+- [GHSA-wjhr-76vg-2hvc](https://github.com/cyberjunky/python-garminconnect/security/advisories/GHSA-wjhr-76vg-2hvc) — 2026-07-04. Уязвимость прав токен-файла в garminconnect ≤0.3.4.
+- [CVE-2026-33752](https://nvd.nist.gov/vuln/detail/CVE-2026-33752) — 2026-07-04. SSRF в curl_cffi ≤0.15.0b4.
+- [CVE-2023-38545](https://curl.se/docs/CVE-2023-38545.html) — 2026-07-04. Heap overflow SOCKS5 в libcurl (задевал старый curl_cffi).
+- [Garmin Terms of Use](https://www.garmin.com/en-US/legal/terms-of-use/) — 2026-07-04. Запрет reverse engineering.
+- [Деактивация аккаунта за ежечасный синк, gcexport #60](https://github.com/pe-st/garmin-connect-export/issues/60) — 2026-07-04. Единственный подтверждённый случай бана.
+- [garth deprecated, discussion #222](https://github.com/matin/garth/discussions/222) — 2026-07-04. Garmin сломал mobile-auth флоу.
+- [Cloudflare-блок SSO, garth #217](https://github.com/matin/garth/issues/217) — 2026-07-04. С марта 2026 programmatic login отбивается глобально; спасают виджет-флоу и локальная генерация токенов.

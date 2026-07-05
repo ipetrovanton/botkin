@@ -367,3 +367,6 @@ uv run python scripts/live_check_rag_health.py ask      # рекомендаци
   (32 767 симв., WinError 206) — тесты пишут скрипт во временный файл.
 - PowerShell глотает кириллицу UTF-8-файлов: ad-hoc проверки делать через
   `uv run python` с `PYTHONIOENCODING=utf-8`.
+
+Подробная инструкция по Garmin (авторизация, токены, rate limits, troubleshooting,
+оценка безопасности библиотек garminconnect/curl_cffi) — `docs/garmin-integration-guide.md`.
