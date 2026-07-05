@@ -17,12 +17,12 @@ import time
 
 from botkin.config import (
     OLLAMA_KEEP_ALIVE, RAG_RECOMMEND_MODEL, RAG_RECOMMEND_NUM_CTX,
-    RAG_RECOMMEND_NUM_PREDICT, RAG_TOP_K,
+    RAG_RECOMMEND_NUM_PREDICT, RAG_TOP_K, RAG_WEB_ENABLED, RAG_WEB_RESULTS,
 )
 from botkin.db.connection import get_conn
 from botkin.db.repos import HealthRepo
 from botkin.llm.client import get_raw_client
-from botkin.rag import retriever
+from botkin.rag import retriever, websearch
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +37,9 @@ SYSTEM_PROMPT = """Ты — медицинский ассистент серви
 3. Если препарат в контексте помечен как исключённый или приостановленный — обязательно
    предупреди об этом.
 4. Если данных недостаточно — так и скажи, не фантазируй.
-5. Завершай ответ напоминанием, что окончательные решения принимает лечащий врач."""
+5. Если в контексте есть блок «СВЕЖИЕ ИСТОЧНИКИ ИЗ ИНТЕРНЕТА» — можешь опираться на него
+   как на дополнительную справку, но проверяй критически и указывай ссылку при цитировании.
+6. Завершай ответ напоминанием, что окончательные решения принимает лечащий врач."""
 
 _RECENT_LABS_SQL = """
     SELECT COALESCE(analyte_canonical, analyte_name) AS name, value_num, unit,
@@ -99,8 +101,14 @@ def _patient_context(user_id: int) -> str:
     return "\n\n".join(parts) if parts else "Данных о пациенте в базе нет."
 
 
-def recommend(user_id: int, question: str, *, top_k: int = RAG_TOP_K) -> dict:
-    """Ответ на вопрос пациента с RAG-контекстом. Возвращает text + использованные чанки."""
+def recommend(
+    user_id: int, question: str, *, top_k: int = RAG_TOP_K, model: str | None = None,
+    use_web: bool | None = None,
+) -> dict:
+    """Ответ на вопрос пациента с RAG-контекстом. Возвращает text + использованные чанки.
+
+    model=None → продакшн-модель RAG_RECOMMEND_MODEL; иначе переопределение (бенчмарк).
+    use_web=None → флаг RAG_WEB_ENABLED; True/False форсирует живой веб+PubMed в контекст."""
     chunks = retriever.search(question, user_id=user_id, top_k=top_k)
     med_names = _extract_med_mentions(user_id)
     for name in med_names[:5]:
@@ -111,13 +119,22 @@ def recommend(user_id: int, question: str, *, top_k: int = RAG_TOP_K) -> dict:
     context_blocks = [f"[{c['source']}] {c['text']}" for c in chunks]
     user_msg = (
         f"КОНТЕКСТ ПАЦИЕНТА:\n{_patient_context(user_id)}\n\n"
-        f"ВЫДЕРЖКИ ИЗ СПРАВОЧНИКОВ И ДАННЫХ:\n" + "\n\n".join(context_blocks) +
-        f"\n\nВОПРОС ПАЦИЕНТА: {question}"
+        f"ВЫДЕРЖКИ ИЗ СПРАВОЧНИКОВ И ДАННЫХ:\n" + "\n\n".join(context_blocks)
     )
-    client = get_raw_client(timeout=300.0)
+
+    want_web = RAG_WEB_ENABLED if use_web is None else use_web
+    web_used = False
+    if want_web:
+        web_ctx = websearch.gather_context(question, max_web=RAG_WEB_RESULTS)
+        if web_ctx:
+            web_used = True
+            user_msg += ("\n\nСВЕЖИЕ ИСТОЧНИКИ ИЗ ИНТЕРНЕТА (веб-поиск и PubMed, "
+                         "проверяй критически, указывай ссылку при использовании):\n" + web_ctx)
+    user_msg += f"\n\nВОПРОС ПАЦИЕНТА: {question}"
+    client = get_raw_client(timeout=600.0)
     t0 = time.perf_counter()
     response = client.chat.completions.create(
-        model=RAG_RECOMMEND_MODEL,
+        model=model or RAG_RECOMMEND_MODEL,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_msg},
@@ -131,10 +148,18 @@ def recommend(user_id: int, question: str, *, top_k: int = RAG_TOP_K) -> dict:
         }},
     )
     text = (response.choices[0].message.content or "").strip()
-    log.info("Рекомендация за %.1fs, чанков в контексте: %d",
-             time.perf_counter() - t0, len(chunks))
+    elapsed = time.perf_counter() - t0
+    log.info("Рекомендация за %.1fs, чанков в контексте: %d", elapsed, len(chunks))
+    usage = getattr(response, "usage", None)
     return {
         "answer": text,
+        "model": model or RAG_RECOMMEND_MODEL,
+        "web_used": web_used,
+        "elapsed_s": round(elapsed, 2),
+        "usage": {
+            "prompt_tokens": getattr(usage, "prompt_tokens", None),
+            "completion_tokens": getattr(usage, "completion_tokens", None),
+        } if usage else None,
         "chunks": [
             {"source": c["source"], "ref_key": c["ref_key"], "distance": c["distance"]}
             for c in chunks

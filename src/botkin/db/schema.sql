@@ -152,7 +152,7 @@ CREATE INDEX IF NOT EXISTS idx_health_activities_user
 -- расширение может быть не загружено при init_db).
 CREATE TABLE IF NOT EXISTS rag_chunks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source TEXT NOT NULL CHECK(source IN ('drugs','analytes','health')),
+    source TEXT NOT NULL CHECK(source IN ('drugs','analytes','health','research')),
     user_id INTEGER,
     ref_key TEXT NOT NULL,
     text TEXT NOT NULL,

@@ -99,6 +99,23 @@ _DEFAULTS: dict = {
         "recommend_model": "qwen3:8b",
         "recommend_num_ctx": 8192,
         "recommend_num_predict": 2048,
+        # Живой веб-доступ модели: подмешивание веб-поиска и PubMed в контекст.
+        "web_enabled": False,
+        "web_results": 4,
+        # Research-RAG: свежие публикации PubMed по темам (автономное обновление).
+        "research": {
+            "tool": "botkin-rag",
+            "email": "botkin@example.com",
+            "per_topic": 15,
+            "topics": [
+                "lymphocytosis differential diagnosis",
+                "monocytosis causes clinical significance",
+                "basophilia clinical interpretation",
+                "complete blood count abnormalities interpretation",
+                "cerebrospinal fluid cell count interpretation",
+                "elevated lymphocytes viral infection",
+            ],
+        },
     },
     "health": {
         "tokens_dir": "./data/health_tokens",
@@ -301,6 +318,15 @@ RAG_TOP_K = setting("rag.top_k", "RAG_TOP_K", int)
 RAG_RECOMMEND_MODEL = setting("rag.recommend_model", "RAG_RECOMMEND_MODEL", str)
 RAG_RECOMMEND_NUM_CTX = setting("rag.recommend_num_ctx", "RAG_RECOMMEND_NUM_CTX", int)
 RAG_RECOMMEND_NUM_PREDICT = setting("rag.recommend_num_predict", "RAG_RECOMMEND_NUM_PREDICT", int)
+
+# Живой веб-доступ модели: веб-поиск + PubMed в контекст рекомендации.
+RAG_WEB_ENABLED = setting("rag.web_enabled", "RAG_WEB_ENABLED", _as_bool)
+RAG_WEB_RESULTS = setting("rag.web_results", "RAG_WEB_RESULTS", int)
+# Research-RAG: свежие публикации PubMed.
+RESEARCH_TOOL = _get("rag.research.tool")
+RESEARCH_EMAIL = _get("rag.research.email")
+RESEARCH_PER_TOPIC = int(_get("rag.research.per_topic"))
+RESEARCH_TOPICS: list[str] = list(_get("rag.research.topics"))
 
 # Health-sync: каталог OAuth-токенов (вне git), глубина первичной синхронизации (дней)
 # и пауза между запросами к провайдеру (бережём rate limit Garmin).

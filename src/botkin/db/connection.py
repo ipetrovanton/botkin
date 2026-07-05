@@ -97,6 +97,40 @@ def _migrate_documents_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_rag_chunks_schema(conn: sqlite3.Connection) -> None:
+    """Пересоздаёт rag_chunks, если CHECK(source) ещё не допускает 'research'.
+
+    id сохраняем явно: rag_vectors (vec0) ссылается на rag_chunks.id, и потеря id
+    осиротила бы вектора. Порядок вставки с исходным id — единственный корректный путь,
+    ALTER CHECK в SQLite не поддерживается.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='rag_chunks'"
+    ).fetchone()
+    if not row or "'research'" in (row["sql"] or ""):
+        return  # таблицы нет (создастся из schema.sql) или уже мигрировано
+
+    new_ddl = """
+    CREATE TABLE rag_chunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT NOT NULL CHECK(source IN ('drugs','analytes','health','research')),
+        user_id INTEGER,
+        ref_key TEXT NOT NULL,
+        text TEXT NOT NULL,
+        meta_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(source, ref_key)
+    )
+    """
+    cols = "id, source, user_id, ref_key, text, meta_json, created_at"
+    conn.execute("ALTER TABLE rag_chunks RENAME TO _rag_chunks_old")
+    conn.executescript(new_ddl)
+    conn.execute(f"INSERT INTO rag_chunks ({cols}) SELECT {cols} FROM _rag_chunks_old")
+    conn.execute("DROP TABLE _rag_chunks_old")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_rag_chunks_source ON rag_chunks(source)")
+    conn.commit()
+
+
 def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with get_conn() as conn:
@@ -104,6 +138,7 @@ def init_db() -> None:
         conn.commit()
         _apply_migrations(conn)
         _migrate_documents_schema(conn)
+        _migrate_rag_chunks_schema(conn)
         _drop_prescriptions(conn)
 
 
