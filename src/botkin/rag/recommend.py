@@ -103,12 +103,16 @@ def _patient_context(user_id: int) -> str:
 
 def recommend(
     user_id: int, question: str, *, top_k: int = RAG_TOP_K, model: str | None = None,
-    use_web: bool | None = None,
+    use_web: bool | None = None, num_predict: int | None = None,
 ) -> dict:
     """Ответ на вопрос пациента с RAG-контекстом. Возвращает text + использованные чанки.
 
     model=None → продакшн-модель RAG_RECOMMEND_MODEL; иначе переопределение (бенчмарк).
-    use_web=None → флаг RAG_WEB_ENABLED; True/False форсирует живой веб+PubMed в контекст."""
+    use_web=None → флаг RAG_WEB_ENABLED; True/False форсирует живой веб+PubMed в контекст.
+    num_predict=None → RAG_RECOMMEND_NUM_PREDICT. Для thinking-моделей (Qwen3.6, DeepSeek-R1)
+    рассуждения идут в reasoning_content и «съедают» бюджет — при малом num_predict финальный
+    content не успевает сгенерироваться (пустой ответ). Поэтому в бенче поднимаем лимит."""
+    num_predict = num_predict or RAG_RECOMMEND_NUM_PREDICT
     chunks = retriever.search(question, user_id=user_id, top_k=top_k)
     med_names = _extract_med_mentions(user_id)
     for name in med_names[:5]:
@@ -131,29 +135,30 @@ def recommend(
             user_msg += ("\n\nСВЕЖИЕ ИСТОЧНИКИ ИЗ ИНТЕРНЕТА (веб-поиск и PubMed, "
                          "проверяй критически, указывай ссылку при использовании):\n" + web_ctx)
     user_msg += f"\n\nВОПРОС ПАЦИЕНТА: {question}"
-    client = get_raw_client(timeout=600.0)
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_msg},
+    ]
+    the_model = model or RAG_RECOMMEND_MODEL
+    # Плотные модели с оффлоадом в RAM (напр. 27B) отвечают >10 мин; таймаут с запасом,
+    # ретраи SDK выключаем — иначе медленный, но живой вызов трижды бьётся о таймаут.
+    client = get_raw_client(timeout=1800.0).with_options(max_retries=0)
     t0 = time.perf_counter()
-    response = client.chat.completions.create(
-        model=model or RAG_RECOMMEND_MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_msg},
-        ],
-        max_tokens=RAG_RECOMMEND_NUM_PREDICT,
-        extra_body={"options": {
-            "keep_alive": OLLAMA_KEEP_ALIVE,
-            "num_ctx": RAG_RECOMMEND_NUM_CTX,
-            "num_predict": RAG_RECOMMEND_NUM_PREDICT,
-            "temperature": 0.3,
-        }},
-    )
-    text = (response.choices[0].message.content or "").strip()
+    response = _chat(client, the_model, messages, num_predict)
+    text, reasoning = _split_message(response)
+    # thinking-модели кладут рассуждения в отдельное поле и могут исчерпать num_predict до
+    # финального content (пустой ответ). Фолбэк: повтор с think=False — весь бюджет на ответ.
+    if not text:
+        log.info("Пустой content (рассуждения съели бюджет) — повтор с think=False")
+        response = _chat(client, the_model, messages, num_predict, think=False)
+        text, reasoning = _split_message(response)
     elapsed = time.perf_counter() - t0
     log.info("Рекомендация за %.1fs, чанков в контексте: %d", elapsed, len(chunks))
     usage = getattr(response, "usage", None)
     return {
         "answer": text,
-        "model": model or RAG_RECOMMEND_MODEL,
+        "reasoning": reasoning,
+        "model": the_model,
         "web_used": web_used,
         "elapsed_s": round(elapsed, 2),
         "usage": {
@@ -165,6 +170,30 @@ def recommend(
             for c in chunks
         ],
     }
+
+
+def _chat(client, model: str, messages: list[dict], num_predict: int, think: bool | None = None):
+    """Вызов Ollama /v1. think=False (нативный параметр Ollama) отключает рассуждения —
+    весь num_predict уходит в ответ; для нерассуждающих моделей это быстрее и без пустых content."""
+    body: dict = {"options": {
+        "keep_alive": OLLAMA_KEEP_ALIVE,
+        "num_ctx": RAG_RECOMMEND_NUM_CTX,
+        "num_predict": num_predict,
+        "temperature": 0.3,
+    }}
+    if think is not None:
+        body["think"] = think
+    return client.chat.completions.create(
+        model=model, messages=messages, max_tokens=num_predict, extra_body=body,
+    )
+
+
+def _split_message(response) -> tuple[str, str]:
+    """(content, reasoning) из ответа. Reasoning у thinking-моделей — в отдельном поле."""
+    msg = response.choices[0].message
+    text = (msg.content or "").strip()
+    reasoning = getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None) or ""
+    return text, reasoning
 
 
 def _extract_med_mentions(user_id: int) -> list[str]:

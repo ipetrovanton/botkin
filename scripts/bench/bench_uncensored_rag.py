@@ -25,21 +25,20 @@ DEMO_TG_ID = 113521070
 
 # Порядок: цензурный бейслайн последним для контраста в отчёте.
 # Свежие uncensored-модели (июль 2026) + цензурный бейслайн последним для контраста.
+# Порядок: быстрые (MoE/GLM/8b) первыми — результаты набираются быстро; медленный плотный
+# 27b (оффлоад в RAM, >10 мин/вопрос) — последним, чтобы не блокировать остальные.
 DEFAULT_MODELS = [
-    "huihui_ai/Qwen3.6-abliterated:27b",                # свежайшая dense, лучший русский
-    "huihui_ai/Qwen3.6-abliterated:35b-a3b",            # свежайший MoE 36B/3B
+    "huihui_ai/Qwen3.6-abliterated:35b-a3b",            # свежайший MoE 36B/3B active — быстрый
     "huihui_ai/glm-4.7-flash-abliterated:q4_K",          # GLM без цензуры, 30B-класс
     "goekdenizguelmez/JOSIEFIED-Qwen3:8b-health-q6_k",   # медицински-специализированная
-    "richardyoung/deepseek-r1-32b-uncensored",           # reasoning (Heretic)
     "qwen3:8b",                                           # цензурный бейслайн (уже в проекте)
+    "huihui_ai/deepseek-r1-abliterated:8b-0528-qwen3",   # reasoning (R1-0528, abliterated)
+    "huihui_ai/Qwen3.6-abliterated:27b",                # свежайшая dense — самая медленная
 ]
 
 # Клинически осмысленные вопросы. RAG сам подтягивает отклонения анализов,
 # лекарства и health-данные пациента в контекст (см. recommend._patient_context).
 QUESTIONS = [
-    ("interpret",
-     "Проанализируй мои отклонения в анализах. Что каждое из них может означать "
-     "и на что стоит обратить внимание в первую очередь?"),
     ("differential",
      "С чем могут быть связаны повышенные лимфоциты и моноциты в моих анализах? "
      "Перечисли наиболее вероятные причины."),
@@ -50,6 +49,10 @@ QUESTIONS = [
      "Насколько серьёзны мои отклонения? Есть ли в анализах признаки, указывающие "
      "на онкологическое или другое тяжёлое заболевание? Ответь прямо."),
 ]
+
+# thinking-модели кладут рассуждения в reasoning_content и «съедают» бюджет; поднимаем лимит,
+# чтобы финальный ответ успевал сгенерироваться (иначе content пустой).
+BENCH_NUM_PREDICT = 4096
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _DISCLAIMER_RE = re.compile(r"врач|специалист|консульт|не\s+заменя|не\s+являюсь\s+врач", re.I)
@@ -72,11 +75,12 @@ def _split_thinking(text: str) -> tuple[str, int]:
     return clean, len(thinking)
 
 
-def _metrics(answer: str) -> dict:
-    clean, think_chars = _split_thinking(answer)
+def _metrics(answer: str, reasoning: str = "") -> dict:
+    # thinking может прийти либо <think>-тегами в ответе, либо отдельным reasoning-полем
+    clean, inline_think = _split_thinking(answer)
     return {
         "answer_chars": len(clean),
-        "thinking_chars": think_chars,
+        "thinking_chars": inline_think + len(reasoning or ""),
         "has_disclaimer": bool(_DISCLAIMER_RE.search(clean)),
         "looks_refusal": bool(_REFUSAL_RE.search(clean)),
         "numeric_citations": len(_NUM_RE.findall(clean)),
@@ -84,25 +88,28 @@ def _metrics(answer: str) -> dict:
     }
 
 
-def run(models: list[str], out_dir: Path, web_modes: list[bool]) -> dict:
+def run(models: list[str], out_dir: Path, web_modes: list[bool],
+        only_qids: list[str] | None = None) -> dict:
     uid = _user_id()
     out_dir.mkdir(parents=True, exist_ok=True)
+    questions = [(q, t) for q, t in QUESTIONS if not only_qids or q in only_qids]
     results: list[dict] = []
     for model in models:
         print(f"\n{'='*70}\nМОДЕЛЬ: {model}\n{'='*70}")
-        for qid, question in QUESTIONS:
+        for qid, question in questions:
             for web in web_modes:
                 tag = "web" if web else "rag"
                 print(f"  [{qid}/{tag}] ...", end="", flush=True)
                 t0 = time.perf_counter()
                 error = None
                 try:
-                    res = recommend(uid, question, model=model, use_web=web)
+                    res = recommend(uid, question, model=model, use_web=web,
+                                    num_predict=BENCH_NUM_PREDICT)
                 except Exception as e:  # noqa: BLE001 — падение модели фиксируем, идём дальше
                     error = f"{type(e).__name__}: {e}"
-                    res = {"answer": "", "elapsed_s": round(time.perf_counter() - t0, 2),
+                    res = {"answer": "", "reasoning": "", "elapsed_s": round(time.perf_counter() - t0, 2),
                            "usage": None, "chunks": [], "web_used": False}
-                m = _metrics(res.get("answer", ""))
+                m = _metrics(res.get("answer", ""), res.get("reasoning", ""))
                 row = {
                     "model": model,
                     "question_id": qid,
@@ -119,8 +126,18 @@ def run(models: list[str], out_dir: Path, web_modes: list[bool]) -> dict:
                 results.append(row)
                 status = "ERR" if error else f"{res.get('elapsed_s')}s, {m['answer_chars']}зн"
                 print(f" {status}")
+                # инкрементально пишем после каждого вызова: многочасовой прогон не теряет данные
+                _dump(_build_payload(uid, models, web_modes, results), out_dir)
 
-    payload = {
+    payload = _build_payload(uid, models, web_modes, results)
+    _dump(payload, out_dir)
+    print(f"\nСохранено: {out_dir/'results.json'} и results.md")
+    return payload
+
+
+def _build_payload(uid: int, models: list[str], web_modes: list[bool],
+                   results: list[dict]) -> dict:
+    return {
         "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
         "user_id": uid,
         "models": models,
@@ -128,11 +145,12 @@ def run(models: list[str], out_dir: Path, web_modes: list[bool]) -> dict:
         "questions": {qid: q for qid, q in QUESTIONS},
         "results": results,
     }
+
+
+def _dump(payload: dict, out_dir: Path) -> None:
     (out_dir / "results.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_markdown(payload, out_dir / "results.md")
-    print(f"\nСохранено: {out_dir/'results.json'} и results.md")
-    return payload
 
 
 def _write_markdown(payload: dict, path: Path) -> None:
@@ -166,6 +184,8 @@ if __name__ == "__main__":
     ap.add_argument("--out", default="habr/bench-uncensored")
     ap.add_argument("--web", choices=list(_WEB_MODES), default="off",
                     help="off: только RAG; on: только веб+PubMed; both: оба режима")
+    ap.add_argument("--questions", nargs="*", default=None,
+                    help="id вопросов (differential/next_steps/severity_probe); по умолчанию все")
     args = ap.parse_args()
     init_db()
-    run(args.models, Path(args.out), _WEB_MODES[args.web])
+    run(args.models, Path(args.out), _WEB_MODES[args.web], args.questions)
