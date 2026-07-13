@@ -839,6 +839,79 @@
           <span class="profile-val" x-text="stats.total ?? 0"></span>
         </div>
       </div>
+      <!-- Профиль тела: учитывается ассистентом в рекомендациях -->
+      <div class="panel">
+        <div class="panel-head"><h2 class="panel-title">О себе</h2></div>
+        <p class="muted" style="margin-bottom:12px;font-size:13px">Эти данные видит только ассистент — они уточняют его рекомендации.</p>
+        <div class="filter-row">
+          <select class="filter-input" x-model="patient.profile.sex">
+            <option value="">Пол — не указан</option>
+            <option value="male">Мужской</option>
+            <option value="female">Женский</option>
+          </select>
+          <input type="date" class="filter-input" title="Дата рождения" x-model="patient.profile.birth_date">
+        </div>
+        <div class="filter-row" style="margin-top:10px">
+          <input type="number" step="any" class="filter-input" placeholder="Рост, см" x-model="patient.profile.height_cm">
+          <input type="number" step="any" class="filter-input" placeholder="Вес, кг" x-model="patient.profile.weight_kg">
+          <input type="text" class="filter-input" placeholder="Группа крови" x-model="patient.profile.blood_type">
+        </div>
+        <textarea class="filter-input" rows="2" placeholder="Аллергии (лекарства, продукты…)" style="margin-top:10px" x-model="patient.profile.allergies"></textarea>
+        <textarea class="filter-input" rows="2" placeholder="Хронические состояния" style="margin-top:10px" x-model="patient.profile.chronic_conditions"></textarea>
+        <button class="btn btn-primary" style="margin-top:10px" @click="savePatientProfile()" :disabled="patient.busy">Сохранить</button>
+      </div>
+
+      <!-- Жалобы в свободной форме -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Жалобы</h2>
+          <span class="panel-cnt" x-text="patient.complaints.length"></span>
+        </div>
+        <div class="filter-row">
+          <input type="text" class="filter-input" placeholder="Что беспокоит? Своими словами"
+                 x-model="patient.newComplaint" @keydown.enter="addComplaint()">
+          <button class="btn btn-primary" @click="addComplaint()">Записать</button>
+        </div>
+        <template x-for="c in patient.complaints" :key="c.id">
+          <div class="admin-user-row">
+            <div class="admin-user-main">
+              <span x-text="c.text" style="font-size:14px"></span>
+              <span class="admin-user-meta" x-text="fmtDate(c.created_at)"></span>
+            </div>
+            <button class="btn btn-ghost btn-danger" @click="deleteComplaint(c)">Удалить</button>
+          </div>
+        </template>
+      </div>
+
+      <!-- Текущие препараты -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Принимаю сейчас</h2>
+          <span class="panel-cnt" x-text="patient.medications.filter(m => m.is_active).length"></span>
+        </div>
+        <div class="filter-row">
+          <input type="text" class="filter-input" placeholder="Препарат *" x-model="patient.newMed.name">
+          <input type="text" class="filter-input" placeholder="Дозировка" x-model="patient.newMed.dosage">
+        </div>
+        <div class="filter-row" style="margin-top:10px">
+          <input type="text" class="filter-input" placeholder="Как принимаете (2 раза в день…)" x-model="patient.newMed.schedule">
+          <button class="btn btn-primary" @click="addMedication()">Добавить</button>
+        </div>
+        <template x-for="m in patient.medications" :key="m.id">
+          <div class="admin-user-row" :style="m.is_active ? '' : 'opacity:.55'">
+            <div class="admin-user-main">
+              <span class="admin-user-name" x-text="m.name + (m.dosage ? ' · ' + m.dosage : '')"></span>
+              <span class="admin-user-meta" x-text="(m.schedule || '') + (m.is_active ? '' : ' — приём завершён')"></span>
+            </div>
+            <div class="admin-user-actions">
+              <button class="btn btn-ghost" @click="toggleMedication(m)"
+                      x-text="m.is_active ? 'Завершить' : 'Возобновить'"></button>
+              <button class="btn btn-ghost btn-danger" @click="deleteMedication(m)">Удалить</button>
+            </div>
+          </div>
+        </template>
+      </div>
+
       <div class="panel">
         <div class="panel-head"><h2 class="panel-title">Идентификация (demo)</h2></div>
         <p class="muted" style="margin-bottom:12px;font-size:13px">На этапе разработки кабинет привязывается к идентификатору пользователя. Введите значение или используйте демонстрационный аккаунт.</p>

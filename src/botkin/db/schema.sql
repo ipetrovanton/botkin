@@ -95,6 +95,42 @@ CREATE TABLE IF NOT EXISTS doctor_reports (
 CREATE INDEX IF NOT EXISTS idx_doctor_reports_user ON doctor_reports(user_id, visit_date);
 CREATE INDEX IF NOT EXISTS idx_doctor_reports_document ON doctor_reports(document_id);
 
+-- ============ PATIENT FORMS (профиль тела, жалобы, текущие препараты) ============
+-- Данные форм подмешиваются в контекст RAG-рекомендаций (см. rag/recommend.py).
+
+CREATE TABLE IF NOT EXISTS patient_profile (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+    sex TEXT CHECK(sex IN ('male','female')),
+    birth_date TEXT,          -- ISO YYYY-MM-DD; возраст вычисляется, а не хранится
+    height_cm REAL,
+    weight_kg REAL,
+    blood_type TEXT,          -- «O(I) Rh+» и т.п.
+    allergies TEXT,
+    chronic_conditions TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS patient_complaints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    text TEXT NOT NULL,       -- жалоба в свободной форме
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_patient_complaints_user
+    ON patient_complaints(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS patient_medications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    dosage TEXT,              -- «500 мг», свободный формат
+    schedule TEXT,            -- «2 раза в день после еды»
+    is_active INTEGER NOT NULL DEFAULT 1,  -- 0 = приём завершён (история сохраняется)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_patient_medications_user
+    ON patient_medications(user_id, is_active);
+
 -- ============ HEALTH SYNC (Garmin / Strava / Apple Health) ============
 
 -- Подключённые источники данных о здоровье. Секреты (пароль) НЕ хранятся:

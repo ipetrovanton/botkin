@@ -106,6 +106,16 @@ function cabinet() {
     },
     assistant: { question: "", answer: "", chunks: [], busy: false },
 
+    // Формы пациента: профиль тела, жалобы, текущие препараты (учитываются в рекомендациях)
+    patient: {
+      profile: { sex: "", birth_date: "", height_cm: "", weight_kg: "", blood_type: "", allergies: "", chronic_conditions: "" },
+      complaints: [],
+      medications: [],
+      newComplaint: "",
+      newMed: { name: "", dosage: "", schedule: "" },
+      busy: false,
+    },
+
     // Администрирование (видно только роли admin — см. user.role)
     admin: {
       users: [],
@@ -173,6 +183,7 @@ function cabinet() {
       else if (s === "overview") this.loadStats();
       else if (s === "health") this.loadHealth();
       else if (s === "admin") this.adminLoadUsers();
+      else if (s === "profile") this.loadPatient();
       if (s !== "documents" && this.selMode) this.toggleSelMode();
     },
 
@@ -320,6 +331,100 @@ function cabinet() {
         this.api("/api/analytes").then((a) => { this.analytesCount = (a || []).length; });
       } catch (e) { this.toast("Не удалось загрузить сводку", "error"); console.error(e); }
       finally { this.loading.stats = false; }
+    },
+
+    // ===== Формы пациента =====
+    async loadPatient() {
+      try {
+        const [profile, complaints, meds] = await Promise.all([
+          this.api("/api/patient/profile"),
+          this.api("/api/patient/complaints"),
+          this.api("/api/patient/medications"),
+        ]);
+        const p = profile || {};
+        this.patient.profile = {
+          sex: p.sex || "", birth_date: p.birth_date || "",
+          height_cm: p.height_cm ?? "", weight_kg: p.weight_kg ?? "",
+          blood_type: p.blood_type || "", allergies: p.allergies || "",
+          chronic_conditions: p.chronic_conditions || "",
+        };
+        this.patient.complaints = complaints?.items || [];
+        this.patient.medications = meds?.items || [];
+      } catch (e) { console.error("patient", e); }
+    },
+
+    async savePatientProfile() {
+      const p = this.patient.profile;
+      this.patient.busy = true;
+      try {
+        await this.api("/api/patient/profile", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sex: p.sex || null,
+            birth_date: p.birth_date || null,
+            height_cm: p.height_cm === "" ? null : Number(p.height_cm),
+            weight_kg: p.weight_kg === "" ? null : Number(p.weight_kg),
+            blood_type: p.blood_type || null,
+            allergies: p.allergies || null,
+            chronic_conditions: p.chronic_conditions || null,
+          }),
+        });
+        this.toast("Профиль сохранён — будет учтён в рекомендациях", "success");
+      } catch (e) { this.toast("Не удалось сохранить профиль", "error"); console.error(e); }
+      finally { this.patient.busy = false; }
+    },
+
+    async addComplaint() {
+      const text = this.patient.newComplaint.trim();
+      if (text.length < 3) { this.toast("Опишите жалобу подробнее", "error"); return; }
+      try {
+        await this.api("/api/patient/complaints", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        this.patient.newComplaint = "";
+        this.toast("Жалоба записана", "success");
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось сохранить", "error"); console.error(e); }
+    },
+
+    async deleteComplaint(c) {
+      try {
+        await this.api(`/api/patient/complaints/${c.id}`, { method: "DELETE" });
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
+    },
+
+    async addMedication() {
+      const m = this.patient.newMed;
+      if (!m.name.trim()) { this.toast("Укажите название препарата", "error"); return; }
+      try {
+        await this.api("/api/patient/medications", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: m.name.trim(), dosage: m.dosage || null, schedule: m.schedule || null }),
+        });
+        this.patient.newMed = { name: "", dosage: "", schedule: "" };
+        this.toast("Препарат добавлен", "success");
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось добавить", "error"); console.error(e); }
+    },
+
+    async toggleMedication(m) {
+      try {
+        await this.api(`/api/patient/medications/${m.id}?is_active=${m.is_active ? "false" : "true"}`,
+                       { method: "PATCH" });
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось изменить статус", "error"); console.error(e); }
+    },
+
+    async deleteMedication(m) {
+      try {
+        await this.api(`/api/patient/medications/${m.id}`, { method: "DELETE" });
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
     },
 
     // ===== Верификация распознанного =====

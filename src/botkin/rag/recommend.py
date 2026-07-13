@@ -21,7 +21,7 @@ from botkin.config import (
 )
 from botkin.db.connection import get_conn
 from botkin.clinical.facts import build_lab_facts, render_lab_facts
-from botkin.db.repos import HealthRepo
+from botkin.db.repos import HealthRepo, PatientRepo
 from botkin.llm.client import get_raw_client
 from botkin.rag import retriever, websearch
 
@@ -60,10 +60,60 @@ _RECENT_MEDS_SQL = """
 """
 
 
+def _profile_context(conn, user_id: int) -> str | None:
+    """Формы пациента (этап 4): профиль тела, текущие препараты, свежие жалобы.
+
+    Возраст вычисляется из birth_date на момент запроса — хранимый «возраст» устаревает."""
+    repo = PatientRepo(conn, user_id)
+    profile = repo.get_profile()
+    meds = repo.list_medications(active_only=True)
+    complaints = repo.list_complaints(limit=5)
+    if not profile and not meds and not complaints:
+        return None
+    lines = ["Профиль пациента (заполнен им самим):"]
+    if profile:
+        sex_ru = {"male": "мужской", "female": "женский"}.get(profile.get("sex") or "")
+        if sex_ru:
+            lines.append(f"- Пол: {sex_ru}")
+        if profile.get("birth_date"):
+            try:
+                born = dt.date.fromisoformat(profile["birth_date"])
+                today = dt.date.today()
+                age = today.year - born.year - (
+                    (today.month, today.day) < (born.month, born.day)
+                )
+                lines.append(f"- Возраст: {age}")
+            except ValueError:
+                pass
+        if profile.get("height_cm"):
+            lines.append(f"- Рост: {profile['height_cm']:g} см")
+        if profile.get("weight_kg"):
+            lines.append(f"- Вес: {profile['weight_kg']:g} кг")
+        if profile.get("blood_type"):
+            lines.append(f"- Группа крови: {profile['blood_type']}")
+        if profile.get("allergies"):
+            lines.append(f"- Аллергии: {profile['allergies']}")
+        if profile.get("chronic_conditions"):
+            lines.append(f"- Хронические состояния: {profile['chronic_conditions']}")
+    if meds:
+        med_strs = [
+            " ".join(filter(None, [m["name"], m["dosage"], m["schedule"]]))
+            for m in meds[:10]
+        ]
+        lines.append("- Принимаемые сейчас препараты: " + "; ".join(med_strs))
+    if complaints:
+        lines.append("- Актуальные жалобы: " + " | ".join(c["text"] for c in complaints))
+    return "\n".join(lines) if len(lines) > 1 else None
+
+
 def _patient_context(user_id: int) -> str:
-    """Отклонения анализов + назначенные лекарства + агрегаты носимых устройств."""
+    """Профиль/жалобы/препараты + отклонения анализов + назначения + носимые устройства."""
     parts: list[str] = []
     with get_conn() as conn:
+        profile_block = _profile_context(conn, user_id)
+        if profile_block:
+            parts.append(profile_block)
+
         labs = conn.execute(_RECENT_LABS_SQL, (user_id,)).fetchall()
         if labs:
             facts = build_lab_facts(labs)
