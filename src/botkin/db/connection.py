@@ -12,6 +12,10 @@ SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
 # Колонки, добавляемые поверх существующих таблиц (идемпотентно).
 _MIGRATIONS: dict[str, dict[str, str]] = {
+    "health_accounts": {
+        # частота автосинка (часы); NULL = только вручную
+        "sync_interval_hours": "INTEGER",
+    },
     "users": {
         # CHECK через ALTER в SQLite не добавить — инвариант ролей держит UserRepo.
         "role": "TEXT NOT NULL DEFAULT 'user'",

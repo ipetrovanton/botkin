@@ -926,9 +926,35 @@ class HealthRepo(BaseRepo):
 
     def list_accounts(self) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT provider, identifier, status, last_error, last_sync_at, created_at "
+            "SELECT provider, identifier, status, last_error, last_sync_at, "
+            "sync_interval_hours, created_at "
             "FROM health_accounts WHERE user_id = ? ORDER BY provider",
             (self.user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def set_sync_interval(self, provider: str, hours: int | None) -> bool:
+        """Частота автосинка; None = только вручную."""
+        cur = self.conn.execute(
+            "UPDATE health_accounts SET sync_interval_hours = ? "
+            "WHERE user_id = ? AND provider = ?",
+            (hours, self.user_id, provider),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    @staticmethod
+    def accounts_due_for_sync(conn) -> list[dict]:
+        """Аккаунты, чей интервал автосинка истёк (для планировщика; все пользователи).
+
+        Сравнение на стороне SQLite: last_sync_at хранится в UTC (CURRENT_TIMESTAMP),
+        поэтому и сравниваем с datetime('now'). NULL last_sync_at = ни разу не синкали — пора."""
+        rows = conn.execute(
+            "SELECT user_id, provider FROM health_accounts "
+            "WHERE status = 'connected' AND sync_interval_hours IS NOT NULL "
+            "AND (last_sync_at IS NULL OR "
+            "     datetime(last_sync_at, '+' || sync_interval_hours || ' hours') "
+            "       <= datetime('now'))"
         ).fetchall()
         return [dict(r) for r in rows]
 

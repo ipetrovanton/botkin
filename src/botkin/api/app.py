@@ -20,8 +20,11 @@ async def lifespan(app: FastAPI):
     init_db()
     # Прогрев моделей — фоном, чтобы не блокировать старт API (см. client.warmup).
     warmup_task = asyncio.create_task(asyncio.to_thread(warmup))
+    # Планировщик автосинка health-данных по расписанию пользователя.
+    scheduler_task = asyncio.create_task(health_sync.scheduler_loop())
     yield
     warmup_task.cancel()
+    scheduler_task.cancel()
 
 
 app = FastAPI(title="botkin API", version="0.2.0", lifespan=lifespan)

@@ -1,6 +1,8 @@
-"""API веб-кабинета: подключение источников здоровья и синхронизация данных."""
+"""API веб-кабинета: подключение источников здоровья, синхронизация данных
+и планировщик автосинка по расписанию пользователя."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import threading
@@ -109,6 +111,60 @@ def sync_garmin(
         _sync_progress[user_id] = {"state": "running", "done": 0, "total": days + 2}
     background_tasks.add_task(_run_garmin_sync, user_id, days)
     return {"status": "started", "days": days}
+
+
+class ScheduleRequest(BaseModel):
+    """Частота автосинка в часах; null = только вручную. Минимум 1ч — чаще нет смысла:
+    Garmin отдаёт дневные агрегаты, а частый опрос упирается в их rate limit."""
+
+    interval_hours: int | None = None
+
+
+@router.patch("/accounts/{provider}/schedule")
+def set_schedule(
+    provider: str, req: ScheduleRequest, user_id: int = Depends(get_user_id),
+) -> dict:
+    if req.interval_hours is not None and not (1 <= req.interval_hours <= 168):
+        raise HTTPException(status_code=422, detail="Интервал: от 1 до 168 часов")
+    with get_conn() as conn:
+        if not HealthRepo(conn, user_id).set_sync_interval(provider, req.interval_hours):
+            raise HTTPException(status_code=404, detail="Источник не подключён")
+    return {"provider": provider, "interval_hours": req.interval_hours}
+
+
+# Шаг проверки расписания. 15 мин достаточно: минимальный интервал автосинка — 1 час.
+SCHEDULER_TICK_SECONDS = 900
+
+
+async def scheduler_loop() -> None:
+    """Фоновый автосинк: запускается из lifespan API-процесса.
+
+    Отдельного планировщика (celery/cron) не заводим: один процесс API,
+    asyncio-цикла достаточно; пропущенный за время дауна тик наверстается
+    при следующем старте (сравнение идёт по last_sync_at, а не по таймеру)."""
+    while True:
+        try:
+            await run_due_syncs()
+        except Exception:
+            log.exception("Планировщик автосинка: сбой тика")
+        await asyncio.sleep(SCHEDULER_TICK_SECONDS)
+
+
+async def run_due_syncs() -> None:
+    """Один тик планировщика: синк всех аккаунтов с истёкшим интервалом."""
+    with get_conn() as conn:
+        due = HealthRepo.accounts_due_for_sync(conn)
+    for account in due:
+        if account["provider"] != "garmin":
+            continue  # автосинк пока только для Garmin (strava/apple — push-модель)
+        uid = account["user_id"]
+        with _sync_lock:
+            if _sync_progress.get(uid, {}).get("state") == "running":
+                continue  # ручной синк уже идёт — не дублируем
+            _sync_progress[uid] = {"state": "running", "done": 0, "total": HEALTH_SYNC_DAYS + 2}
+        log.info("Автосинк Garmin по расписанию: user %s", uid)
+        # fetch — блокирующий (requests внутри garminconnect) → в поток
+        await asyncio.to_thread(_run_garmin_sync, uid, HEALTH_SYNC_DAYS)
 
 
 @router.get("/sync/status")

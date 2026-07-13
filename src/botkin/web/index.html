@@ -600,6 +600,20 @@
             <div class="muted" style="margin-top:8px;font-size:12px" x-show="healthAccount('garmin')?.last_sync_at">
               Последняя синхронизация: <span x-text="fmtDate(healthAccount('garmin')?.last_sync_at)"></span>
             </div>
+            <!-- Автосинк по расписанию -->
+            <div style="margin-top:12px">
+              <label class="muted" style="font-size:13px;display:block;margin-bottom:4px">Автосинхронизация</label>
+              <div class="filter-row">
+                <select class="filter-input" @change="setSyncSchedule($event)" style="max-width:240px">
+                  <option value="" :selected="!healthAccount('garmin')?.sync_interval_hours">Только вручную</option>
+                  <option value="1" :selected="healthAccount('garmin')?.sync_interval_hours===1">Каждый час</option>
+                  <option value="3" :selected="healthAccount('garmin')?.sync_interval_hours===3">Каждые 3 часа</option>
+                  <option value="6" :selected="healthAccount('garmin')?.sync_interval_hours===6">Каждые 6 часов</option>
+                  <option value="12" :selected="healthAccount('garmin')?.sync_interval_hours===12">Каждые 12 часов</option>
+                  <option value="24" :selected="healthAccount('garmin')?.sync_interval_hours===24">Раз в сутки</option>
+                </select>
+              </div>
+            </div>
           </div>
         </template>
 

@@ -1015,6 +1015,19 @@ function cabinet() {
         this.pollSync();
       } catch (e) { this.toast("Не удалось запустить синхронизацию", "error"); console.error(e); }
     },
+    async setSyncSchedule(event) {
+      const val = event.target.value;
+      const hours = val ? parseInt(val, 10) : null;
+      try {
+        await this.api("/api/health/accounts/garmin/schedule", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ interval_hours: hours }),
+        });
+        this.toast(hours ? `Автосинк: каждые ${hours} ч` : "Автосинк выключен", "success");
+        this.loadHealth();
+      } catch (e) { this.toast("Не удалось сохранить расписание", "error"); console.error(e); }
+    },
     async pollSync() {
       try {
         const st = await this.api("/api/health/sync/status");

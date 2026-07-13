@@ -147,6 +147,8 @@ CREATE TABLE IF NOT EXISTS health_accounts (
         CHECK(status IN ('connected','error','disconnected')),
     last_error TEXT,
     last_sync_at TIMESTAMP,
+    -- частота автосинка в часах; NULL = только вручную (см. api/routes/health_sync.py)
+    sync_interval_hours INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, provider)
 );
