@@ -18,6 +18,8 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "title": "TEXT",
         "clinic": "TEXT",
         "delivered_at": "TIMESTAMP",
+        # unix-время входа в текущую стадию — для достоверного прогресс-бара
+        "stage_started_at": "REAL",
     },
     "lab_results": {
         "value_raw": "TEXT", "unit_raw": "TEXT", "taken_at_raw": "TEXT",
@@ -75,11 +77,13 @@ def _migrate_documents_schema(conn: sqlite3.Connection) -> None:
         title TEXT,
         clinic TEXT,
         delivered_at TIMESTAMP,
+        stage_started_at REAL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """
     new_cols = ["id", "user_id", "doc_type", "source_path", "raw_text", "status",
-                "confidence", "raw_extraction", "title", "clinic", "delivered_at", "created_at"]
+                "confidence", "raw_extraction", "title", "clinic", "delivered_at",
+                "stage_started_at", "created_at"]
     old_cols = {r["name"] for r in conn.execute("PRAGMA table_info(documents)").fetchall()}
     shared = ", ".join(c for c in new_cols if c in old_cols)
 

@@ -110,9 +110,27 @@ class DocumentRepo(BaseRepo):
         return labs + reports
 
     def set_status(self, document_id: int, status: str) -> None:
+        """Меняет стадию + фиксирует время входа в неё и EMA длительности предыдущей.
+
+        stage_started_at нужен достоверному прогресс-бару (elapsed внутри стадии),
+        EMA — оценке ожидаемой длительности следующих прогонов (см. progress_model).
+        """
+        import time as _time
+
+        from botkin.pipeline.progress_model import StageDurationStore
+
+        now = _time.time()
+        prev = self.conn.execute(
+            "SELECT status, stage_started_at FROM documents WHERE id = ? AND user_id = ?",
+            (document_id, self.user_id),
+        ).fetchone()
+        if prev and prev["status"] and prev["stage_started_at"]:
+            duration = now - float(prev["stage_started_at"])
+            if 0 < duration < 3600:  # аномалии (час+) не портят EMA
+                StageDurationStore(self.conn).record(prev["status"], duration)
         self.conn.execute(
-            "UPDATE documents SET status = ? WHERE id = ? AND user_id = ?",
-            (status, document_id, self.user_id),
+            "UPDATE documents SET status = ?, stage_started_at = ? WHERE id = ? AND user_id = ?",
+            (status, now, document_id, self.user_id),
         )
         self.conn.commit()
 
@@ -165,6 +183,14 @@ class DocumentRepo(BaseRepo):
             (document_id, self.user_id),
         ).fetchone()
         return row["status"] if row else None
+
+    def get_progress_row(self, document_id: int) -> dict | None:
+        """Статус + время входа в стадию — для оценки прогресса и ETA."""
+        row = self.conn.execute(
+            "SELECT status, stage_started_at FROM documents WHERE id = ? AND user_id = ?",
+            (document_id, self.user_id),
+        ).fetchone()
+        return dict(row) if row else None
 
     def get_last(self) -> dict | None:
         """Последний документ пользователя."""

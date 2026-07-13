@@ -206,7 +206,8 @@ function cabinet() {
       // Прогресс повторного распознавания виден в очереди на экране загрузки.
       this.queue.unshift({
         id: ++this._seq, name: doc.title || `Документ #${doc.id}`,
-        state: "processing", status: "received", docId: doc.id, progress: 0,
+        state: "processing", status: "received", docId: doc.id,
+        progress: 2, etaSeconds: null, stageElapsedSeconds: 0, alive: true,
       });
       this.pollStatus(this.queue[0]);
       this.toast("Документ отправлен на повторное распознавание", "info");
@@ -443,7 +444,10 @@ function cabinet() {
       if (!files.length) return;
       for (const file of files) {
         if (file.size > 20 * 1024 * 1024) { this.toast(`${file.name}: больше 20 МБ`, "error"); continue; }
-        const raw = { id: ++this._seq, name: file.name, state: "uploading", status: "received", docId: null, progress: 0 };
+        const raw = {
+          id: ++this._seq, name: file.name, state: "uploading", status: "received", docId: null,
+          progress: 0, etaSeconds: null, stageElapsedSeconds: 0, alive: true,
+        };
         this.queue.unshift(raw);
         // После unshift элемент в массиве обёрнут в reactive-Proxy; внешняя ссылка `raw`
         // остаётся на оригинале — мутации через raw НЕ триггерят перерисовку x-for.
@@ -476,13 +480,8 @@ function cabinet() {
     },
     // Поллинг статуса: обновляем стадию, останавливаемся на extracted/failed.
     async pollStatus(item) {
-      const start = Date.now();
-      const timeoutMs = 180000;
       const tick = async () => {
         if (item.state === "failed" || item.status === "extracted") return;
-        if (Date.now() - start > timeoutMs) {
-          item.state = "failed"; this.toast(`${item.name}: превышено время ожидания`, "error"); return;
-        }
         try {
           const data = await this.api(`/api/documents/${item.docId}/status`);
           if (!data) {
@@ -494,7 +493,12 @@ function cabinet() {
             return;
           }
           item.status = data.status;
+          item.progress = Number.isFinite(data.percent) ? data.percent : (STAGE_PROGRESS[data.status] ?? 0);
+          item.etaSeconds = Number.isFinite(data.eta_seconds) ? data.eta_seconds : null;
+          item.stageElapsedSeconds = Number.isFinite(data.stage_elapsed_s) ? data.stage_elapsed_s : 0;
+          item.alive = data.alive !== false;
           if (data.status === "extracted") {
+            item.progress = 100;
             item.state = "done";
             this.toast(`${item.name} обработан`, "success");
             this.loadStats();
@@ -503,13 +507,26 @@ function cabinet() {
             this.toast(`${item.name}: ошибка обработки`, "error");
           } else {
             item.state = "processing";
-            setTimeout(tick, 2000);
+            setTimeout(tick, item.alive ? 2000 : 5000);
           }
-        } catch (e) { setTimeout(tick, 3000); }
+        } catch (e) {
+          // Сеть может кратко пропасть; не превращаем временную ошибку в ложный failed.
+          item.alive = false;
+          setTimeout(tick, 5000);
+        }
       };
       setTimeout(tick, 1500);
     },
-    progressPct(item) { return STAGE_PROGRESS[item.status] ?? 0; },
+    progressPct(item) { return Number.isFinite(item.progress) ? item.progress : (STAGE_PROGRESS[item.status] ?? 0); },
+    etaText(item) {
+      if (item.state === "uploading") return "Передаю документ…";
+      if (item.state === "done") return "Результат готов";
+      if (item.state === "failed") return "Нужно повторить загрузку";
+      if (!item.alive) return "Связь с сервером прервалась — перепроверяю…";
+      if (item.etaSeconds === null) return "Модель готовит анализ…";
+      if (item.etaSeconds < 60) return `Ориентир: меньше минуты · ${item.progress}%`;
+      return `Ориентир: около ${Math.ceil(item.etaSeconds / 60)} мин · ${item.progress}%`;
+    },
     stageDone(item, stage) {
       // processing — промежуточный статус между received и recognizing;
       // без него indexOf = -1 и чекпоинты стадий «прыгали».

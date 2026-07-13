@@ -26,6 +26,8 @@ dependencies = [
     "numpy>=1.26",
     "garminconnect>=0.3.6",
     "sqlite-vec>=0.1.9",
+    "fpdf2>=2.8.7",
+    "markdown>=3.10.2",
 ]
 
 [dependency-groups]
@@ -49,9 +51,10 @@ pythonpath = ["src", "."]
 asyncio_default_fixture_loop_scope = "function"
 # По умолчанию e2e с реальной Ollama не гоняем: окружение без GPU (CI) иначе флапает.
 # Запуск явно: `uv run pytest -m llm` (командный -m переопределяет этот фильтр).
-addopts = "-m 'not llm'"
+addopts = "-m 'not llm and not reasoning'"
 markers = [
     "llm: e2e-тесты, дёргающие реальную Ollama (авто-skip, если модель недоступна)",
+    "reasoning: e2e-тесты medical reasoning через локальные uncensored LLM (авто-skip, если модель недоступна)",
 ]
 
 [tool.ruff]

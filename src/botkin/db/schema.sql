@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS documents (
     title TEXT,
     clinic TEXT,
     delivered_at TIMESTAMP,
+    -- unix-время входа в текущую стадию: достоверный прогресс-бар считает elapsed внутри стадии
+    stage_started_at REAL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
@@ -161,3 +163,13 @@ CREATE TABLE IF NOT EXISTS rag_chunks (
     UNIQUE(source, ref_key)
 );
 CREATE INDEX IF NOT EXISTS idx_rag_chunks_source ON rag_chunks(source);
+
+-- ============ PROGRESS ============
+
+-- EMA длительностей стадий pipeline — историческая база для оценки прогресса и ETA
+-- (см. pipeline/progress_model.py).
+CREATE TABLE IF NOT EXISTS stage_durations (
+    stage TEXT PRIMARY KEY,
+    ema_seconds REAL NOT NULL,
+    samples INTEGER NOT NULL DEFAULT 0
+);

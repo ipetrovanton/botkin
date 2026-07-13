@@ -20,6 +20,7 @@ from botkin.config import (
     RAG_RECOMMEND_NUM_PREDICT, RAG_TOP_K, RAG_WEB_ENABLED, RAG_WEB_RESULTS,
 )
 from botkin.db.connection import get_conn
+from botkin.clinical.facts import build_lab_facts, render_lab_facts
 from botkin.db.repos import HealthRepo
 from botkin.llm.client import get_raw_client
 from botkin.rag import retriever, websearch
@@ -43,7 +44,7 @@ SYSTEM_PROMPT = """Ты — медицинский ассистент серви
 
 _RECENT_LABS_SQL = """
     SELECT COALESCE(analyte_canonical, analyte_name) AS name, value_num, unit,
-           ref_low, ref_high, taken_at
+           ref_low, ref_high, ref_text, taken_at
     FROM lab_results
     WHERE user_id = ? AND value_num IS NOT NULL
       AND (ref_low IS NOT NULL OR ref_high IS NOT NULL)
@@ -65,15 +66,8 @@ def _patient_context(user_id: int) -> str:
     with get_conn() as conn:
         labs = conn.execute(_RECENT_LABS_SQL, (user_id,)).fetchall()
         if labs:
-            lines = ["Отклонения в анализах пациента (свежие):"]
-            for r in labs:
-                ref = f"норма {r['ref_low']:g}–{r['ref_high']:g}" if r["ref_low"] is not None \
-                    and r["ref_high"] is not None else f"норма до {r['ref_high']:g}" \
-                    if r["ref_high"] is not None else f"норма от {r['ref_low']:g}"
-                lines.append(
-                    f"- {r['name']}: {r['value_num']:g} {r['unit'] or ''} ({ref}), {r['taken_at']}"
-                )
-            parts.append("\n".join(lines))
+            facts = build_lab_facts(labs)
+            parts.append(render_lab_facts(facts))
 
         meds_rows = conn.execute(_RECENT_MEDS_SQL, (user_id,)).fetchall()
         med_names: list[str] = []

@@ -340,8 +340,15 @@
               <span class="queue-name" x-text="item.name"></span>
               <span class="queue-status" :class="'queue-status--'+item.state" x-text="queueStateText(item)"></span>
             </div>
-            <div class="progress-track">
+            <div class="progress-track" role="progressbar" :aria-valuenow="progressPct(item)" aria-valuemin="0" aria-valuemax="100">
               <div class="progress-bar" :class="'progress-bar--'+item.state" :style="`width:${progressPct(item)}%`"></div>
+            </div>
+            <div class="queue-progress-meta">
+              <span class="queue-progress-pct" x-text="`${progressPct(item)}%`"></span>
+              <span class="queue-progress-status" :class="{'is-alive': item.alive && item.state === 'processing'}">
+                <span class="status-pulse" x-show="item.alive && item.state === 'processing'"></span>
+                <span x-text="etaText(item)"></span>
+              </span>
             </div>
             <div class="queue-stages">
               <span class="stage" :class="{done: stageDone(item,'received'), active: item.status==='received' || item.status==='processing'}">Принят</span>
