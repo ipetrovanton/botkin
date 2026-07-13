@@ -95,6 +95,20 @@ function cabinet() {
       garminEmail: "", garminPassword: "", connecting: false,
     },
     assistant: { question: "", answer: "", chunks: [], busy: false },
+
+    // Администрирование (видно только роли admin — см. user.role)
+    admin: {
+      users: [],
+      newUser: { telegram_user_id: "", display_name: "" },
+      labsUser: null,          // пользователь, чьи анализы открыты
+      labs: { items: [], total: 0 },
+      labsQuery: "",
+      labsOffset: 0,
+      editLab: null,           // копия строки в форме редактирования (null = закрыта)
+      newLabOpen: false,
+      newLab: { analyte_name: "", value_num: "", unit: "", ref_low: "", ref_high: "", taken_at: "" },
+      busy: false,
+    },
     ragIndex: { chunks: {}, reindex: { state: "idle" } },
 
     // UI-состояние
@@ -148,6 +162,7 @@ function cabinet() {
       else if (s === "reports") this.loadReports();
       else if (s === "overview") this.loadStats();
       else if (s === "health") this.loadHealth();
+      else if (s === "admin") this.adminLoadUsers();
       if (s !== "documents" && this.selMode) this.toggleSelMode();
     },
 
@@ -257,6 +272,141 @@ function cabinet() {
         this.api("/api/analytes").then((a) => { this.analytesCount = (a || []).length; });
       } catch (e) { this.toast("Не удалось загрузить сводку", "error"); console.error(e); }
       finally { this.loading.stats = false; }
+    },
+
+    // ===== Администрирование =====
+    isAdmin() { return this.user?.role === "admin"; },
+
+    async adminLoadUsers() {
+      try {
+        const data = await this.api("/api/admin/users");
+        this.admin.users = data?.items || [];
+      } catch (e) { this.toast("Нет доступа к администрированию", "error"); console.error(e); }
+    },
+
+    async adminCreateUser() {
+      const tg = parseInt(String(this.admin.newUser.telegram_user_id).trim(), 10);
+      if (!tg || tg <= 0) { this.toast("Введите числовой Telegram ID", "error"); return; }
+      try {
+        await this.api("/api/admin/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ telegram_user_id: tg, display_name: this.admin.newUser.display_name || null }),
+        });
+        this.admin.newUser = { telegram_user_id: "", display_name: "" };
+        this.toast("Пользователь добавлен", "success");
+        this.adminLoadUsers();
+      } catch (e) {
+        this.toast(String(e.message).includes("409") ? "Такой пользователь уже есть" : "Не удалось добавить пользователя", "error");
+      }
+    },
+
+    async adminSetRole(u, role) {
+      try {
+        await this.api(`/api/admin/users/${u.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role }),
+        });
+        this.toast(`Роль обновлена: ${role}`, "success");
+      } catch (e) {
+        this.toast(String(e.message).includes("409") ? "Нельзя разжаловать последнего администратора" : "Не удалось сменить роль", "error");
+      }
+      this.adminLoadUsers();
+    },
+
+    async adminDeleteUser(u) {
+      if (!confirm(`Удалить пользователя ${u.display_name || u.telegram_user_id} со всеми данными? Это необратимо.`)) return;
+      try {
+        await this.api(`/api/admin/users/${u.id}`, { method: "DELETE" });
+        this.toast("Пользователь удалён", "success");
+        if (this.admin.labsUser?.id === u.id) this.admin.labsUser = null;
+      } catch (e) {
+        this.toast(String(e.message).includes("409") ? "Нельзя удалить самого себя" : "Не удалось удалить", "error");
+      }
+      this.adminLoadUsers();
+    },
+
+    async adminOpenLabs(u) {
+      this.admin.labsUser = u;
+      this.admin.labsQuery = "";
+      this.admin.labsOffset = 0;
+      this.admin.editLab = null;
+      this.admin.newLabOpen = false;
+      await this.adminLoadLabs();
+    },
+
+    async adminLoadLabs() {
+      if (!this.admin.labsUser) return;
+      try {
+        const p = new URLSearchParams({ limit: 50, offset: this.admin.labsOffset });
+        if (this.admin.labsQuery) p.set("q", this.admin.labsQuery);
+        const data = await this.api(`/api/admin/users/${this.admin.labsUser.id}/labs?${p}`);
+        this.admin.labs = data || { items: [], total: 0 };
+      } catch (e) { this.toast("Не удалось загрузить анализы", "error"); console.error(e); }
+    },
+
+    adminStartEditLab(row) {
+      // Копия, а не ссылка: отмена редактирования не должна портить список.
+      this.admin.editLab = { ...row };
+    },
+
+    async adminSaveLab() {
+      const l = this.admin.editLab;
+      if (!l) return;
+      this.admin.busy = true;
+      try {
+        await this.api(`/api/admin/labs/${l.id}?user_id=${this.admin.labsUser.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analyte_name: l.analyte_name,
+            value_num: l.value_num === "" ? null : Number(l.value_num),
+            unit: l.unit || null,
+            ref_low: l.ref_low === "" ? null : Number(l.ref_low),
+            ref_high: l.ref_high === "" ? null : Number(l.ref_high),
+            taken_at: l.taken_at || null,
+          }),
+        });
+        this.admin.editLab = null;
+        this.toast("Показатель обновлён", "success");
+        this.adminLoadLabs();
+      } catch (e) { this.toast("Не удалось сохранить", "error"); console.error(e); }
+      finally { this.admin.busy = false; }
+    },
+
+    async adminDeleteLab(row) {
+      if (!confirm(`Удалить показатель «${row.analyte_name}»?`)) return;
+      try {
+        await this.api(`/api/admin/labs/${row.id}?user_id=${this.admin.labsUser.id}`, { method: "DELETE" });
+        this.toast("Показатель удалён", "success");
+        this.adminLoadLabs();
+      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
+    },
+
+    async adminAddLab() {
+      const n = this.admin.newLab;
+      if (!n.analyte_name.trim()) { this.toast("Название показателя обязательно", "error"); return; }
+      this.admin.busy = true;
+      try {
+        await this.api(`/api/admin/users/${this.admin.labsUser.id}/labs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analyte_name: n.analyte_name.trim(),
+            value_num: n.value_num === "" ? null : Number(n.value_num),
+            unit: n.unit || null,
+            ref_low: n.ref_low === "" ? null : Number(n.ref_low),
+            ref_high: n.ref_high === "" ? null : Number(n.ref_high),
+            taken_at: n.taken_at || null,
+          }),
+        });
+        this.admin.newLab = { analyte_name: "", value_num: "", unit: "", ref_low: "", ref_high: "", taken_at: "" };
+        this.admin.newLabOpen = false;
+        this.toast("Показатель добавлен", "success");
+        this.adminLoadLabs();
+      } catch (e) { this.toast("Не удалось добавить", "error"); console.error(e); }
+      finally { this.admin.busy = false; }
     },
 
     async loadSelectors() {

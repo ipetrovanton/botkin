@@ -45,6 +45,9 @@
         <svg x-show="theme==='dark'" viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         <svg x-show="theme==='light'" viewBox="0 0 24 24" width="20" height="20" style="display:none"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
       </button>
+      <button class="icon-btn" x-show="isAdmin()" @click="go('admin')" :class="{active: screen==='admin'}" title="Администрирование" aria-label="Администрирование" style="display:none">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 3l7 3v5c0 4.4-3 8.4-7 9.5C8 19.4 5 15.4 5 11V6l7-3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 12l1.8 1.8 3.4-3.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
       <button class="icon-btn" @click="go('profile')" :class="{active: screen==='profile'}" title="Профиль" aria-label="Профиль">
         <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
@@ -586,6 +589,128 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- ====== АДМИНИСТРИРОВАНИЕ ====== -->
+    <section x-show="screen==='admin'" class="screen">
+      <div class="screen-head">
+        <h1 class="screen-title">Администрирование</h1>
+        <p class="screen-sub">Пользователи и их анализы</p>
+      </div>
+
+      <div class="panel" x-show="!isAdmin()">
+        <p class="muted">Доступ только для администратора.</p>
+      </div>
+
+      <template x-if="isAdmin()">
+        <div>
+          <!-- Пользователи -->
+          <div class="panel">
+            <div class="panel-head">
+              <h2 class="panel-title">Пользователи</h2>
+              <span class="panel-cnt" x-text="admin.users.length"></span>
+            </div>
+            <template x-for="u in admin.users" :key="u.id">
+              <div class="admin-user-row">
+                <div class="admin-user-main">
+                  <span class="admin-user-name" x-text="u.display_name || ('ID ' + u.telegram_user_id)"></span>
+                  <span class="admin-user-meta">
+                    <span x-text="'tg:' + u.telegram_user_id"></span> ·
+                    <span x-text="u.documents + ' док.'"></span> ·
+                    <span x-text="u.lab_results + ' показ.'"></span>
+                  </span>
+                </div>
+                <div class="admin-user-actions">
+                  <select class="filter-input admin-role-select" :value="u.role" @change="adminSetRole(u, $event.target.value)" :disabled="u.id===user?.id" :title="u.id===user?.id ? 'Свою роль меняет другой администратор' : 'Роль'">
+                    <option value="user">пациент</option>
+                    <option value="admin">админ</option>
+                  </select>
+                  <button class="btn btn-ghost" @click="adminOpenLabs(u)">Анализы</button>
+                  <button class="btn btn-ghost btn-danger" @click="adminDeleteUser(u)" :disabled="u.id===user?.id">Удалить</button>
+                </div>
+              </div>
+            </template>
+            <!-- Добавление пользователя -->
+            <div class="filter-row" style="margin-top:12px">
+              <input type="text" inputmode="numeric" class="filter-input" placeholder="Telegram ID" x-model="admin.newUser.telegram_user_id">
+              <input type="text" class="filter-input" placeholder="Имя (необязательно)" x-model="admin.newUser.display_name">
+              <button class="btn btn-primary" @click="adminCreateUser()">Добавить</button>
+            </div>
+          </div>
+
+          <!-- Анализы выбранного пользователя -->
+          <div class="panel" x-show="admin.labsUser">
+            <div class="panel-head">
+              <h2 class="panel-title" x-text="'Анализы: ' + (admin.labsUser?.display_name || ('ID ' + admin.labsUser?.telegram_user_id))"></h2>
+              <span class="panel-cnt" x-text="admin.labs.total"></span>
+            </div>
+            <div class="filter-row">
+              <input type="search" class="filter-input" placeholder="Поиск по показателю" x-model.debounce.400ms="admin.labsQuery" @input="admin.labsOffset=0; adminLoadLabs()">
+              <button class="btn btn-ghost" @click="admin.newLabOpen = !admin.newLabOpen" x-text="admin.newLabOpen ? 'Скрыть форму' : 'Добавить показатель'"></button>
+            </div>
+
+            <!-- Форма добавления -->
+            <div class="admin-lab-form" x-show="admin.newLabOpen">
+              <input type="text" class="filter-input" placeholder="Название показателя *" x-model="admin.newLab.analyte_name">
+              <div class="filter-row">
+                <input type="number" step="any" class="filter-input" placeholder="Значение" x-model="admin.newLab.value_num">
+                <input type="text" class="filter-input" placeholder="Ед." x-model="admin.newLab.unit">
+              </div>
+              <div class="filter-row">
+                <input type="number" step="any" class="filter-input" placeholder="Норма от" x-model="admin.newLab.ref_low">
+                <input type="number" step="any" class="filter-input" placeholder="Норма до" x-model="admin.newLab.ref_high">
+                <input type="date" class="filter-input" title="Дата взятия" x-model="admin.newLab.taken_at">
+              </div>
+              <button class="btn btn-primary" @click="adminAddLab()" :disabled="admin.busy">Сохранить показатель</button>
+            </div>
+
+            <!-- Список с редактированием -->
+            <template x-for="r in admin.labs.items" :key="r.id">
+              <div>
+                <div class="admin-lab-row" x-show="admin.editLab?.id !== r.id">
+                  <div class="admin-lab-main">
+                    <span class="lab-name" x-text="r.analyte_canonical || r.analyte_name"></span>
+                    <span class="admin-user-meta">
+                      <span x-text="(r.value_num ?? r.value_text ?? '—') + (r.unit ? ' ' + r.unit : '')"></span>
+                      · <span x-text="r.taken_at || 'без даты'"></span>
+                    </span>
+                  </div>
+                  <div class="admin-user-actions">
+                    <button class="btn btn-ghost" @click="adminStartEditLab(r)">Изменить</button>
+                    <button class="btn btn-ghost btn-danger" @click="adminDeleteLab(r)">Удалить</button>
+                  </div>
+                </div>
+                <!-- Инлайн-редактор: x-if (не x-show) — x-model не должен читать null-editLab -->
+                <template x-if="admin.editLab?.id === r.id">
+                  <div class="admin-lab-form">
+                    <input type="text" class="filter-input" placeholder="Название" x-model="admin.editLab.analyte_name">
+                    <div class="filter-row">
+                      <input type="number" step="any" class="filter-input" placeholder="Значение" x-model="admin.editLab.value_num">
+                      <input type="text" class="filter-input" placeholder="Ед." x-model="admin.editLab.unit">
+                    </div>
+                    <div class="filter-row">
+                      <input type="number" step="any" class="filter-input" placeholder="Норма от" x-model="admin.editLab.ref_low">
+                      <input type="number" step="any" class="filter-input" placeholder="Норма до" x-model="admin.editLab.ref_high">
+                      <input type="date" class="filter-input" title="Дата взятия" x-model="admin.editLab.taken_at">
+                    </div>
+                    <div class="filter-row">
+                      <button class="btn btn-primary" @click="adminSaveLab()" :disabled="admin.busy">Сохранить</button>
+                      <button class="btn btn-ghost" @click="admin.editLab = null">Отмена</button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <p class="muted" x-show="!admin.labs.items.length" style="font-size:13px">Показателей нет.</p>
+
+            <!-- Пагинация -->
+            <div class="filter-row" x-show="admin.labs.total > 50" style="margin-top:10px">
+              <button class="btn btn-ghost" :disabled="admin.labsOffset===0" @click="admin.labsOffset=Math.max(0,admin.labsOffset-50); adminLoadLabs()">← Новее</button>
+              <button class="btn btn-ghost" :disabled="admin.labsOffset+50>=admin.labs.total" @click="admin.labsOffset+=50; adminLoadLabs()">Старее →</button>
+            </div>
+          </div>
+        </div>
+      </template>
     </section>
 
     <!-- ====== ПРОФИЛЬ ====== -->

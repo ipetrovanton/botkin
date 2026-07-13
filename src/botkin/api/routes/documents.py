@@ -46,7 +46,8 @@ def me(user_id: int = Depends(get_user_id)) -> dict:
     """Текущий пользователь кабинета (user_id + исходный telegram-идентификатор)."""
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id, telegram_user_id, created_at FROM users WHERE id = ?", (user_id,)
+            "SELECT id, telegram_user_id, role, display_name, created_at "
+            "FROM users WHERE id = ?", (user_id,)
         ).fetchone()
     return dict(row) if row else {"id": user_id}
 

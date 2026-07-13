@@ -507,6 +507,22 @@ body {
 .report-diagnosis { font-size: 14px; color: var(--text-dim); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .report-card-foot { display: flex; gap: 12px; margin-top: 10px; font-size: 12px; color: var(--text-mut); flex-wrap: wrap; }
 
+/* ===== Администрирование ===== */
+.admin-user-row, .admin-lab-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 12px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap;
+}
+.admin-user-main, .admin-lab-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.admin-user-name { font-size: 14px; font-weight: 600; }
+.admin-user-meta { color: var(--text-dim); font-size: 12px; }
+.admin-user-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.admin-role-select { width: auto; padding: 8px 10px; }
+.admin-lab-form {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px; margin: 10px 0; border: 1px dashed var(--border);
+  border-radius: var(--radius-sm); background: var(--surface-2, transparent);
+}
+
 /* ===== Профиль ===== */
 .profile-row {
   display: flex; justify-content: space-between; align-items: center;

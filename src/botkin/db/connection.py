@@ -12,6 +12,11 @@ SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
 # Колонки, добавляемые поверх существующих таблиц (идемпотентно).
 _MIGRATIONS: dict[str, dict[str, str]] = {
+    "users": {
+        # CHECK через ALTER в SQLite не добавить — инвариант ролей держит UserRepo.
+        "role": "TEXT NOT NULL DEFAULT 'user'",
+        "display_name": "TEXT",
+    },
     "documents": {
         "file_sha256": "TEXT",
         "raw_extraction": "TEXT",

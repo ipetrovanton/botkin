@@ -9,6 +9,11 @@ PRAGMA busy_timeout = 5000;
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     telegram_user_id INTEGER NOT NULL UNIQUE,
+    -- ролевая модель демо-уровня: admin управляет пользователями и их данными.
+    -- CHECK только для свежих БД: в мигрированных колонка добавляется через ALTER без CHECK,
+    -- инвариант поддерживает UserRepo.
+    role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin','user')),
+    display_name TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

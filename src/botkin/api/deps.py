@@ -26,3 +26,15 @@ def get_user_id(x_telegram_user_id: int | None = Header(None, alias="X-Telegram-
     tg_id = get_telegram_user_id(x_telegram_user_id)
     with get_conn() as conn:
         return UserRepo(conn).get_or_create(tg_id)
+
+
+def require_admin(
+    x_telegram_user_id: int | None = Header(None, alias="X-Telegram-User-Id"),
+) -> int:
+    """user_id администратора; 403 для остальных. Демо-уровень: роль читается из БД,
+    подлинность заголовка не проверяется (осознанное решение из интервью)."""
+    user_id = get_user_id(x_telegram_user_id)
+    with get_conn() as conn:
+        if UserRepo(conn).role_of(user_id) != "admin":
+            raise HTTPException(status_code=403, detail="Требуется роль администратора")
+    return user_id

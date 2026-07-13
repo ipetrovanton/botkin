@@ -117,6 +117,11 @@ _DEFAULTS: dict = {
             ],
         },
     },
+    "auth": {
+        # telegram_user_id, которым при первом входе присваивается роль admin.
+        # Демо-уровень: идентификация остаётся по заголовку, ролью управляет БД.
+        "admin_telegram_ids": [],
+    },
     "health": {
         "tokens_dir": "./data/health_tokens",
         "sync_days": 30,
@@ -301,6 +306,13 @@ BOT_PROGRESS_TIMEOUT = float(os.getenv("BOT_PROGRESS_TIMEOUT", str(30 + 3 * VLM_
 # Если задан (> 0) и заголовок отсутствует — API работает от имени этого
 # telegram_user_id. ТОЛЬКО для локального запуска/дебага; в проде не задавать.
 WEB_DEBUG_USER_ID = int(os.getenv("WEB_DEBUG_USER_ID", "0") or 0)
+
+# Бутстрап ролей: перечисленные telegram_user_id получают роль admin при первом
+# обращении (get_or_create). Дальше ролями управляет админ через /api/admin/users.
+_admin_ids_env = os.getenv("ADMIN_TELEGRAM_IDS", "")
+ADMIN_TELEGRAM_IDS: frozenset[int] = frozenset(
+    int(x) for x in _admin_ids_env.split(",") if x.strip().isdigit()
+) or frozenset(int(x) for x in _get("auth.admin_telegram_ids"))
 
 # Загрузка файлов
 UPLOAD_MAX_BYTES = setting("upload.max_bytes", "UPLOAD_MAX_BYTES", int)
