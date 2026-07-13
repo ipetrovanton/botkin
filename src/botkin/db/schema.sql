@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS documents (
     delivered_at TIMESTAMP,
     -- unix-время входа в текущую стадию: достоверный прогресс-бар считает elapsed внутри стадии
     stage_started_at REAL,
+    -- когда пользователь подтвердил корректность распознанных данных (NULL = не проверено)
+    verified_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);

@@ -243,6 +243,23 @@ class DocumentRepo(BaseRepo):
         )
         self.conn.commit()
 
+    def mark_verified(self, document_id: int) -> bool:
+        """Пользователь подтвердил корректность распознанных данных."""
+        cur = self.conn.execute(
+            "UPDATE documents SET verified_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+            (document_id, self.user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def clear_verified(self, document_id: int) -> None:
+        """Сброс отметки после любой правки данных — подтверждение относилось к старой версии."""
+        self.conn.execute(
+            "UPDATE documents SET verified_at = NULL WHERE id = ? AND user_id = ?",
+            (document_id, self.user_id),
+        )
+        self.conn.commit()
+
     def claim_delivery(self, document_id: int) -> bool:
         """Атомарно помечает доставку; True если захватил первым."""
         cur = self.conn.execute(
@@ -552,9 +569,10 @@ class LabRepo(BaseRepo):
         # Карточка документа показывает ВСЕ строки панели в порядке документа.
         # Дефолтного LIMIT нет: панель ОАК+СРБ (21 строка) обрезалась на LIMIT 20.
         # ORDER BY id ASC сохраняет порядок вставки (= порядок в документе).
+        # id нужен форме верификации в кабинете — правка/удаление конкретной строки.
         sql = (
-            "SELECT analyte_name, value_num, value_text, unit, "
-            "ref_low, ref_high, ref_operator, ref_text, "
+            "SELECT id, analyte_name, value_num, value_text, unit, "
+            "ref_low, ref_high, ref_operator, ref_text, taken_at, "
             "analyte_canonical, loinc, nmu_code, analyte_group, "
             "match_status, unit_expected, unit_mismatch "
             "FROM lab_results WHERE document_id = ? AND user_id = ? ORDER BY id ASC"
@@ -697,12 +715,31 @@ class ReportRepo(BaseRepo):
 
     def for_document(self, document_id: int) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT diagnosis, recommendations_json, complaints_json, "
-            "medications_json, doctor_name, department "
+            "SELECT id, diagnosis, recommendations_json, complaints_json, "
+            "medications_json, doctor_name, department, visit_date "
             "FROM doctor_reports WHERE document_id = ? AND user_id = ?",
             (document_id, self.user_id),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # Колонки, редактируемые формой верификации. JSON-списки сериализует API-слой.
+    EDITABLE_COLUMNS = frozenset({
+        "diagnosis", "recommendations_json", "complaints_json",
+        "medications_json", "doctor_name", "department", "visit_date",
+    })
+
+    def update_row(self, report_id: int, fields: dict) -> bool:
+        """Частичное обновление заключения; False — не найдено/чужое."""
+        cols = {k: v for k, v in fields.items() if k in self.EDITABLE_COLUMNS}
+        if not cols:
+            return False
+        assignments = ", ".join(f"{c} = ?" for c in cols)
+        cur = self.conn.execute(
+            f"UPDATE doctor_reports SET {assignments} WHERE id = ? AND user_id = ?",
+            (*cols.values(), report_id, self.user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
 
     def distinct_doctors(self) -> list[dict]:
         """Уникальные врачи с отделением — для селектора фильтра."""

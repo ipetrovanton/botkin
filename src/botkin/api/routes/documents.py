@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..deps import get_telegram_user_id, get_user_id
 from botkin.db.connection import get_conn
@@ -92,9 +92,11 @@ def document_detail(document_id: int, user_id: int = Depends(get_user_id)) -> di
             rows = ReportRepo(conn, user_id).for_document(document_id)
             reports = [
                 {
+                    "id": r["id"],
                     "diagnosis": r["diagnosis"],
                     "doctor_name": r["doctor_name"],
                     "department": r["department"],
+                    "visit_date": r["visit_date"],
                     "recommendations": _loads_list(r["recommendations_json"]),
                     "complaints": _loads_list(r["complaints_json"]),
                     "medications": _loads_list(r["medications_json"]),
@@ -159,6 +161,128 @@ def delete_document(document_id: int, user_id: int = Depends(get_user_id)) -> di
         raise HTTPException(status_code=404, detail="Документ не найден")
     _unlink_quietly(source_path)
     return {"deleted": 1}
+
+
+# ===== Верификация распознанного (этап 2) =====
+# Пользователь проверяет и правит извлечённые данные своего документа.
+# Любая правка сбрасывает verified_at: подтверждение относилось к старой версии данных.
+
+
+class LabEditRequest(BaseModel):
+    """Редактируемые поля показателя; учитываются только явно переданные."""
+
+    analyte_name: str | None = Field(None, max_length=300)
+    value_num: float | None = None
+    value_text: str | None = Field(None, max_length=300)
+    unit: str | None = Field(None, max_length=50)
+    ref_low: float | None = None
+    ref_high: float | None = None
+    ref_text: str | None = Field(None, max_length=200)
+    taken_at: str | None = Field(None, max_length=30)
+
+    def set_fields(self) -> dict:
+        return {k: getattr(self, k) for k in self.model_fields_set}
+
+
+class ReportEditRequest(BaseModel):
+    """Правка заключения: списки приходят как list[str], в БД лежат JSON-колонки."""
+
+    diagnosis: str | None = Field(None, max_length=4000)
+    doctor_name: str | None = Field(None, max_length=200)
+    department: str | None = Field(None, max_length=200)
+    recommendations: list[str] | None = None
+    medications: list[str] | None = None
+
+    def set_fields(self) -> dict:
+        fields: dict = {}
+        for key in ("diagnosis", "doctor_name", "department"):
+            if key in self.model_fields_set:
+                fields[key] = getattr(self, key)
+        for key, column in (("recommendations", "recommendations_json"),
+                            ("medications", "medications_json")):
+            if key in self.model_fields_set:
+                fields[column] = json.dumps(getattr(self, key) or [], ensure_ascii=False)
+        return fields
+
+
+def _require_own_document(conn, user_id: int, document_id: int) -> dict:
+    doc = DocumentRepo(conn, user_id).get(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    return doc
+
+
+@router.post("/documents/{document_id}/labs", status_code=201)
+def add_document_lab(
+    document_id: int, req: LabEditRequest, user_id: int = Depends(get_user_id),
+) -> dict:
+    """Ручное добавление показателя, пропущенного распознаванием."""
+    fields = req.set_fields()
+    if not fields.get("analyte_name"):
+        raise HTTPException(status_code=422, detail="analyte_name обязателен")
+    with get_conn() as conn:
+        _require_own_document(conn, user_id, document_id)
+        repo = LabRepo(conn, user_id)
+        lab_id = repo.insert_manual(document_id, fields)
+        DocumentRepo(conn, user_id).clear_verified(document_id)
+        return repo.get_row(lab_id)
+
+
+@router.patch("/documents/{document_id}/labs/{lab_id}")
+def edit_document_lab(
+    document_id: int, lab_id: int, req: LabEditRequest,
+    user_id: int = Depends(get_user_id),
+) -> dict:
+    with get_conn() as conn:
+        _require_own_document(conn, user_id, document_id)
+        repo = LabRepo(conn, user_id)
+        row = repo.get_row(lab_id)
+        if not row or row["document_id"] != document_id:
+            raise HTTPException(status_code=404, detail="Показатель не найден")
+        repo.update_row(lab_id, req.set_fields())
+        DocumentRepo(conn, user_id).clear_verified(document_id)
+        return repo.get_row(lab_id)
+
+
+@router.delete("/documents/{document_id}/labs/{lab_id}")
+def delete_document_lab(
+    document_id: int, lab_id: int, user_id: int = Depends(get_user_id),
+) -> dict:
+    with get_conn() as conn:
+        _require_own_document(conn, user_id, document_id)
+        repo = LabRepo(conn, user_id)
+        row = repo.get_row(lab_id)
+        if not row or row["document_id"] != document_id:
+            raise HTTPException(status_code=404, detail="Показатель не найден")
+        repo.delete_row(lab_id)
+        DocumentRepo(conn, user_id).clear_verified(document_id)
+    return {"deleted": 1}
+
+
+@router.patch("/documents/{document_id}/reports/{report_id}")
+def edit_document_report(
+    document_id: int, report_id: int, req: ReportEditRequest,
+    user_id: int = Depends(get_user_id),
+) -> dict:
+    with get_conn() as conn:
+        _require_own_document(conn, user_id, document_id)
+        repo = ReportRepo(conn, user_id)
+        if not repo.update_row(report_id, req.set_fields()):
+            raise HTTPException(status_code=404, detail="Заключение не найдено")
+        DocumentRepo(conn, user_id).clear_verified(document_id)
+        rows = [r for r in repo.for_document(document_id) if r["id"] == report_id]
+    return rows[0] if rows else {"id": report_id}
+
+
+@router.post("/documents/{document_id}/verify")
+def verify_document(document_id: int, user_id: int = Depends(get_user_id)) -> dict:
+    """Пользователь подтверждает: распознанные данные соответствуют оригиналу."""
+    with get_conn() as conn:
+        repo = DocumentRepo(conn, user_id)
+        if not repo.mark_verified(document_id):
+            raise HTTPException(status_code=404, detail="Документ не найден")
+        doc = repo.get(document_id)
+    return {"document_id": document_id, "verified_at": doc["verified_at"]}
 
 
 class DeleteBatchRequest(BaseModel):

@@ -25,6 +25,8 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "delivered_at": "TIMESTAMP",
         # unix-время входа в текущую стадию — для достоверного прогресс-бара
         "stage_started_at": "REAL",
+        # когда пользователь подтвердил корректность распознанных данных (верификация)
+        "verified_at": "TIMESTAMP",
     },
     "lab_results": {
         "value_raw": "TEXT", "unit_raw": "TEXT", "taken_at_raw": "TEXT",

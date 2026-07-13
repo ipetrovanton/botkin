@@ -62,6 +62,15 @@ function cabinet() {
     doctors: [],
     docs: { items: [], total: 0 },
     current: { doc: null, kind: null, labs: [], reports: [] },
+    // Верификация распознанного: режим правки внутри карточки документа
+    verify: {
+      editing: false,
+      editLab: null,          // копия строки показателя в редакторе
+      newLabOpen: false,
+      newLab: { analyte_name: "", value_num: "", unit: "", ref_low: "", ref_high: "", taken_at: "" },
+      editReport: null,       // копия заключения (списки — текстом, строка = пункт)
+      busy: false,
+    },
     reports: { items: [], total: 0 },
     dynamics: { points: [], analyte: "", unit: "", ref_low: null, ref_high: null },
 
@@ -274,6 +283,129 @@ function cabinet() {
       finally { this.loading.stats = false; }
     },
 
+    // ===== Верификация распознанного =====
+    async reloadDoc() {
+      // Тихая перезагрузка карточки без сброса режима редактирования.
+      const id = this.current.doc?.id;
+      if (!id) return;
+      const data = await this.api(`/api/documents/${id}`);
+      if (data) this.current = { doc: data.document, kind: data.kind, labs: data.labs, reports: data.reports };
+    },
+
+    async verifyDoc() {
+      try {
+        await this.api(`/api/documents/${this.current.doc.id}/verify`, { method: "POST" });
+        this.verify.editing = false;
+        this.toast("Данные подтверждены", "success");
+        this.reloadDoc();
+      } catch (e) { this.toast("Не удалось подтвердить", "error"); console.error(e); }
+    },
+
+    vToggleEditing() {
+      this.verify.editing = !this.verify.editing;
+      this.verify.editLab = null;
+      this.verify.newLabOpen = false;
+      this.verify.editReport = null;
+    },
+
+    vStartEditLab(row) {
+      this.verify.editLab = { ...row };
+    },
+
+    async vSaveLab() {
+      const l = this.verify.editLab;
+      if (!l) return;
+      this.verify.busy = true;
+      try {
+        await this.api(`/api/documents/${this.current.doc.id}/labs/${l.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analyte_name: l.analyte_name,
+            value_num: l.value_num === "" || l.value_num === null ? null : Number(l.value_num),
+            unit: l.unit || null,
+            ref_low: l.ref_low === "" || l.ref_low === null ? null : Number(l.ref_low),
+            ref_high: l.ref_high === "" || l.ref_high === null ? null : Number(l.ref_high),
+            taken_at: l.taken_at || null,
+          }),
+        });
+        this.verify.editLab = null;
+        this.toast("Показатель исправлен", "success");
+        this.reloadDoc();
+      } catch (e) { this.toast("Не удалось сохранить", "error"); console.error(e); }
+      finally { this.verify.busy = false; }
+    },
+
+    async vDeleteLab(row) {
+      if (!confirm(`Удалить показатель «${row.analyte_name}»?`)) return;
+      try {
+        await this.api(`/api/documents/${this.current.doc.id}/labs/${row.id}`, { method: "DELETE" });
+        this.toast("Показатель удалён", "success");
+        this.reloadDoc();
+      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
+    },
+
+    async vAddLab() {
+      const n = this.verify.newLab;
+      if (!n.analyte_name.trim()) { this.toast("Название показателя обязательно", "error"); return; }
+      this.verify.busy = true;
+      try {
+        await this.api(`/api/documents/${this.current.doc.id}/labs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analyte_name: n.analyte_name.trim(),
+            value_num: n.value_num === "" ? null : Number(n.value_num),
+            unit: n.unit || null,
+            ref_low: n.ref_low === "" ? null : Number(n.ref_low),
+            ref_high: n.ref_high === "" ? null : Number(n.ref_high),
+            taken_at: n.taken_at || null,
+          }),
+        });
+        this.verify.newLab = { analyte_name: "", value_num: "", unit: "", ref_low: "", ref_high: "", taken_at: "" };
+        this.verify.newLabOpen = false;
+        this.toast("Показатель добавлен", "success");
+        this.reloadDoc();
+      } catch (e) { this.toast("Не удалось добавить", "error"); console.error(e); }
+      finally { this.verify.busy = false; }
+    },
+
+    vStartEditReport(rep) {
+      // Списки редактируются как текст: одна строка = один пункт.
+      this.verify.editReport = {
+        id: rep.id,
+        diagnosis: rep.diagnosis || "",
+        doctor_name: rep.doctor_name || "",
+        department: rep.department || "",
+        recommendations: (rep.recommendations || []).join("\n"),
+        medications: (rep.medications || []).join("\n"),
+      };
+    },
+
+    async vSaveReport() {
+      const r = this.verify.editReport;
+      if (!r) return;
+      const toList = (text) => text.split("\n").map((s) => s.trim()).filter(Boolean);
+      this.verify.busy = true;
+      try {
+        await this.api(`/api/documents/${this.current.doc.id}/reports/${r.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            diagnosis: r.diagnosis || null,
+            doctor_name: r.doctor_name || null,
+            department: r.department || null,
+            recommendations: toList(r.recommendations),
+            medications: toList(r.medications),
+          }),
+        });
+        this.verify.editReport = null;
+        this.toast("Заключение исправлено", "success");
+        this.reloadDoc();
+      } catch (e) { this.toast("Не удалось сохранить", "error"); console.error(e); }
+      finally { this.verify.busy = false; }
+    },
+
     // ===== Администрирование =====
     isAdmin() { return this.user?.role === "admin"; },
 
@@ -442,6 +574,7 @@ function cabinet() {
       this.screen = "document";
       this.loading.doc = true;
       this.current = { doc: null, kind: null, labs: [], reports: [] };
+      this.verify = { ...this.verify, editing: false, editLab: null, newLabOpen: false, editReport: null };
       try {
         const data = await this.api(`/api/documents/${id}`);
         if (req !== this._req.doc) return;

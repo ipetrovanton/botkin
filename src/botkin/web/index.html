@@ -253,29 +253,90 @@
               Удалить
             </button>
           </div>
+          <!-- Верификация: пользователь подтверждает или правит распознанное -->
+          <div class="verify-bar" x-show="current.kind==='analysis' || current.kind==='doctor_report'">
+            <template x-if="current.doc?.verified_at">
+              <span class="verify-badge">
+                <svg viewBox="0 0 24 24" width="14" height="14"><path d="M5 12l5 5 9-10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Данные проверены вами
+              </span>
+            </template>
+            <template x-if="!current.doc?.verified_at">
+              <span class="verify-hint">Проверьте, что распознано без ошибок</span>
+            </template>
+            <div class="verify-actions">
+              <button class="btn btn-ghost" @click="vToggleEditing()"
+                      x-text="verify.editing ? 'Завершить правку' : 'Исправить'"></button>
+              <button class="btn btn-primary" x-show="!current.doc?.verified_at" @click="verifyDoc()">Всё верно</button>
+            </div>
+          </div>
         </div>
 
         <!-- Анализы -->
         <div class="panel" x-show="current.kind==='analysis'">
-          <div class="panel-head"><h2 class="panel-title">Показатели</h2><span class="panel-cnt" x-text="current.labs.length"></span></div>
+          <div class="panel-head">
+            <h2 class="panel-title">Показатели</h2>
+            <span class="panel-cnt" x-text="current.labs.length"></span>
+          </div>
           <div class="labs-table">
-            <!-- key=индекс: у строк нет id, а имя+значение коллидируют на дублях панели -->
-            <template x-for="(r, ri) in current.labs" :key="ri">
-              <div class="lab-row" :class="{'lab-row--warn': r.unit_mismatch}">
-                <div class="lab-name" x-text="r.analyte_canonical || r.analyte_name"></div>
-                <div class="lab-value">
-                  <span class="val" :class="labValueClass(r)" x-text="fmtValue(r)"></span>
-                  <span class="unit" x-text="r.unit"></span>
+            <template x-for="r in current.labs" :key="r.id">
+              <div>
+                <div class="lab-row" :class="{'lab-row--warn': r.unit_mismatch}" x-show="verify.editLab?.id !== r.id">
+                  <div class="lab-name" x-text="r.analyte_canonical || r.analyte_name"></div>
+                  <div class="lab-value">
+                    <span class="val" :class="labValueClass(r)" x-text="fmtValue(r)"></span>
+                    <span class="unit" x-text="r.unit"></span>
+                  </div>
+                  <div class="lab-ref" x-text="fmtRef(r)"></div>
+                  <!-- Мини-шкала: положение значения в коридоре нормы -->
+                  <div class="ref-scale" x-show="refPosition(r) !== null" aria-hidden="true">
+                    <span class="ref-scale-dot"
+                          :class="labValueClass(r) ? 'ref-scale-dot--'+labValueClass(r) : ''"
+                          :style="`left:${refPosition(r)}%`"></span>
+                  </div>
+                  <div class="admin-user-actions" x-show="verify.editing" style="grid-column:1/-1">
+                    <button class="btn btn-ghost" @click="vStartEditLab(r)">Изменить</button>
+                    <button class="btn btn-ghost btn-danger" @click="vDeleteLab(r)">Удалить</button>
+                  </div>
                 </div>
-                <div class="lab-ref" x-text="fmtRef(r)"></div>
-                <!-- Мини-шкала: положение значения в коридоре нормы -->
-                <div class="ref-scale" x-show="refPosition(r) !== null" aria-hidden="true">
-                  <span class="ref-scale-dot"
-                        :class="labValueClass(r) ? 'ref-scale-dot--'+labValueClass(r) : ''"
-                        :style="`left:${refPosition(r)}%`"></span>
-                </div>
+                <!-- Инлайн-редактор показателя (x-if: x-model не должен читать null) -->
+                <template x-if="verify.editLab?.id === r.id">
+                  <div class="admin-lab-form">
+                    <input type="text" class="filter-input" placeholder="Название" x-model="verify.editLab.analyte_name">
+                    <div class="filter-row">
+                      <input type="number" step="any" class="filter-input" placeholder="Значение" x-model="verify.editLab.value_num">
+                      <input type="text" class="filter-input" placeholder="Ед." x-model="verify.editLab.unit">
+                    </div>
+                    <div class="filter-row">
+                      <input type="number" step="any" class="filter-input" placeholder="Норма от" x-model="verify.editLab.ref_low">
+                      <input type="number" step="any" class="filter-input" placeholder="Норма до" x-model="verify.editLab.ref_high">
+                    </div>
+                    <div class="filter-row">
+                      <button class="btn btn-primary" @click="vSaveLab()" :disabled="verify.busy">Сохранить</button>
+                      <button class="btn btn-ghost" @click="verify.editLab = null">Отмена</button>
+                    </div>
+                  </div>
+                </template>
               </div>
             </template>
+          </div>
+          <!-- Ручное добавление пропущенного показателя -->
+          <div x-show="verify.editing" style="margin-top:10px">
+            <button class="btn btn-ghost" @click="verify.newLabOpen = !verify.newLabOpen"
+                    x-text="verify.newLabOpen ? 'Скрыть форму' : 'Добавить показатель'"></button>
+            <div class="admin-lab-form" x-show="verify.newLabOpen">
+              <input type="text" class="filter-input" placeholder="Название показателя *" x-model="verify.newLab.analyte_name">
+              <div class="filter-row">
+                <input type="number" step="any" class="filter-input" placeholder="Значение" x-model="verify.newLab.value_num">
+                <input type="text" class="filter-input" placeholder="Ед." x-model="verify.newLab.unit">
+              </div>
+              <div class="filter-row">
+                <input type="number" step="any" class="filter-input" placeholder="Норма от" x-model="verify.newLab.ref_low">
+                <input type="number" step="any" class="filter-input" placeholder="Норма до" x-model="verify.newLab.ref_high">
+                <input type="date" class="filter-input" title="Дата взятия" x-model="verify.newLab.taken_at">
+              </div>
+              <button class="btn btn-primary" @click="vAddLab()" :disabled="verify.busy">Сохранить показатель</button>
+            </div>
           </div>
         </div>
 
@@ -283,6 +344,28 @@
         <div class="panel" x-show="current.kind==='doctor_report'">
           <template x-for="(rep, repi) in current.reports" :key="repi">
             <div class="report-block">
+              <div class="admin-user-actions" x-show="verify.editing && verify.editReport?.id !== rep.id" style="margin-bottom:10px">
+                <button class="btn btn-ghost" @click="vStartEditReport(rep)">Изменить заключение</button>
+              </div>
+              <!-- Редактор заключения: списки — по пункту на строку -->
+              <template x-if="verify.editReport?.id === rep.id">
+                <div class="admin-lab-form">
+                  <label class="report-h">Диагноз</label>
+                  <textarea class="filter-input" rows="2" x-model="verify.editReport.diagnosis"></textarea>
+                  <div class="filter-row">
+                    <input type="text" class="filter-input" placeholder="Врач" x-model="verify.editReport.doctor_name">
+                    <input type="text" class="filter-input" placeholder="Отделение" x-model="verify.editReport.department">
+                  </div>
+                  <label class="report-h">Рекомендации (по одной на строку)</label>
+                  <textarea class="filter-input" rows="4" x-model="verify.editReport.recommendations"></textarea>
+                  <label class="report-h">Назначения (по одному на строку)</label>
+                  <textarea class="filter-input" rows="3" x-model="verify.editReport.medications"></textarea>
+                  <div class="filter-row">
+                    <button class="btn btn-primary" @click="vSaveReport()" :disabled="verify.busy">Сохранить</button>
+                    <button class="btn btn-ghost" @click="verify.editReport = null">Отмена</button>
+                  </div>
+                </div>
+              </template>
               <div x-show="rep.diagnosis" class="report-field">
                 <h3 class="report-h">Диагноз</h3>
                 <p x-text="rep.diagnosis"></p>
