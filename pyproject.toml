@@ -28,6 +28,7 @@ dependencies = [
     "sqlite-vec>=0.1.9",
     "fpdf2>=2.8.7",
     "markdown>=3.10.2",
+    "minio>=7.2.20",
 ]
 
 [dependency-groups]

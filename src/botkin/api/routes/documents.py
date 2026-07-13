@@ -1,33 +1,28 @@
 """API веб-кабинета: пользователь, лента документов, детальная карточка, статус,
 исходники, удаление и повторное распознавание."""
+import hashlib
 import json
 import mimetypes
-from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile,
+)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..deps import get_telegram_user_id, get_user_id
+from botkin.config import UPLOAD_ALLOWED_EXTENSIONS, UPLOAD_MAX_BYTES
 from botkin.db.connection import get_conn
 from botkin.db.repos import DocumentRepo, LabRepo, ReportRepo
 from botkin.pipeline.orchestrator import process_document
 from botkin.pipeline.progress_model import StageDurationStore, estimate_progress
+from botkin.preprocess.formats import resolve_extension
+from botkin.storage import delete_quietly, is_stored_file, open_local, storage_for
 
 router = APIRouter(prefix="/api", tags=["cabinet"])
 
 # iPhone-фото: стандартный mimetypes может не знать HEIC/HEIF.
 _EXTRA_MEDIA_TYPES = {".heic": "image/heic", ".heif": "image/heif"}
-
-
-def _unlink_quietly(path_str: str | None) -> None:
-    """Удаляет файл-исходник; отсутствие файла — не ошибка (мог быть утрачен)."""
-    if not path_str:
-        return
-    try:
-        Path(path_str).unlink(missing_ok=True)
-    except OSError:
-        pass
 
 
 def _loads_list(raw: str | None) -> list[str]:
@@ -138,8 +133,8 @@ def document_source(document_id: int, user_id: int = Depends(get_user_id)) -> Fi
         doc = DocumentRepo(conn, user_id).get(document_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
-    path = Path(doc["source_path"])
-    if not path.is_file():
+    path = open_local(doc["source_path"])
+    if path is None:
         raise HTTPException(status_code=404, detail="Файл-исходник утрачен")
     media_type = (
         _EXTRA_MEDIA_TYPES.get(path.suffix.lower())
@@ -159,7 +154,7 @@ def delete_document(document_id: int, user_id: int = Depends(get_user_id)) -> di
         source_path = DocumentRepo(conn, user_id).delete(document_id)
     if source_path is None:
         raise HTTPException(status_code=404, detail="Документ не найден")
-    _unlink_quietly(source_path)
+    delete_quietly(source_path)
     return {"deleted": 1}
 
 
@@ -274,6 +269,59 @@ def edit_document_report(
     return rows[0] if rows else {"id": report_id}
 
 
+@router.get("/documents/{document_id}/versions")
+def document_versions(document_id: int, user_id: int = Depends(get_user_id)) -> dict:
+    """История версий файла-исходника (появляются после замены файла)."""
+    with get_conn() as conn:
+        doc = _require_own_document(conn, user_id, document_id)
+    if not is_stored_file(doc["source_path"]):
+        return {"items": []}
+    return {"items": storage_for(doc["source_path"]).versions(doc["source_path"])}
+
+
+@router.post("/documents/{document_id}/replace")
+async def replace_document_source(
+    document_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    user_id: int = Depends(get_user_id),
+    telegram_user_id: int = Depends(get_telegram_user_id),
+) -> dict:
+    """Замена файла-исходника новой версией (переснятый бланк) + перераспознавание.
+
+    Валидация изменений: тот же контент-контроль, что и при загрузке (тип/размер),
+    плюс запрет no-op замены тем же самым файлом (по sha256). Старая версия
+    сохраняется бэкендом хранилища (versioning MinIO / .versions на диске).
+    """
+    body = await file.read()
+    if len(body) > UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large: {len(body)} bytes")
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if resolve_extension(file.filename, body[:32], UPLOAD_ALLOWED_EXTENSIONS) is None:
+        raise HTTPException(status_code=415, detail="Unsupported file content")
+
+    new_sha = hashlib.sha256(body).hexdigest()
+    with get_conn() as conn:
+        repo = DocumentRepo(conn, user_id)
+        doc = _require_own_document(conn, user_id, document_id)
+        if not is_stored_file(doc["source_path"]):
+            raise HTTPException(status_code=409, detail="У документа нет файла-исходника")
+        if doc["file_sha256"] == new_sha:
+            raise HTTPException(status_code=409, detail="Этот же файл уже загружен")
+        storage_for(doc["source_path"]).replace(doc["source_path"], body)
+        conn.execute(
+            "UPDATE documents SET file_sha256 = ? WHERE id = ? AND user_id = ?",
+            (new_sha, document_id, user_id),
+        )
+        conn.commit()
+        # Новое содержимое — новое распознавание: старые данные относятся к старой версии.
+        repo.clear_extracted_data(document_id)
+        repo.clear_verified(document_id)
+    background_tasks.add_task(process_document, document_id, telegram_user_id)
+    return {"document_id": document_id, "status": "received", "file_sha256": new_sha}
+
+
 @router.post("/documents/{document_id}/verify")
 def verify_document(document_id: int, user_id: int = Depends(get_user_id)) -> dict:
     """Пользователь подтверждает: распознанные данные соответствуют оригиналу."""
@@ -300,7 +348,7 @@ def delete_documents_batch(
         for doc_id in payload.ids:
             source_path = repo.delete(doc_id)
             if source_path is not None:
-                _unlink_quietly(source_path)
+                delete_quietly(source_path)
                 deleted += 1
     return {"deleted": deleted}
 
@@ -323,7 +371,7 @@ def reparse_document(
         doc = repo.get(document_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Документ не найден")
-        if not Path(doc["source_path"]).is_file():
+        if open_local(doc["source_path"]) is None:
             raise HTTPException(
                 status_code=409,
                 detail="Файл-исходник утрачен — повторное распознавание невозможно",

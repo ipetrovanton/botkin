@@ -1,16 +1,16 @@
 """API загрузки документов."""
 import hashlib
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 
-from botkin.config import UPLOAD_ALLOWED_EXTENSIONS, UPLOAD_MAX_BYTES, UPLOAD_SOURCES_DIR
+from botkin.config import UPLOAD_ALLOWED_EXTENSIONS, UPLOAD_MAX_BYTES
 from botkin.db.connection import get_conn
 from botkin.db.repos import DocumentRepo
 from botkin.domain.models import UploadResponse
 from botkin.pipeline.orchestrator import process_document
 from botkin.preprocess.formats import resolve_extension
+from botkin.storage import default_storage
 
 from ..deps import get_telegram_user_id, get_user_id
 
@@ -35,20 +35,16 @@ async def upload_document(
     if ext is None:
         raise HTTPException(status_code=415, detail="Unsupported file content")
 
-    yyyy_mm = datetime.now(timezone.utc).strftime("%Y-%m")
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    dest_dir = UPLOAD_SOURCES_DIR / str(user_id) / yyyy_mm
-    dest_dir.mkdir(parents=True, exist_ok=True)
     safe_name = (file.filename or "doc").replace("/", "_").replace("\\", "_")
     # Гарантируем корректное расширение: ниже по конвейеру PDF/изображение различаются по суффиксу.
     if Path(safe_name).suffix.lower() not in UPLOAD_ALLOWED_EXTENSIONS:
         safe_name = f"{safe_name}{ext}"
-    dest = dest_dir / f"{ts}-{safe_name}"
-    dest.write_bytes(body)
+    # Бэкенд хранения (диск/MinIO) выбирается конфигом; uri уходит в source_path.
+    uri = default_storage().save(user_id, safe_name, body)
 
     with get_conn() as conn:
         doc_id = DocumentRepo(conn, user_id).create(
-            source_path=str(dest),
+            source_path=uri,
             # sha256 содержимого — точный признак повторной загрузки того же файла.
             file_sha256=hashlib.sha256(body).hexdigest(),
         )

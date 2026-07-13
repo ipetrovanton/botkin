@@ -62,6 +62,7 @@ function cabinet() {
     doctors: [],
     docs: { items: [], total: 0 },
     current: { doc: null, kind: null, labs: [], reports: [] },
+    currentVersions: [],
     // Верификация распознанного: режим правки внутри карточки документа
     verify: {
       editing: false,
@@ -237,6 +238,44 @@ function cabinet() {
       this.toast("Документ отправлен на повторное распознавание", "info");
       this.go("upload");
     },
+    async replaceSource(event) {
+      // Замена файла-исходника: старая версия сохраняется в хранилище,
+      // данные перераспознаются заново (прогресс — на экране загрузки).
+      const doc = this.current.doc;
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!doc || !file) return;
+      const form = new FormData();
+      form.append("file", file);
+      try {
+        const res = await fetch(`/api/documents/${doc.id}/replace`, {
+          method: "POST", headers: { "X-Telegram-User-Id": this.tgUserId }, body: form,
+        });
+        if (res.status === 409) {
+          this.toast((await res.json())?.detail || "Замена отклонена", "error");
+          return;
+        }
+        if (!res.ok) throw new Error(String(res.status));
+      } catch (e) { this.toast("Не удалось заменить файл", "error"); console.error(e); return; }
+      this.queue.unshift({
+        id: ++this._seq, name: `${doc.title || "Документ #" + doc.id} (новая версия)`,
+        state: "processing", status: "received", docId: doc.id,
+        progress: 2, etaSeconds: null, stageElapsedSeconds: 0, alive: true,
+      });
+      this.pollStatus(this.queue[0]);
+      this.toast("Файл заменён — распознаём заново", "info");
+      this.go("upload");
+    },
+
+    async loadVersions() {
+      const id = this.current.doc?.id;
+      if (!id) return;
+      try {
+        const data = await this.api(`/api/documents/${id}/versions`);
+        this.currentVersions = data?.items || [];
+      } catch (e) { console.error("versions", e); this.currentVersions = []; }
+    },
+
     async openSource() {
       // Файл открывается через blob: заголовок идентификации нельзя передать в window.open.
       const id = this.current.doc?.id;
@@ -583,6 +622,8 @@ function cabinet() {
         this.current = {
           doc: data.document, kind: data.kind, labs: data.labs, reports: data.reports,
         };
+        this.currentVersions = [];
+        this.loadVersions();
       } catch (e) {
         if (req !== this._req.doc) return;
         this.toast("Ошибка загрузки документа", "error"); console.error(e);

@@ -78,6 +78,15 @@ _DEFAULTS: dict = {
     "bot": {
         "api_url": "http://localhost:8000",
     },
+    "storage": {
+        # local — файлы на диске (по умолчанию); minio — S3-хранилище с версиями.
+        "backend": "local",
+        "minio": {
+            "endpoint": "localhost:9000",
+            "bucket": "botkin-documents",
+            "secure": False,
+        },
+    },
     "upload": {
         "max_bytes": 20 * 1024 * 1024,
         "allowed_extensions": [".pdf", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"],
@@ -313,6 +322,15 @@ _admin_ids_env = os.getenv("ADMIN_TELEGRAM_IDS", "")
 ADMIN_TELEGRAM_IDS: frozenset[int] = frozenset(
     int(x) for x in _admin_ids_env.split(",") if x.strip().isdigit()
 ) or frozenset(int(x) for x in _get("auth.admin_telegram_ids"))
+
+# Хранилище оригиналов документов: local (диск) или minio (S3 с версионированием).
+# Секреты MinIO — только из env (не хранить ключи в config.json под git).
+STORAGE_BACKEND = setting("storage.backend", "STORAGE_BACKEND", str)
+MINIO_ENDPOINT = setting("storage.minio.endpoint", "MINIO_ENDPOINT", str)
+MINIO_BUCKET = setting("storage.minio.bucket", "MINIO_BUCKET", str)
+MINIO_SECURE = _as_bool(setting("storage.minio.secure", "MINIO_SECURE", str))
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
 
 # Загрузка файлов
 UPLOAD_MAX_BYTES = setting("upload.max_bytes", "UPLOAD_MAX_BYTES", int)

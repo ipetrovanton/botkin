@@ -5,8 +5,13 @@ from botkin.domain.models import ClassifyResult
 
 
 def _make_doc(source_path="/tmp/x.jpg"):
+    from pathlib import Path
+
     from botkin.db.connection import get_conn
     from botkin.db.repos import DocumentRepo, UserRepo
+    # Пайплайн проверяет существование исходника через storage-слой —
+    # фиктивный путь без файла останавливал _run до стадий classify/extract.
+    Path(source_path).touch()
     with get_conn() as conn:
         uid = UserRepo(conn).get_or_create(777)
         did = DocumentRepo(conn, uid).create(source_path=source_path)

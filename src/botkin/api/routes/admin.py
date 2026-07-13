@@ -4,13 +4,13 @@
 идентификации — по заголовку X-Telegram-User-Id; см. deps.require_admin.
 """
 import sqlite3
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from botkin.db.connection import get_conn
 from botkin.db.repos import LabRepo, UserRepo
+from botkin.storage import delete_quietly
 
 from ..deps import require_admin
 
@@ -80,10 +80,7 @@ def delete_user(user_id: int, admin_id: int = Depends(require_admin)) -> dict:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
         paths = repo.delete_cascade(user_id)
     for p in paths:
-        try:
-            Path(p).unlink(missing_ok=True)
-        except OSError:
-            pass
+        delete_quietly(p)
     return {"deleted": 1, "files_removed": len(paths)}
 
 
