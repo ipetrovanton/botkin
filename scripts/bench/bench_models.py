@@ -32,6 +32,17 @@ DEFAULT_MODELS = [
     "gemma4:latest",
     "minicpm-v:8b",
     "qwen3-vl:30b-a3b",
+    "qwen2.5vl:7b",
+    "glm-ocr:latest",
+    "qwen3.5:9b",
+    "haervwe/GLM-4.6V-Flash-9B",
+]
+
+# Все модели, которые нужно выгружать перед запуском очередной —
+# включая RAG-модели (bge-m3, qwen3:8b), чтобы освободить память.
+ALL_KNOWN_MODELS = DEFAULT_MODELS + [
+    "bge-m3",
+    "qwen3:8b",
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -141,9 +152,9 @@ def run_model(model: str, skip_synthetic: bool = False, timeout: int = 7200) -> 
     """Прогоняет e2e-тесты на одной модели и возвращает результат."""
     result = ModelResult(model=model)
 
-    # Выгружаем все загруженные модели, чтобы освободить VRAM — иначе новая
-    # модель может не поместиться на GPU и уйдёт в CPU-оффлоад (10-100x медленнее).
-    for m in DEFAULT_MODELS:
+    # Выгружаем все загруженные модели, чтобы освободить память — иначе новая
+    # модель может не поместиться и уйдёт в оффлоад (10-100x медленнее).
+    for m in ALL_KNOWN_MODELS:
         try:
             subprocess.run(["ollama", "stop", m], timeout=30,
                            capture_output=True, env=os.environ.copy())

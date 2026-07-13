@@ -10,6 +10,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -20,15 +21,22 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node не 
 
 
 def run_js(snippet: str) -> str:
-    """Исполняет app.js + snippet в node, возвращает stdout."""
+    """Исполняет app.js + snippet в node, возвращает stdout.
+
+    Скрипт пишется во временный файл: `node -e` со всем app.js в аргументе
+    упирается в лимит длины командной строки Windows (32767 симв., WinError 206).
+    """
     bootstrap = (
         "globalThis.localStorage = { getItem: () => null, setItem: () => {} };\n"
         + APP_JS.read_text(encoding="utf-8")
         + "\n" + snippet
     )
-    res = subprocess.run(
-        ["node", "-e", bootstrap], capture_output=True, text=True, timeout=30,
-    )
+    with tempfile.TemporaryDirectory() as tmp:
+        script = Path(tmp) / "app_test.js"
+        script.write_text(bootstrap, encoding="utf-8")
+        res = subprocess.run(
+            ["node", str(script)], capture_output=True, text=True, timeout=30,
+        )
     assert res.returncode == 0, res.stderr
     return res.stdout.strip()
 

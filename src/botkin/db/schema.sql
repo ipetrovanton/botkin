@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS documents (
     title TEXT,
     clinic TEXT,
     delivered_at TIMESTAMP,
+    -- unix-время входа в текущую стадию: достоверный прогресс-бар считает elapsed внутри стадии
+    stage_started_at REAL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
@@ -85,3 +87,89 @@ CREATE TABLE IF NOT EXISTS doctor_reports (
 );
 CREATE INDEX IF NOT EXISTS idx_doctor_reports_user ON doctor_reports(user_id, visit_date);
 CREATE INDEX IF NOT EXISTS idx_doctor_reports_document ON doctor_reports(document_id);
+
+-- ============ HEALTH SYNC (Garmin / Strava / Apple Health) ============
+
+-- Подключённые источники данных о здоровье. Секреты (пароль) НЕ хранятся:
+-- для garmin персистятся только OAuth-токены на диске (token_path), для strava —
+-- refresh-токен в token_json (OAuth-обмен), apple_health токенов не имеет (push/upload).
+CREATE TABLE IF NOT EXISTS health_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    provider TEXT NOT NULL CHECK(provider IN ('garmin','strava','apple_health')),
+    identifier TEXT,
+    token_path TEXT,
+    token_json TEXT,
+    status TEXT NOT NULL DEFAULT 'connected'
+        CHECK(status IN ('connected','error','disconnected')),
+    last_error TEXT,
+    last_sync_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, provider)
+);
+
+-- Универсальный time-series для метрик здоровья. value_num — скаляр (уд/мин, шаги, кг...),
+-- value_json — структурные значения (фазы сна и т.п.). UNIQUE-ключ делает синк идемпотентным:
+-- повторная загрузка дня перезаписывает, а не дублирует.
+CREATE TABLE IF NOT EXISTS health_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    provider TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    taken_at TIMESTAMP NOT NULL,
+    value_num REAL,
+    value_json TEXT,
+    unit TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, provider, metric, taken_at)
+);
+CREATE INDEX IF NOT EXISTS idx_health_metrics_user_metric
+    ON health_metrics(user_id, metric, taken_at);
+
+-- Активности (тренировки). external_id — id у провайдера, обеспечивает идемпотентность.
+CREATE TABLE IF NOT EXISTS health_activities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    provider TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    activity_type TEXT,
+    name TEXT,
+    started_at TIMESTAMP,
+    duration_s REAL,
+    distance_m REAL,
+    avg_hr REAL,
+    max_hr REAL,
+    calories REAL,
+    raw_json TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, provider, external_id)
+);
+CREATE INDEX IF NOT EXISTS idx_health_activities_user
+    ON health_activities(user_id, started_at);
+
+-- ============ RAG ============
+
+-- Чанки RAG-индекса: текст + метаданные; вектор — в vec0-таблице rag_vectors
+-- (создаётся кодом, sqlite-vec это виртуальная таблица и в schema.sql ей не место:
+-- расширение может быть не загружено при init_db).
+CREATE TABLE IF NOT EXISTS rag_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL CHECK(source IN ('drugs','analytes','health','research')),
+    user_id INTEGER,
+    ref_key TEXT NOT NULL,
+    text TEXT NOT NULL,
+    meta_json TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(source, ref_key)
+);
+CREATE INDEX IF NOT EXISTS idx_rag_chunks_source ON rag_chunks(source);
+
+-- ============ PROGRESS ============
+
+-- EMA длительностей стадий pipeline — историческая база для оценки прогресса и ETA
+-- (см. pipeline/progress_model.py).
+CREATE TABLE IF NOT EXISTS stage_durations (
+    stage TEXT PRIMARY KEY,
+    ema_seconds REAL NOT NULL,
+    samples INTEGER NOT NULL DEFAULT 0
+);

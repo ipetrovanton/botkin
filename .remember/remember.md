@@ -1,5 +1,45 @@
 # Текущий handoff
 
+## 2026-07-05 — ветка feature/uncensored-med-llm: свежие uncensored-LLM + research-RAG + веб
+
+**Цель:** изучить свежие локальные LLM без цензуры для медицины/русского, установить 5,
+прогнать через RAG на тестовых анализах, дать доступ в интернет + RAG из мед.исследований,
+оформить фактуру для Хабра. Железо: RTX 3080 16GB + 48GB RAM.
+
+**Сделано (коммит d4fcb15, локально, НЕ запушено):**
+- Выбраны 5 свежих моделей (теги проверены на ollama.com/tags):
+  `huihui_ai/Qwen3.6-abliterated:27b`, `:35b-a3b`, `huihui_ai/glm-4.7-flash-abliterated:q4_K`,
+  `goekdenizguelmez/JOSIEFIED-Qwen3:8b-health-q6_k`, `richardyoung/deepseek-r1-32b-uncensored`
+  + бейслайн `qwen3:8b` (цензурный). GLM-4.6/5.2/Air НЕ влезают по железу.
+- research-RAG из PubMed: `src/botkin/rag/research.py` + `scripts/update_medical_research.py`
+  (source="research", идемпотентно по PMID). Уже проиндексировано **79 статей**.
+- Веб-доступ моделей: `src/botkin/rag/websearch.py` (DuckDuckGo Lite + live PubMed) →
+  augmentation контекста. `recommend(model=, use_web=)`; конфиг `rag.web_*`, `rag.research.*`.
+- Миграция `rag_chunks`: CHECK(source) += 'research' (connection.py `_migrate_rag_chunks_schema`).
+- Харнесс `scripts/bench/bench_uncensored_rag.py` (--web off/on/both) + анализ/графики
+  `scripts/bench/analyze_uncensored_rag.py`. Дымовой тест на qwen3:8b прошёл (модель
+  процитировала PubMed-абстракты). 397 тестов зелёные, ruff clean (мои файлы).
+
+**Состояние: ЗАДАЧА ВЫПОЛНЕНА** (коммиты в feature/uncensored-med-llm, локально, НЕ запушено).
+- Прогон завершён: 6 моделей × 3 вопроса (RAG) + веб-подвыборка (differential, все web_used=да).
+  Результаты: habr/bench-uncensored/{results.json,md,analysis.md,chart_*.png},
+  habr/bench-uncensored-web/. Битую richardyoung/deepseek заменили на
+  huihui_ai/deepseek-r1-abliterated:8b-0528-qwen3.
+- Ключевые выводы (в фактуре habr/2026-07-05--uncensored-med-llm.md): 0% отказов у всех;
+  MoE 35b-a3b (137с) >> dense 27b (733с) на оффлоаде; JOSIEFIED-health подняла онкомаркеры
+  CA 72-4/549; GLM-4.7 протекает китайскими иероглифами в RU; research-RAG реально цитируется.
+- Фиксы по ходу: num_predict=4096 + фолбэк think=False (пустой content thinking-моделей);
+  таймаут 1800с + max_retries=0; графики на PIL (kaleido не стартует Chromium на хосте).
+- Возможное продолжение: полная матрица `--web both` по всем вопросам (сейчас веб только на
+  differential ради времени); прод-интеграция веб-доступа (сейчас RAG_WEB_ENABLED=False).
+- Автообновление research: `uv run python -m scripts.update_medical_research` (планировщик ОС).
+- Демо-пользователь: telegram 113521070 → user_id=1 (318 анализов, отклонения: лимфоциты 40%,
+  моноциты 11.7%, базофилы). Фактура: `habr/2026-07-05--uncensored-med-llm.md`.
+- NB: 27b/32b пойдут с оффлоадом в RAM → медленно; если OOM — кванты поменьше.
+
+---
+
+
 ## 2026-07-03 — ветка refactor/web-cabinet-quality: аудит + рефакторинг + редизайн кабинета
 
 Ветка `refactor/web-cabinet-quality` (от `feature/web-cabinet`, которая = master + коммит

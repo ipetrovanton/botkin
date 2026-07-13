@@ -1,0 +1,15 @@
+[
+  {
+    "model": "huihui_ai/glm-4.7-flash-abliterated",
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0,
+    "total_time_s": 0.0,
+    "wall_s": 1830.4,
+    "pass_rate": 0.0,
+    "avg_time_per_test": 0.0,
+    "score": 0.0,
+    "error": null,
+    "tests": []
+  }
+]

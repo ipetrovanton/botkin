@@ -426,7 +426,7 @@ body {
 .queue-status--failed { background: rgba(240,86,74,.16); color: var(--danger); }
 
 .progress-track {
-  height: 6px; background: var(--surface-3); border-radius: 999px; overflow: hidden; margin-bottom: 12px;
+  height: 7px; background: var(--surface-3); border-radius: 999px; overflow: hidden; margin-bottom: 8px;
 }
 .progress-bar {
   height: 100%; border-radius: 999px; background: var(--brand-gradient);
@@ -436,6 +436,22 @@ body {
 .progress-bar--done { background: linear-gradient(90deg, var(--ok), #6EE7B7); }
 .progress-bar--duplicate { background: linear-gradient(90deg, var(--brand-2), #67E8F9); }
 .progress-bar--failed { background: var(--danger); }
+.queue-progress-meta {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  min-height: 24px; margin-bottom: 8px; color: var(--text-dim); font-size: 12px;
+}
+.queue-progress-pct { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 700; }
+.queue-progress-status { display: inline-flex; align-items: center; gap: 6px; text-align: right; }
+.queue-progress-status.is-alive { color: var(--brand-1); }
+.status-pulse {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--brand-1);
+  box-shadow: 0 0 0 0 rgba(20,184,166,.45); animation: inference-pulse 1.8s ease-out infinite;
+}
+@keyframes inference-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(20,184,166,.45); }
+  70% { box-shadow: 0 0 0 7px rgba(20,184,166,0); }
+  100% { box-shadow: 0 0 0 0 rgba(20,184,166,0); }
+}
 
 .queue-stages { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-mut); flex-wrap: wrap; }
 .stage { padding: 2px 6px; border-radius: 6px; }
@@ -467,6 +483,7 @@ body {
   transition: border-color var(--dur), background var(--dur), color var(--dur);
 }
 .chip:hover { border-color: var(--brand-1); color: var(--brand-1); background: var(--brand-soft); }
+.chip.active { border-color: var(--brand-1); color: var(--brand-1); background: var(--brand-soft); }
 
 .chart-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .chart-wrap svg { width: 100%; height: auto; display: block; min-width: 320px; }
@@ -502,7 +519,7 @@ body {
 /* ===== Навигация (снизу на мобильных, рельса слева на десктопе) ===== */
 .bottom-nav {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
-  display: grid; grid-template-columns: repeat(5, 1fr); align-items: center;
+  display: grid; grid-template-columns: repeat(6, 1fr); align-items: center;
   background: var(--nav-bg);
   backdrop-filter: saturate(180%) blur(14px); -webkit-backdrop-filter: saturate(180%) blur(14px);
   border-top: 1px solid var(--border);

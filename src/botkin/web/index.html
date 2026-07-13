@@ -340,8 +340,15 @@
               <span class="queue-name" x-text="item.name"></span>
               <span class="queue-status" :class="'queue-status--'+item.state" x-text="queueStateText(item)"></span>
             </div>
-            <div class="progress-track">
+            <div class="progress-track" role="progressbar" :aria-valuenow="progressPct(item)" aria-valuemin="0" aria-valuemax="100">
               <div class="progress-bar" :class="'progress-bar--'+item.state" :style="`width:${progressPct(item)}%`"></div>
+            </div>
+            <div class="queue-progress-meta">
+              <span class="queue-progress-pct" x-text="`${progressPct(item)}%`"></span>
+              <span class="queue-progress-status" :class="{'is-alive': item.alive && item.state === 'processing'}">
+                <span class="status-pulse" x-show="item.alive && item.state === 'processing'"></span>
+                <span x-text="etaText(item)"></span>
+              </span>
             </div>
             <div class="queue-stages">
               <span class="stage" :class="{done: stageDone(item,'received'), active: item.status==='received' || item.status==='processing'}">Принят</span>
@@ -445,6 +452,142 @@
       <div class="skeleton-row" x-show="loading.reports"><div class="skeleton-card"></div><div class="skeleton-card"></div></div>
     </section>
 
+    <!-- ====== ЗДОРОВЬЕ (Garmin / Strava / Apple Health) ====== -->
+    <section x-show="screen==='health'" class="screen">
+      <div class="screen-head">
+        <h1 class="screen-title">Здоровье</h1>
+        <p class="screen-sub">Данные носимых устройств и ассистент</p>
+      </div>
+
+      <!-- Источники -->
+      <div class="panel">
+        <div class="panel-head"><h2 class="panel-title">Источники данных</h2></div>
+
+        <!-- Garmin -->
+        <div class="profile-row">
+          <span class="profile-lbl">Garmin Connect</span>
+          <span class="profile-val" x-text="healthAccount('garmin') ? (healthAccount('garmin').identifier + (healthAccount('garmin').status==='error' ? ' · ошибка' : '')) : 'не подключён'"></span>
+        </div>
+        <template x-if="!healthAccount('garmin')">
+          <div>
+            <p class="muted" style="margin:8px 0;font-size:13px">Пароль используется один раз для входа и не сохраняется — дальше синхронизация живёт на токенах.</p>
+            <div class="filter-row">
+              <input type="email" x-model="health.garminEmail" placeholder="E-mail Garmin" class="filter-input" autocomplete="off">
+              <input type="password" x-model="health.garminPassword" placeholder="Пароль" class="filter-input" autocomplete="off">
+            </div>
+            <button class="btn btn-primary" style="margin-top:10px" @click="connectGarmin()" :disabled="health.connecting"
+                    x-text="health.connecting ? 'Подключение…' : 'Подключить Garmin'"></button>
+          </div>
+        </template>
+        <template x-if="healthAccount('garmin')">
+          <div style="margin-top:10px">
+            <button class="btn btn-primary" @click="syncGarmin()" :disabled="health.syncState.state==='running'">Синхронизировать (30 дней)</button>
+            <div x-show="health.syncState.state==='running'" style="margin-top:10px">
+              <div class="muted" style="font-size:13px">Синхронизация… <span x-text="syncPct()"></span>%</div>
+            </div>
+            <div class="muted" style="margin-top:8px;font-size:12px" x-show="healthAccount('garmin')?.last_sync_at">
+              Последняя синхронизация: <span x-text="fmtDate(healthAccount('garmin')?.last_sync_at)"></span>
+            </div>
+          </div>
+        </template>
+
+        <hr style="border:none;border-top:1px solid var(--border);margin:14px 0">
+
+        <!-- Apple Health -->
+        <div class="profile-row">
+          <span class="profile-lbl">Apple Health</span>
+          <span class="profile-val" x-text="healthAccount('apple_health') ? 'подключён' : 'не подключён'"></span>
+        </div>
+        <p class="muted" style="margin:8px 0;font-size:13px">Загрузите export.zip (Здоровье → Профиль → Экспорт медданных) или настройте Health Auto Export на отправку в /api/health/apple/ingest.</p>
+        <label class="btn btn-ghost" style="display:inline-block;cursor:pointer">
+          Импортировать export.zip
+          <input type="file" accept=".zip" style="display:none" @change="uploadAppleExport($event)">
+        </label>
+
+        <hr style="border:none;border-top:1px solid var(--border);margin:14px 0">
+
+        <!-- Strava -->
+        <div class="profile-row">
+          <span class="profile-lbl">Strava</span>
+          <span class="profile-val" x-text="healthAccount('strava') ? 'подключена' : (health.stravaConfigured ? 'не подключена' : 'не сконфигурирована')"></span>
+        </div>
+        <p class="muted" style="margin:8px 0;font-size:13px" x-show="!health.stravaConfigured">Для подключения задайте STRAVA_CLIENT_ID и STRAVA_CLIENT_SECRET в .env (регистрация приложения на strava.com/settings/api). Strava отдаёт только тренировки — давления и сна в её API нет.</p>
+      </div>
+
+      <!-- Метрики -->
+      <div class="panel" x-show="health.metrics.length">
+        <div class="panel-head">
+          <h2 class="panel-title">Метрики</h2>
+          <span class="panel-cnt" x-text="(health.stats.points || 0) + ' точек'"></span>
+        </div>
+        <div class="chip-row">
+          <template x-for="m in health.metrics" :key="m.metric">
+            <button class="chip" :class="{active: health.picked===m.metric}" @click="pickHealthMetric(m.metric)">
+              <span x-text="metricLabel(m.metric)"></span>
+            </button>
+          </template>
+        </div>
+        <div x-show="health.series.points.length" style="margin-top:14px">
+          <div class="panel-head">
+            <h3 class="panel-title" x-text="metricLabel(health.series.metric)"></h3>
+            <span class="panel-cnt" x-text="health.series.metric==='sleep_seconds' ? 'часы' : (health.series.unit || '')"></span>
+          </div>
+          <div class="chart-wrap" x-ref="healthChart"></div>
+        </div>
+      </div>
+      <div class="empty" x-show="!health.metrics.length">
+        <p>Данных о здоровье пока нет.</p>
+        <p class="muted">Подключите Garmin или импортируйте экспорт Apple Health.</p>
+      </div>
+
+      <!-- Активности -->
+      <div class="panel" x-show="health.activities.length">
+        <div class="panel-head">
+          <h2 class="panel-title">Тренировки</h2>
+          <span class="panel-cnt" x-text="health.activities.length"></span>
+        </div>
+        <template x-for="a in health.activities.slice(0, 15)" :key="a.provider + a.external_id">
+          <div class="profile-row">
+            <span class="profile-lbl">
+              <span x-text="a.name || a.activity_type"></span>
+              <span class="muted" style="font-size:12px;display:block" x-text="fmtDate(a.started_at)"></span>
+            </span>
+            <span class="profile-val" style="text-align:right">
+              <span x-text="fmtDuration(a.duration_s)"></span>
+              <span class="muted" style="font-size:12px;display:block" x-text="a.avg_hr ? ('пульс ' + Math.round(a.avg_hr)) : ''"></span>
+            </span>
+          </div>
+        </template>
+      </div>
+
+      <!-- Ассистент -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Ассистент</h2>
+          <span class="panel-cnt" x-text="ragTotalChunks() ? (ragTotalChunks() + ' записей в индексе') : 'индекс пуст'"></span>
+        </div>
+        <template x-if="!ragTotalChunks()">
+          <div>
+            <p class="muted" style="margin-bottom:10px;font-size:13px">Справочники лекарств (ГРЛС) и анализов (ФСЛИ) ещё не проиндексированы для поиска.</p>
+            <button class="btn btn-primary" @click="ragReindex()" :disabled="ragIndex.reindex.state==='running'"
+                    x-text="ragIndex.reindex.state==='running' ? 'Индексация…' : 'Проиндексировать справочники'"></button>
+          </div>
+        </template>
+        <div x-show="ragTotalChunks()">
+          <p class="muted" style="margin-bottom:10px;font-size:13px">Ассистент отвечает на основе ваших анализов, данных устройств и официальных справочников. Не является медицинской консультацией.</p>
+          <textarea x-model="assistant.question" rows="3" class="filter-input" style="width:100%;resize:vertical"
+                    placeholder="Например: что означает мой повышенный холестерин и на что обратить внимание?"></textarea>
+          <button class="btn btn-primary" style="margin-top:10px" @click="askAssistant()" :disabled="assistant.busy"
+                  x-text="assistant.busy ? 'Думаю…' : 'Спросить'"></button>
+          <div class="panel" style="margin-top:12px" x-show="assistant.answer">
+            <div class="report-diagnosis" style="white-space:pre-wrap" x-text="assistant.answer"></div>
+            <div class="muted" style="margin-top:10px;font-size:12px" x-show="assistant.chunks.length"
+                 x-text="'Источники: ' + assistant.chunks.map(c => c.ref_key).slice(0, 6).join('; ')"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ====== ПРОФИЛЬ ====== -->
     <section x-show="screen==='profile'" class="screen">
       <div class="screen-head"><h1 class="screen-title">Профиль</h1></div>
@@ -495,6 +638,10 @@
     <button class="nav-item" :class="{active: screen==='reports'}" @click="go('reports')">
       <svg viewBox="0 0 24 24" width="22" height="22"><path d="M6 3h9l5 5v13H6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M14 3v6h5" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
       <span>Заключения</span>
+    </button>
+    <button class="nav-item" :class="{active: screen==='health'}" @click="go('health')">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 21C7 16.5 3 13.2 3 9.1 3 6.3 5.2 4 8 4c1.6 0 3.1.8 4 2 .9-1.2 2.4-2 4-2 2.8 0 5 2.3 5 5.1 0 4.1-4 7.4-9 11.9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M6 12h3l1.5-3 2.5 5 1.5-2H18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Здоровье</span>
     </button>
   </nav>
 

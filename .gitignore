@@ -56,14 +56,33 @@ tests/fixtures/documents/*
 tests/fixtures/documents/samples/*
 !tests/fixtures/documents/samples/*.expected.json
 
-# Служебные отладочные скрипты и логи
-_*.py
-_*.log
-_*.out
-_*.json
-_*.txt
-_*.jpg
-_*.png
+# Служебные отладочные скрипты и логи (только в корне: паттерн без якоря
+# матчил бы и src/**/__init__.py)
+/_*.py
+/_*.log
+/_*.out
+/_*.json
+/_*.txt
+/_*.jpg
+/_*.png
+
+# Health-sync: OAuth-токены провайдеров — секреты, не коммитим
+data/health_tokens/
+
+# Patient data — база и манифест исследований, не коммитим
+data/
+
+# Внутренние директории инструментов
+.agents/
+.remember/
+skills-lock.json
+
+# Временные тестовые дампы
+tests/_dump_*
+tests/_last_run.txt
+
+# Сгенерированные PDF-артефакты
+habr/*.pdf
 
 # Bench-артефакты прогонов: логи и текстовые дампы. Сами скрипты scripts/bench/*.py
 # и данные сравнения bench_models_results.json — версионируем.

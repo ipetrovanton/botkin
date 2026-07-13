@@ -12,6 +12,7 @@ from ..deps import get_telegram_user_id, get_user_id
 from botkin.db.connection import get_conn
 from botkin.db.repos import DocumentRepo, LabRepo, ReportRepo
 from botkin.pipeline.orchestrator import process_document
+from botkin.pipeline.progress_model import StageDurationStore, estimate_progress
 
 router = APIRouter(prefix="/api", tags=["cabinet"])
 
@@ -104,12 +105,27 @@ def document_detail(document_id: int, user_id: int = Depends(get_user_id)) -> di
 
 @router.get("/documents/{document_id}/status")
 def document_status(document_id: int, user_id: int = Depends(get_user_id)) -> dict:
-    """Текущий статус обработки — для поллинга прогресса из веб-кабинета."""
+    """Статус + достоверный прогресс — для поллинга из веб-кабинета и бота.
+
+    percent растёт внутри длинной VLM-стадии (по исторической EMA длительности),
+    поэтому фронт может показывать живое движение бара вместо замершей стадии.
+    alive=false только при status=failed — «модель думает, а не упала».
+    """
     with get_conn() as conn:
-        status = DocumentRepo(conn, user_id).get_status(document_id)
-    if status is None:
-        raise HTTPException(status_code=404, detail="Документ не найден")
-    return {"status": status}
+        repo = DocumentRepo(conn, user_id)
+        row = repo.get_progress_row(document_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Документ не найден")
+        est = estimate_progress(
+            row["status"], row.get("stage_started_at"), StageDurationStore(conn),
+        )
+    return {
+        "status": est.status,
+        "percent": est.percent,
+        "eta_seconds": est.eta_seconds,
+        "stage_elapsed_s": est.stage_elapsed_s,
+        "alive": est.alive,
+    }
 
 
 @router.get("/documents/{document_id}/source")

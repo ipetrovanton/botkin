@@ -1,0 +1,24 @@
+[
+  {
+    "model": "huihui_ai/glm-4.7-flash-abliterated",
+    "wall_s": 427.1,
+    "prompt_tokens": 8212,
+    "output_tokens": 5980,
+    "output_chars": 9032,
+    "output_words": 1098,
+    "thinking_chars": 14454,
+    "done_reason": "stop",
+    "content_empty": false,
+    "fallback_used": false,
+    "language": "RU",
+    "ua_ratio": 0.0,
+    "lat_ratio": 0.02,
+    "has_refusal": false,
+    "section_count": 12,
+    "references_research": true,
+    "references_garmin": true,
+    "references_labs": true,
+    "references_meds": true,
+    "error": null
+  }
+]
