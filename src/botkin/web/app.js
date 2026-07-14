@@ -132,7 +132,7 @@ function cabinet() {
       newLab: { analyte_name: "", value_num: "", unit: "", ref_low: "", ref_high: "", taken_at: "" },
       busy: false,
     },
-    ragIndex: { chunks: {}, reindex: { state: "idle" } },
+    ragIndex: { chunks: {}, reindex: { state: "idle" }, research: { state: "idle" }, benching: false, benchModels: "", benchResults: null },
 
     // UI-состояние
     loading: { stats: false, docs: false, doc: false, reports: false, dynamics: false },
@@ -1196,6 +1196,58 @@ function cabinet() {
     },
     ragTotalChunks() {
       return Object.values(this.ragIndex.chunks || {}).reduce((a, b) => a + b, 0);
+    },
+
+    async ragResearchUpdate() {
+      try {
+        await this.api("/api/rag/research/update", { method: "POST" });
+        this.ragIndex.research = { state: "running" };
+        this.toast("Обновление PubMed запущено", "info");
+        this._pollResearch();
+      } catch (e) {
+        if (e?.status === 409) this.toast("Обновление уже идёт", "error");
+        else this.toast("Не удалось запустить обновление", "error");
+        console.error(e);
+      }
+    },
+
+    async ragResearchStatus() {
+      try {
+        const st = await this.api("/api/rag/research/status");
+        if (st) this.ragIndex.research = st;
+      } catch (e) { console.error(e); }
+    },
+
+    _pollResearch() {
+      setTimeout(async () => {
+        try {
+          const st = await this.api("/api/rag/research/status");
+          if (st) this.ragIndex.research = st;
+          if (st?.state === "running") this._pollResearch();
+          else if (st?.state === "done") this.toast("PubMed обновлён: " + (st.indexed ?? 0) + " публикаций", "success");
+        } catch (e) { console.error(e); }
+      }, 5000);
+    },
+
+    async ragBenchmark() {
+      const raw = this.ragIndex.benchModels.trim();
+      if (!raw) { this.toast("Укажите модели через запятую", "error"); return; }
+      const models = raw.split(",").map(m => m.trim()).filter(Boolean);
+      if (!models.length) { this.toast("Укажите хотя бы одну модель", "error"); return; }
+      this.ragIndex.benching = true;
+      this.ragIndex.benchResults = null;
+      try {
+        const data = await this.api("/api/rag/benchmark", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ models }),
+        });
+        this.ragIndex.benchResults = data.models || [];
+        this.toast("Бенчмарк завершён", "success");
+      } catch (e) {
+        this.toast("Бенчмарк недоступен (проверьте Ollama)", "error");
+        console.error(e);
+      } finally { this.ragIndex.benching = false; }
     },
 
     // ===== Форматтеры =====

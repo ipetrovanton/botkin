@@ -742,9 +742,56 @@
           </div>
         </div>
       </div>
-    </section>
 
-    <!-- ====== АДМИНИСТРИРОВАНИЕ ====== -->
+      <!-- Управление RAG: обновление PubMed + бенчмарк -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Обновление базы знаний</h2>
+        </div>
+        <p class="muted" style="margin-bottom:10px;font-size:13px">Подтянуть свежие медицинские публикации из PubMed в локальный индекс.</p>
+        <div class="filter-row">
+          <button class="btn btn-primary" @click="ragResearchUpdate()"
+                  :disabled="ragIndex.research.state==='running'"
+                  x-text="ragIndex.research.state==='running' ? 'Обновление…' : 'Обновить из PubMed'"></button>
+          <button class="btn btn-ghost" @click="ragResearchStatus()"
+                  x-show="ragIndex.research.state==='done' || ragIndex.research.state==='error'">Статус</button>
+        </div>
+        <template x-if="ragIndex.research.state==='done'">
+          <div class="muted" style="margin-top:8px;font-size:12px"
+               x-text="'Проиндексировано: ' + (ragIndex.research.indexed ?? 0) + ' публикаций'"></div>
+        </template>
+        <template x-if="ragIndex.research.state==='error'">
+          <div class="muted" style="margin-top:8px;font-size:12px;color:var(--danger)"
+               x-text="'Ошибка: ' + (ragIndex.research.error || '')"></div>
+        </template>
+
+        <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
+          <h3 class="panel-title" style="font-size:15px;margin-bottom:8px">Бенчмарк embedding-моделей</h3>
+          <p class="muted" style="margin-bottom:10px;font-size:13px">Сравнить модели на тестовом наборе медицинских запросов (hit_rate, MRR).</p>
+          <div class="filter-row">
+            <input type="text" class="filter-input" placeholder="Модели через запятую (bge-m3,nomic-embed-text)"
+                   x-model="ragIndex.benchModels">
+            <button class="btn btn-primary" @click="ragBenchmark()" :disabled="ragIndex.benching">Запустить</button>
+          </div>
+          <template x-if="ragIndex.benching">
+            <div class="muted" style="margin-top:8px;font-size:12px">Сравнение моделей…</div>
+          </template>
+          <template x-if="ragIndex.benchResults">
+            <div style="margin-top:10px">
+              <template x-for="r in ragIndex.benchResults" :key="r.model">
+                <div class="admin-user-row">
+                  <div class="admin-user-main">
+                    <span class="admin-user-name" x-text="r.model"></span>
+                    <span class="admin-user-meta"
+                          x-text="'hit_rate: ' + (r.hit_rate*100).toFixed(0) + '%, MRR: ' + r.mrr.toFixed(3) + ', dist: ' + r.avg_distance.toFixed(4)"></span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </div>
+    </section>
     <section x-show="screen==='admin'" class="screen">
       <div class="screen-head">
         <h1 class="screen-title">Администрирование</h1>
