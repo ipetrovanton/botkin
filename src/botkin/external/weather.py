@@ -1,7 +1,11 @@
-"""Погода и геомагнитная активность из бесплатных API без ключей.
+"""Погода и геомагнитная активность из бесплатных публичных источников.
 
-Источники:
-- Open-Meteo (https://api.open-meteo.com) — погода без API-ключа, CC BY 4.0.
+Источники погоды (fallback-цепочка):
+1. Open-Meteo (https://api.open-meteo.com) — REST API без ключа, CC BY 4.0.
+2. wttr.in (https://wttr.in) — публичный веб-сервис, отдаёт JSON без ключа.
+   Используется как fallback, если Open-Meteo недоступен.
+
+Геомагнитная активность:
 - NOAA SWPC (https://services.swpc.noaa.gov) — индекс Kp, публичный API US gov.
 
 Все запросы — через стандартный urllib, без внешних зависимостей.
@@ -17,6 +21,7 @@ from dataclasses import dataclass
 log = logging.getLogger(__name__)
 
 _OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+_WTTR_URL = "https://wttr.in/{lat},{lon}?format=j1"
 _SWPC_KP_URL = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"
 _TIMEOUT = 10
 
@@ -100,7 +105,19 @@ def _kp_level(kp: float) -> str:
 
 
 def fetch_weather(latitude: float, longitude: float) -> WeatherData | None:
-    """Текущая погода через Open-Meteo. Возвращает None при ошибке сети."""
+    """Текущая погода. Сначала Open-Meteo, при ошибке — fallback на wttr.in.
+
+    Возвращает None, если оба источника недоступны.
+    """
+    data = _fetch_open_meteo(latitude, longitude)
+    if data is not None:
+        return data
+    log.info("Open-Meteo недоступен, пробуем wttr.in")
+    return _fetch_wttr(latitude, longitude)
+
+
+def _fetch_open_meteo(latitude: float, longitude: float) -> WeatherData | None:
+    """Погода через Open-Meteo REST API (без ключа)."""
     params = (
         f"?latitude={latitude}&longitude={longitude}"
         "&current=temperature_2m,relative_humidity_2m,weather_code,"
@@ -119,7 +136,46 @@ def fetch_weather(latitude: float, longitude: float) -> WeatherData | None:
             precipitation=cur.get("precipitation", 0.0),
         )
     except Exception as e:
-        log.warning("Не удалось получить погоду: %s", e)
+        log.warning("Open-Meteo не ответил: %s", e)
+        return None
+
+
+# Маппинг кодов погоды wttr.in (weatherCode) → WMO-коды Open-Meteo
+# https://wttr.in/:format=j1 возвращает weatherCode как текстовое описание.
+# Маппим на ближайшие WMO-коды для единообразного описания.
+_WTTR_CODE_MAP: dict[str, int] = {
+    "Clear": 0, "Sunny": 0, "Clear sky": 0,
+    "Partly cloudy": 2, "Partly Cloudy": 2,
+    "Cloudy": 3, "Overcast": 3,
+    "Mist": 45, "Fog": 45,
+    "Light rain": 61, "Patchy rain possible": 61,
+    "Moderate rain": 63, "Rain": 63,
+    "Heavy rain": 65,
+    "Light snow": 71, "Patchy snow possible": 71,
+    "Moderate snow": 73, "Snow": 73,
+    "Heavy snow": 75,
+    "Thundery outbreaks possible": 95, "Thunder": 95, "Thunderstorm": 95,
+}
+
+
+def _fetch_wttr(latitude: float, longitude: float) -> WeatherData | None:
+    """Fallback: погода через wttr.in (публичный веб-сервис, без ключа)."""
+    url = _WTTR_URL.format(lat=latitude, lon=longitude)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "curl/8.0"})
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            data = json.loads(resp.read())
+        cur = data["current_condition"][0]
+        weather_code = _WTTR_CODE_MAP.get(cur.get("weatherDesc", [{}])[0].get("value", ""), 0)
+        return WeatherData(
+            temperature=float(cur["temp_C"]),
+            windspeed=float(cur["windspeedKmph"]),
+            humidity=float(cur["humidity"]),
+            weather_code=weather_code,
+            precipitation=float(cur.get("precipMM", 0.0)),
+        )
+    except Exception as e:
+        log.warning("wttr.in не ответил: %s", e)
         return None
 
 

@@ -92,3 +92,32 @@ def test_external_today_with_profile_coordinates(monkeypatch, tmp_path):
                headers=_hdr())
     r = client.get("/api/external/today", headers=_hdr())
     assert r.status_code == 200
+
+
+def test_weather_fallback_to_wttr(monkeypatch):
+    """При недоступности Open-Meteo погода запрашивается через wttr.in."""
+    from botkin.external import weather
+
+    # Open-Meteo «недоступен»
+    monkeypatch.setattr(weather, "_fetch_open_meteo", lambda lat, lon: None)
+
+    # wttr.in возвращает тестовые данные
+    fake_wttr = weather.WeatherData(
+        temperature=15.0, windspeed=10.0, humidity=60.0,
+        weather_code=0, precipitation=0.0,
+    )
+    monkeypatch.setattr(weather, "_fetch_wttr", lambda lat, lon: fake_wttr)
+
+    result = weather.fetch_weather(55.75, 37.61)
+    assert result is not None
+    assert result.temperature == 15.0
+
+
+def test_weather_both_sources_fail(monkeypatch):
+    """При недоступности обоих источников возвращается None."""
+    from botkin.external import weather
+
+    monkeypatch.setattr(weather, "_fetch_open_meteo", lambda lat, lon: None)
+    monkeypatch.setattr(weather, "_fetch_wttr", lambda lat, lon: None)
+
+    assert weather.fetch_weather(55.75, 37.61) is None
