@@ -129,9 +129,39 @@
           </button>
         </div>
       </div>
-    </section>
 
-    <!-- ====== ДОКУМЕНТЫ ====== -->
+      <!-- Внешние факторы: погода, геомагнитная активность -->
+      <div class="panel" x-show="external.today" x-cloak>
+        <div class="panel-head"><h2 class="panel-title">Внешние факторы</h2></div>
+        <div class="external-grid">
+          <template x-if="external.today?.weather">
+            <div class="external-card">
+              <div class="external-icon">🌤️</div>
+              <div class="external-val" x-text="external.today.weather.temperature + '°C'"></div>
+              <div class="external-lbl" x-text="external.today.weather.description"></div>
+              <div class="muted" style="font-size:11px;margin-top:2px">
+                Ветер <span x-text="external.today.weather.windspeed + ' км/ч'"></span>,
+                влажность <span x-text="external.today.weather.humidity + '%'"></span>
+              </div>
+            </div>
+          </template>
+          <template x-if="external.today?.geomagnetic">
+            <div class="external-card">
+              <div class="external-icon">🧲</div>
+              <div class="external-val" x-text="'Kp ' + external.today.geomagnetic.kp_index"></div>
+              <div class="external-lbl" x-text="external.today.geomagnetic.level"></div>
+            </div>
+          </template>
+          <template x-if="external.today?.horoscope">
+            <div class="external-card external-card--fun">
+              <div class="external-icon">♈</div>
+              <div class="external-val" x-text="external.today.horoscope.sign"></div>
+              <div class="external-lbl" style="font-size:11px" x-text="external.today.horoscope.text"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </section>
     <section x-show="screen==='documents'" class="screen">
       <div class="screen-head">
         <h1 class="screen-title">Документы</h1>
@@ -872,6 +902,10 @@
         </div>
         <textarea class="filter-input" rows="2" placeholder="Аллергии (лекарства, продукты…)" style="margin-top:10px" x-model="patient.profile.allergies"></textarea>
         <textarea class="filter-input" rows="2" placeholder="Хронические состояния" style="margin-top:10px" x-model="patient.profile.chronic_conditions"></textarea>
+        <div class="filter-row" style="margin-top:10px">
+          <input type="number" step="any" class="filter-input" placeholder="Широта" x-model="patient.profile.latitude" title="Для погоды в рекомендациях">
+          <input type="number" step="any" class="filter-input" placeholder="Долгота" x-model="patient.profile.longitude" title="Для погоды в рекомендациях">
+        </div>
         <button class="btn btn-primary" style="margin-top:10px" @click="savePatientProfile()" :disabled="patient.busy">Сохранить</button>
       </div>
 

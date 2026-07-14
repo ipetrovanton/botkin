@@ -105,10 +105,11 @@ function cabinet() {
       garminEmail: "", garminPassword: "", connecting: false,
     },
     assistant: { question: "", answer: "", chunks: [], busy: false },
+    external: { today: null },
 
     // Формы пациента: профиль тела, жалобы, текущие препараты (учитываются в рекомендациях)
     patient: {
-      profile: { sex: "", birth_date: "", height_cm: "", weight_kg: "", blood_type: "", allergies: "", chronic_conditions: "" },
+      profile: { sex: "", birth_date: "", height_cm: "", weight_kg: "", blood_type: "", allergies: "", chronic_conditions: "", latitude: "", longitude: "" },
       complaints: [],
       medications: [],
       newComplaint: "",
@@ -180,7 +181,7 @@ function cabinet() {
       this.screen = s;
       if (s === "documents") this.loadDocs();
       else if (s === "reports") this.loadReports();
-      else if (s === "overview") this.loadStats();
+      else if (s === "overview") { this.loadStats(); this.loadExternal(); }
       else if (s === "health") this.loadHealth();
       else if (s === "admin") this.adminLoadUsers();
       else if (s === "profile") this.loadPatient();
@@ -332,6 +333,11 @@ function cabinet() {
       } catch (e) { this.toast("Не удалось загрузить сводку", "error"); console.error(e); }
       finally { this.loading.stats = false; }
     },
+    async loadExternal() {
+      try {
+        this.external.today = await this.api("/api/external/today");
+      } catch (e) { console.error("external", e); }
+    },
 
     // ===== Формы пациента =====
     async loadPatient() {
@@ -347,6 +353,7 @@ function cabinet() {
           height_cm: p.height_cm ?? "", weight_kg: p.weight_kg ?? "",
           blood_type: p.blood_type || "", allergies: p.allergies || "",
           chronic_conditions: p.chronic_conditions || "",
+          latitude: p.latitude ?? "", longitude: p.longitude ?? "",
         };
         this.patient.complaints = complaints?.items || [];
         this.patient.medications = meds?.items || [];

@@ -186,6 +186,19 @@ body {
 .stat-val { font-size: 28px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .stat-lbl { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
 
+/* ===== Внешние факторы (погода, геомагнетика) ===== */
+.external-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+}
+.external-card {
+  background: var(--surface-3); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px; text-align: center;
+}
+.external-card--fun { border-style: dashed; opacity: .8; }
+.external-icon { font-size: 24px; margin-bottom: 6px; }
+.external-val { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.external-lbl { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
+
 /* ===== Панели ===== */
 .panel {
   background: var(--surface); border: 1px solid var(--border);

@@ -45,6 +45,10 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "unit_mismatch": "INTEGER",
     },
     "doctor_reports": {"medications_normalized_json": "TEXT"},
+    "patient_profile": {
+        "latitude": "REAL",
+        "longitude": "REAL",
+    },
 }
 
 

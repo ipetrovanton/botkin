@@ -16,12 +16,14 @@ import logging
 import time
 
 from botkin.config import (
-    OLLAMA_KEEP_ALIVE, RAG_RECOMMEND_MODEL, RAG_RECOMMEND_NUM_CTX,
+    EXT_ASTROLOGY_ENABLED, EXT_DEFAULT_LAT, EXT_DEFAULT_LON, EXT_GEOMAGNETIC_ENABLED,
+    EXT_WEATHER_ENABLED, OLLAMA_KEEP_ALIVE, RAG_RECOMMEND_MODEL, RAG_RECOMMEND_NUM_CTX,
     RAG_RECOMMEND_NUM_PREDICT, RAG_TOP_K, RAG_WEB_ENABLED, RAG_WEB_RESULTS,
 )
 from botkin.db.connection import get_conn
 from botkin.clinical.facts import build_lab_facts, render_lab_facts
 from botkin.db.repos import HealthRepo, PatientRepo
+from botkin.external import astrology, weather
 from botkin.llm.client import get_raw_client
 from botkin.rag import retriever, websearch
 
@@ -40,7 +42,11 @@ SYSTEM_PROMPT = """Ты — медицинский ассистент серви
 4. Если данных недостаточно — так и скажи, не фантазируй.
 5. Если в контексте есть блок «СВЕЖИЕ ИСТОЧНИКИ ИЗ ИНТЕРНЕТА» — можешь опираться на него
    как на дополнительную справку, но проверяй критически и указывай ссылку при цитировании.
-6. Завершай ответ напоминанием, что окончательные решения принимает лечащий врач."""
+6. Если в контексте есть погодные данные или геомагнитная активность — учитывай их
+   при рекомендациях по режиму дня (например, при высокой геомагнитной активности
+   метеозависимым людям стоит снизить нагрузку). Астрологический блок — исключительно
+   развлекательный, НЕ используй его для медицинских рекомендаций.
+7. Завершай ответ напоминанием, что окончательные решения принимает лечащий врач."""
 
 _RECENT_LABS_SQL = """
     SELECT COALESCE(analyte_canonical, analyte_name) AS name, value_num, unit,
@@ -142,7 +148,46 @@ def _patient_context(user_id: int) -> str:
                 unit = rows[0].get("unit") or ""
                 lines.append(f"- {metric}: среднее {avg:.1f} {unit}".rstrip())
             parts.append("\n".join(lines))
+
+        ext_block = _external_context(conn, user_id)
+        if ext_block:
+            parts.append(ext_block)
     return "\n\n".join(parts) if parts else "Данных о пациенте в базе нет."
+
+
+def _external_context(conn, user_id: int) -> str | None:
+    """Погода, геомагнитная активность и (опционально) развлекательный гороскоп.
+
+    Погода запрашивается по координатам из профиля пациента или по умолчанию (Москва).
+    Все источники — graceful: при ошибке сети блок просто пропускается.
+    """
+    lines: list[str] = []
+
+    lat, lon = EXT_DEFAULT_LAT, EXT_DEFAULT_LON
+    birth_date = None
+    repo = PatientRepo(conn, user_id)
+    profile = repo.get_profile()
+    if profile:
+        if profile.get("latitude"):
+            lat = profile["latitude"]
+        if profile.get("longitude"):
+            lon = profile["longitude"]
+        birth_date = profile.get("birth_date")
+
+    if EXT_WEATHER_ENABLED or EXT_GEOMAGNETIC_ENABLED:
+        ext = weather.gather_external_context(
+            latitude=lat if EXT_WEATHER_ENABLED else None,
+            longitude=lon if EXT_WEATHER_ENABLED else None,
+        )
+        if ext:
+            lines.append(ext)
+
+    if EXT_ASTROLOGY_ENABLED:
+        horo = astrology.get_daily_horoscope(birth_date)
+        if horo:
+            lines.append(horo)
+
+    return "\n".join(lines) if lines else None
 
 
 def recommend(

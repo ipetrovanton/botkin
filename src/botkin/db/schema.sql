@@ -107,6 +107,8 @@ CREATE TABLE IF NOT EXISTS patient_profile (
     blood_type TEXT,          -- «O(I) Rh+» и т.п.
     allergies TEXT,
     chronic_conditions TEXT,
+    latitude REAL,            -- геолокация для погодного контекста рекомендаций
+    longitude REAL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
