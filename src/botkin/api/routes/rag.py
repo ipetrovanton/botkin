@@ -78,3 +78,73 @@ def recommend(req: RecommendRequest, user_id: int = Depends(get_user_id)) -> dic
     except Exception as e:
         log.exception("Рекомендация не удалась")
         raise HTTPException(status_code=502, detail=f"LLM недоступна: {e}")
+
+
+_research_state: dict = {"state": "idle"}
+_research_lock = threading.Lock()
+
+
+def _run_research_update() -> None:
+    global _research_state
+    try:
+        from botkin.rag.research import index_research
+        result = index_research()
+        with _research_lock:
+            _research_state = {"state": "done", **result}
+        log.info("Research-RAG обновлён: %s", result)
+    except Exception as e:
+        log.exception("Research-RAG обновление упало")
+        with _research_lock:
+            _research_state = {"state": "error", "error": str(e)[:300]}
+
+
+@router.post("/research/update")
+def research_update(
+    background_tasks: BackgroundTasks,
+    user_id: int = Depends(get_user_id),
+) -> dict:
+    """Обновление RAG свежими публикациями PubMed (фоновая задача)."""
+    global _research_state
+    with _research_lock:
+        if _research_state.get("state") == "running":
+            raise HTTPException(status_code=409, detail="Обновление уже идёт")
+        _research_state = {"state": "running"}
+    background_tasks.add_task(_run_research_update)
+    return {"status": "started"}
+
+
+@router.get("/research/status")
+def research_status() -> dict:
+    with _research_lock:
+        return dict(_research_state)
+
+
+class BenchmarkRequest(BaseModel):
+    models: list[str] = Field(..., min_length=1, max_length=10)
+
+
+@router.post("/benchmark")
+def benchmark(
+    req: BenchmarkRequest,
+    user_id: int = Depends(get_user_id),
+) -> dict:
+    """Сравнение embedding-моделей на golden set. Требует Ollama с установленными моделями."""
+    from botkin.rag.benchmark import run_benchmark, format_results
+    try:
+        results = run_benchmark(req.models)
+    except Exception as e:
+        log.exception("Бенчмарк упал")
+        raise HTTPException(status_code=502, detail=f"Бенчмарк недоступен: {e}")
+    return {
+        "summary": format_results(results),
+        "models": [
+            {
+                "model": r.model,
+                "hit_rate": round(r.hit_rate, 4),
+                "mrr": round(r.mrr, 4),
+                "avg_distance": round(r.avg_distance, 4),
+                "per_query": r.per_query,
+            }
+            for r in results
+        ],
+    }
