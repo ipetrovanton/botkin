@@ -898,13 +898,39 @@
         <div class="filter-row" style="margin-top:10px">
           <input type="number" step="any" class="filter-input" placeholder="Рост, см" x-model="patient.profile.height_cm">
           <input type="number" step="any" class="filter-input" placeholder="Вес, кг" x-model="patient.profile.weight_kg">
-          <input type="text" class="filter-input" placeholder="Группа крови" x-model="patient.profile.blood_type">
+          <select class="filter-input" x-model="patient.profile.blood_type">
+            <option value="">Группа крови —</option>
+            <option value="O−">O− (I отрицательная)</option>
+            <option value="O+">O+ (I положительная)</option>
+            <option value="A−">A− (II отрицательная)</option>
+            <option value="A+">A+ (II положительная)</option>
+            <option value="B−">B− (III отрицательная)</option>
+            <option value="B+">B+ (III положительная)</option>
+            <option value="AB−">AB− (IV отрицательная)</option>
+            <option value="AB+">AB+ (IV положительная)</option>
+          </select>
         </div>
         <textarea class="filter-input" rows="2" placeholder="Аллергии (лекарства, продукты…)" style="margin-top:10px" x-model="patient.profile.allergies"></textarea>
         <textarea class="filter-input" rows="2" placeholder="Хронические состояния" style="margin-top:10px" x-model="patient.profile.chronic_conditions"></textarea>
         <div class="filter-row" style="margin-top:10px">
-          <input type="number" step="any" class="filter-input" placeholder="Широта" x-model="patient.profile.latitude" title="Для погоды в рекомендациях">
-          <input type="number" step="any" class="filter-input" placeholder="Долгота" x-model="patient.profile.longitude" title="Для погоды в рекомендациях">
+          <input type="text" class="filter-input" placeholder="Город (для погоды)"
+                 x-model="patient.cityQuery"
+                 @input="searchCities()"
+                 @focus="patient.showCities = true"
+                 @blur="setTimeout(() => patient.showCities = false, 200)">
+          <input type="hidden" x-model="patient.profile.latitude">
+          <input type="hidden" x-model="patient.profile.longitude">
+        </div>
+        <div x-show="patient.showCities && patient.cityResults.length" x-cloak
+             style="position:relative;z-index:10">
+          <div class="autocomplete-list">
+            <template x-for="c in patient.cityResults" :key="c.label">
+              <div class="autocomplete-item" @mousedown="selectCity(c)">
+                <span x-text="c.name"></span>
+                <span class="muted" style="font-size:12px;margin-left:6px" x-text="c.region"></span>
+              </div>
+            </template>
+          </div>
         </div>
         <button class="btn btn-primary" style="margin-top:10px" @click="savePatientProfile()" :disabled="patient.busy">Сохранить</button>
       </div>
@@ -937,9 +963,27 @@
           <h2 class="panel-title">Принимаю сейчас</h2>
           <span class="panel-cnt" x-text="patient.medications.filter(m => m.is_active).length"></span>
         </div>
-        <div class="filter-row">
-          <input type="text" class="filter-input" placeholder="Препарат *" x-model="patient.newMed.name">
+        <div class="filter-row" style="position:relative">
+          <input type="text" class="filter-input" placeholder="Препарат *"
+                 x-model="patient.newMed.name"
+                 @input="searchDrugs()"
+                 @focus="patient.showDrugs = true"
+                 @blur="setTimeout(() => patient.showDrugs = false, 200)">
           <input type="text" class="filter-input" placeholder="Дозировка" x-model="patient.newMed.dosage">
+        </div>
+        <div x-show="patient.showDrugs && patient.drugResults.length" x-cloak
+             style="position:relative;z-index:10">
+          <div class="autocomplete-list">
+            <template x-for="d in patient.drugResults" :key="d.ref_key">
+              <div class="autocomplete-item" @mousedown="selectDrug(d)">
+                <span x-text="d.name"></span>
+                <span class="muted" style="font-size:11px;margin-left:6px" x-text="d.mnn && d.mnn !== d.name ? d.mnn : ''"></span>
+                <template x-if="d.statuses && d.statuses.includes('excluded')">
+                  <span class="drug-status drug-status--excluded" title="Исключён из реестра ГРЛС">исключён</span>
+                </template>
+              </div>
+            </template>
+          </div>
         </div>
         <div class="filter-row" style="margin-top:10px">
           <input type="text" class="filter-input" placeholder="Как принимаете (2 раза в день…)" x-model="patient.newMed.schedule">

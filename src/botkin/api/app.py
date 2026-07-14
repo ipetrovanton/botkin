@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from botkin.db.connection import init_db
-from botkin.api.routes import admin, analytics, documents, external, health_sync, patient, rag, upload
+from botkin.api.routes import admin, analytics, directory, documents, external, health_sync, patient, rag, upload
 from botkin.llm.client import warmup
 from botkin.log_config import setup_logging
 
@@ -39,6 +39,7 @@ app.include_router(rag.router)
 app.include_router(admin.router)
 app.include_router(patient.router)
 app.include_router(external.router)
+app.include_router(directory.router)
 
 
 @app.get("/health")

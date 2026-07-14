@@ -115,6 +115,8 @@ function cabinet() {
       newComplaint: "",
       newMed: { name: "", dosage: "", schedule: "" },
       busy: false,
+      cityQuery: "", cityResults: [], showCities: false,
+      drugResults: [], showDrugs: false,
     },
 
     // Администрирование (видно только роли admin — см. user.role)
@@ -357,6 +359,10 @@ function cabinet() {
         };
         this.patient.complaints = complaints?.items || [];
         this.patient.medications = meds?.items || [];
+        // Восстанавливаем город по координатам
+        if (p.latitude && p.longitude) {
+          this.patient.cityQuery = p.city_name || "";
+        }
       } catch (e) { console.error("patient", e); }
     },
 
@@ -375,11 +381,41 @@ function cabinet() {
             blood_type: p.blood_type || null,
             allergies: p.allergies || null,
             chronic_conditions: p.chronic_conditions || null,
+            latitude: p.latitude === "" ? null : Number(p.latitude),
+            longitude: p.longitude === "" ? null : Number(p.longitude),
           }),
         });
         this.toast("Профиль сохранён — будет учтён в рекомендациях", "success");
       } catch (e) { this.toast("Не удалось сохранить профиль", "error"); console.error(e); }
       finally { this.patient.busy = false; }
+    },
+
+    async searchCities() {
+      const q = this.patient.cityQuery.trim();
+      if (q.length < 2) { this.patient.cityResults = []; return; }
+      try {
+        this.patient.cityResults = await this.api(`/api/directory/cities?q=${encodeURIComponent(q)}`);
+      } catch (e) { console.error("cities", e); }
+    },
+
+    selectCity(c) {
+      this.patient.cityQuery = c.name;
+      this.patient.profile.latitude = c.lat;
+      this.patient.profile.longitude = c.lon;
+      this.patient.showCities = false;
+    },
+
+    async searchDrugs() {
+      const q = this.patient.newMed.name.trim();
+      if (q.length < 2) { this.patient.drugResults = []; return; }
+      try {
+        this.patient.drugResults = await this.api(`/api/directory/drugs?q=${encodeURIComponent(q)}`);
+      } catch (e) { console.error("drugs", e); }
+    },
+
+    selectDrug(d) {
+      this.patient.newMed.name = d.name;
+      this.patient.showDrugs = false;
     },
 
     async addComplaint() {

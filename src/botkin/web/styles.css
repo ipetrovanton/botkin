@@ -199,6 +199,25 @@ body {
 .external-val { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .external-lbl { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
 
+/* ===== Автодополнение ===== */
+.autocomplete-list {
+  position: absolute; top: 100%; left: 0; right: 0;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); max-height: 240px; overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0,0,0,.15); z-index: 20;
+}
+.autocomplete-item {
+  padding: 8px 12px; cursor: pointer; display: flex; align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.autocomplete-item:last-child { border-bottom: none; }
+.autocomplete-item:hover { background: var(--surface-3); }
+.drug-status {
+  margin-left: auto; font-size: 10px; padding: 2px 6px; border-radius: 4px;
+  font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
+}
+.drug-status--excluded { background: rgba(220,53,69,.18); color: #dc3545; }
+
 /* ===== Панели ===== */
 .panel {
   background: var(--surface); border: 1px solid var(--border);
