@@ -338,8 +338,10 @@ STORAGE_BACKEND = setting("storage.backend", "STORAGE_BACKEND", str)
 MINIO_ENDPOINT = setting("storage.minio.endpoint", "MINIO_ENDPOINT", str)
 MINIO_BUCKET = setting("storage.minio.bucket", "MINIO_BUCKET", str)
 MINIO_SECURE = _as_bool(setting("storage.minio.secure", "MINIO_SECURE", str))
-MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+# Без дефолта: молчаливый fallback на minioadmin в проде опасен. Отсутствие ключей
+# при backend=minio валидируется в storage.MinioStorage (fail-fast с понятной ошибкой).
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 
 # Загрузка файлов
 UPLOAD_MAX_BYTES = setting("upload.max_bytes", "UPLOAD_MAX_BYTES", int)

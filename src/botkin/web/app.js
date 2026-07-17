@@ -30,6 +30,8 @@ const METRIC_LABELS = {
   weight_kg: "Вес",
 };
 const PROVIDER_LABELS = { garmin: "Garmin Connect", strava: "Strava", apple_health: "Apple Health" };
+// Демо-аккаунт кабинета — единственная точка правки (кнопка в index.html рендерится отсюда).
+const DEMO_USER_ID = "113521070";
 
 const STATUS_LABELS = {
   received: "Принят",
@@ -51,8 +53,9 @@ function cabinet() {
     theme: localStorage.getItem("botkin.theme") || "dark",
 
     // Идентификация (demo): сохраняем между сессиями, дефолт — demo-аккаунт.
-    tgUserId: localStorage.getItem("botkin.tgUserId") || "113521070",
-    demoUserId: localStorage.getItem("botkin.tgUserId") || "113521070",
+    DEMO_USER_ID,
+    tgUserId: localStorage.getItem("botkin.tgUserId") || DEMO_USER_ID,
+    demoUserId: localStorage.getItem("botkin.tgUserId") || DEMO_USER_ID,
     user: null,
 
     // Данные
@@ -316,7 +319,7 @@ function cabinet() {
       this.go("overview");
     },
     useDemoUser() {
-      this.demoUserId = "113521070";
+      this.demoUserId = DEMO_USER_ID;
       this.setDemoUser();
     },
 
@@ -1245,7 +1248,7 @@ function cabinet() {
         this.ragIndex.benchResults = data.models || [];
         this.toast("Бенчмарк завершён", "success");
       } catch (e) {
-        this.toast("Бенчмарк недоступен (проверьте Ollama)", "error");
+        this.toast("Бенчмарк недоступен (нужна роль admin и запущенная Ollama)", "error");
         console.error(e);
       } finally { this.ragIndex.benching = false; }
     },

@@ -119,6 +119,6 @@ uv run ruff check src/ tests/    # линт
 - LLM-вызовы: `src/botkin/llm/{classify,extract,client,prompts}.py`.
 - Детерминированный разбор: `src/botkin/parsing/{text_layer,scalars,rows,harvester,androflor,sibr}.py`.
 - e2e-тест и сверка: `tests/test_e2e_llm.py` (PASS/FAIL по `missing` эталонным значениям).
-- Бенч-обвязка: `scripts/bench/` (`bench_models.py` гоняет e2e и парсит сводку;
+- Бенч-обвязка: `research/bench/` (`bench_models.py` гоняет e2e и парсит сводку;
   `bench_compare.py` сравнивает с baseline). Требует GPU.
 - История и обоснования: `habr/2026-06-27--ollama-speed-optimization.md`.

@@ -9,13 +9,13 @@ model card) и что она ПОКАЗЫВАЕТ на реальных русс
 со ссылкой на первоисточник. Реальность — замер этого скрипта.
 
 Запуск (нужны Ollama + GPU; модели подтянутся с --pull):
-    .venv/bin/python scripts/bench/bench_expectations.py
-    .venv/bin/python scripts/bench/bench_expectations.py --models qwen3-vl:8b-instruct glm-ocr
-    .venv/bin/python scripts/bench/bench_expectations.py --pull --skip-synthetic
+    .venv/bin/python research/bench/bench_expectations.py
+    .venv/bin/python research/bench/bench_expectations.py --models qwen3-vl:8b-instruct glm-ocr
+    .venv/bin/python research/bench/bench_expectations.py --pull --skip-synthetic
 
 Результат:
-    scripts/bench/bench_expectations_report.md  — готовая фактура для статьи
-    scripts/bench/bench_expectations_results.json — сырые числа
+    research/bench/bench_expectations_report.md  — готовая фактура для статьи
+    research/bench/bench_expectations_results.json — сырые числа
     + наглядная таблица в консоль
 """
 from __future__ import annotations

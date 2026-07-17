@@ -128,6 +128,16 @@ class MinioStorage:
             from minio import Minio
             from minio.versioningconfig import ENABLED, VersioningConfig
 
+            if not MINIO_ACCESS_KEY or not MINIO_SECRET_KEY:
+                raise RuntimeError(
+                    "STORAGE_BACKEND=minio требует MINIO_ACCESS_KEY и MINIO_SECRET_KEY "
+                    "в окружении (см. .env.example)"
+                )
+            if MINIO_ACCESS_KEY == "minioadmin":
+                log.warning(
+                    "MinIO использует ключи по умолчанию (minioadmin) — "
+                    "допустимо только для локальной разработки"
+                )
             self._client = Minio(
                 MINIO_ENDPOINT, access_key=MINIO_ACCESS_KEY,
                 secret_key=MINIO_SECRET_KEY, secure=MINIO_SECURE,

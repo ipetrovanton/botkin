@@ -17,7 +17,7 @@ uv run pytest -m "not llm"   → 313 passed (309 базовых + 2 на adaptiv
 uv run ruff check src/ tests/ → All checks passed!
 ```
 
-### E2E (реальная Ollama, `scripts/bench/bench_models.py`)
+### E2E (реальная Ollama, `research/bench/bench_models.py`)
 
 | Метрика | Baseline | Текущий | Изменение |
 |---|---|---|---|
@@ -64,6 +64,6 @@ sample_008  33.0 (24/24)  sample_009  89.8 (27/27)
 # Unit (без GPU):
 uv run pytest -m "not llm"
 # E2E (нужна Ollama + GPU):
-uv run python scripts/bench/bench_models.py --models qwen3-vl:8b-instruct --skip-synthetic
-uv run python scripts/bench/bench_compare.py
+uv run python research/bench/bench_models.py --models qwen3-vl:8b-instruct --skip-synthetic
+uv run python research/bench/bench_compare.py
 ```

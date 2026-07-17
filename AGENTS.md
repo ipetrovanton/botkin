@@ -174,7 +174,8 @@ botkin/
 │   ├── test_directory.py    # Тесты автодополнения (города, препараты)
 │   ├── test_integration_chain.py # Интеграционные тесты цепочки
 │   └── test_smoke.py        # smoke-тесты
-├── scripts/                 # Сборка справочников, бенчмарки
+├── scripts/                 # Сборка справочников, живые проверки
+├── research/                # Исследования: бенчмарки моделей и артефакты (не прод)
 ├── config.json              # Переопределения конфигурации
 ├── pyproject.toml           # Зависимости, entry points, tool config
 ├── docker-compose.yml       # MinIO + API + Telegram-бот

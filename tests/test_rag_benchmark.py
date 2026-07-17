@@ -57,7 +57,15 @@ def test_benchmark_requires_auth(monkeypatch, tmp_path):
     assert client.post("/api/rag/benchmark", json={"models": ["bge-m3"]}).status_code == 401
 
 
+def test_benchmark_requires_admin(monkeypatch, tmp_path):
+    """Тяжёлый GPU-прогон — исследовательский инструмент, обычной роли запрещён."""
+    client = _client(monkeypatch, tmp_path)
+    r = client.post("/api/rag/benchmark", json={"models": ["bge-m3"]}, headers=_hdr())
+    assert r.status_code == 403
+
+
 def test_benchmark_validation_empty_models(monkeypatch, tmp_path):
+    monkeypatch.setenv("ADMIN_TELEGRAM_IDS", "999")
     client = _client(monkeypatch, tmp_path)
     r = client.post("/api/rag/benchmark", json={"models": []}, headers=_hdr())
     assert r.status_code == 422

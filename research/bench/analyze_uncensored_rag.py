@@ -9,7 +9,7 @@
 - эффект веб-доступа (если прогон был с --web both).
 
 Запуск:
-  uv run python -m scripts.bench.analyze_uncensored_rag --in habr/bench-uncensored
+  uv run python -m research.bench.analyze_uncensored_rag --in habr/bench-uncensored
 """
 from __future__ import annotations
 

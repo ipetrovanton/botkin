@@ -5,8 +5,8 @@
 цитирование конкретных значений, объём thinking). Результат — JSON + Markdown.
 
 Запуск (модель рекомендаций переопределяется через параметр recommend(model=...)):
-  uv run python -m scripts.bench.bench_uncensored_rag
-  uv run python -m scripts.bench.bench_uncensored_rag --models dolphin3:8b qwen3:8b
+  uv run python -m research.bench.bench_uncensored_rag
+  uv run python -m research.bench.bench_uncensored_rag --models dolphin3:8b qwen3:8b
 """
 from __future__ import annotations
 
