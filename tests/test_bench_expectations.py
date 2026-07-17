@@ -3,11 +3,11 @@ import importlib.util
 import sys
 from pathlib import Path
 
-BENCH_DIR = Path(__file__).parent.parent / "scripts" / "bench"
+BENCH_DIR = Path(__file__).parent.parent / "research" / "bench"
 
 
 def _load_module():
-    """Загружает bench_expectations как модуль (scripts/bench — не пакет)."""
+    """Загружает bench_expectations как модуль (research/bench — не пакет)."""
     sys.path.insert(0, str(BENCH_DIR))
     spec = importlib.util.spec_from_file_location(
         "bench_expectations", BENCH_DIR / "bench_expectations.py"

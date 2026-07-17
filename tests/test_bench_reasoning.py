@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 
-BENCH_PATH = Path(__file__).parents[1] / "scripts" / "bench" / "bench_reasoning.py"
+BENCH_PATH = Path(__file__).parents[1] / "research" / "bench" / "bench_reasoning.py"
 
 
 def _load_module():

@@ -1058,7 +1058,7 @@
           <input type="text" x-model="demoUserId" placeholder="X-Telegram-User-Id" class="filter-input">
           <button class="btn btn-primary" @click="setDemoUser()">Применить</button>
         </div>
-        <button class="btn btn-ghost" style="margin-top:10px;width:100%" @click="useDemoUser()">Использовать demo (113521070)</button>
+        <button class="btn btn-ghost" style="margin-top:10px;width:100%" @click="useDemoUser()" x-text="`Использовать demo (${DEMO_USER_ID})`"></button>
       </div>
     </section>
 

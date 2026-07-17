@@ -26,7 +26,8 @@ from botkin.llm.client import (
 )
 from botkin.llm.prompts import (
     ANALYSIS_INSTRUCTION, ANALYSIS_TEXT_SYSTEM, ANALYSIS_VLM_SYSTEM,
-    DOCTOR_REPORT_INSTRUCTION, DOCTOR_REPORT_VLM_SYSTEM, PROMPTS_VERSION, TEXT_INSTRUCTION,
+    DOCTOR_REPORT_INSTRUCTION, DOCTOR_REPORT_VLM_SYSTEM, IMAGE_TABLE_OCR_PROMPT,
+    OCR_SYSTEM, PROMPTS_VERSION, SIBR_OCR_PROMPT, TEXT_INSTRUCTION,
 )
 from botkin.parsing.androflor import is_androflor_text, parse_androflor_ocr
 from botkin.parsing.sibr import is_sibr_text, parse_sibr_ocr
@@ -41,22 +42,9 @@ from botkin.preprocess.pdf_text import has_usable_text_layer, open_pdf
 
 log = logging.getLogger(__name__)
 
-_IMAGE_TABLE_OCR_PROMPT = (
-    "Прочитай таблицу лабораторных результатов на изображении дословно, строка за строкой. "
-    "Для каждой строки верни: название показателя, все числа результата, единицы и проценты. "
-    "Сохраняй логарифмические значения как есть (например 'название: 10 5.7 -0.1 (68-91%)'). "
-    "Не структурируй в JSON. Ничего не придумывай и не пропускай."
-)
 # Порог строк, ниже которого «андрофлор-страница» считается описанием бланка, а не таблицей.
 _ANDROFLOR_MIN_ROWS = 4
 
-_SIBR_OCR_PROMPT = (
-    "На изображении — таблица водородно-метанового дыхательного теста с лактулозой (СИБР). "
-    "Время в минутах идёт по строкам, газовые показатели по колонкам. "
-    "Верни таблицу строго в формате: одна строка на каждое время, "
-    'формат: "<время> мин: H2=<ppm>, CH4=<ppm>, H2+2CH4=<ppm>, O2=<%>". '
-    "Ничего не придумывай и не пропускай."
-)
 # Минимум строк: полная таблица СИБР даёт 8 временных точек × 4 газа = 32 показателя.
 _SIBR_MIN_ROWS = 16
 
@@ -181,7 +169,7 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
 
 
 def _call_image_ocr(b64_images: list[str], doc_name: str) -> str:
-    messages = _messages_from_images("Ты — точный OCR медицинских таблиц.", _IMAGE_TABLE_OCR_PROMPT, b64_images)
+    messages = _messages_from_images(OCR_SYSTEM, IMAGE_TABLE_OCR_PROMPT, b64_images)
     client = get_raw_client()
     t0 = time.perf_counter()
     response = client.chat.completions.create(
@@ -200,7 +188,7 @@ def _call_image_ocr(b64_images: list[str], doc_name: str) -> str:
 
 def _call_sibr_ocr(b64_images: list[str], doc_name: str) -> str:
     """Специализированный OCR-запрос для таблицы СИБР (возвращает построчный формат)."""
-    messages = _messages_from_images("Ты — точный OCR медицинских таблиц.", _SIBR_OCR_PROMPT, b64_images)
+    messages = _messages_from_images(OCR_SYSTEM, SIBR_OCR_PROMPT, b64_images)
     client = get_raw_client()
     t0 = time.perf_counter()
     response = client.chat.completions.create(

@@ -6,6 +6,10 @@ tests
 docs
 habr
 scripts
+research
+.remember
+.claude
+*.docx
 *.md
 .env
 .env.gitignore

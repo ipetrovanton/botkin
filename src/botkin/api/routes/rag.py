@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from botkin.rag import retriever, store
 
-from ..deps import get_user_id
+from ..deps import get_user_id, require_admin
 
 log = logging.getLogger(__name__)
 
@@ -126,9 +126,11 @@ class BenchmarkRequest(BaseModel):
 @router.post("/benchmark")
 def benchmark(
     req: BenchmarkRequest,
-    user_id: int = Depends(get_user_id),
+    user_id: int = Depends(require_admin),
 ) -> dict:
-    """Сравнение embedding-моделей на golden set. Требует Ollama с установленными моделями."""
+    """Сравнение embedding-моделей на golden set. Требует Ollama с установленными моделями.
+
+    Тяжёлый GPU-прогон — исследовательский инструмент, доступен только роли admin."""
     from botkin.rag.benchmark import run_benchmark, format_results
     try:
         results = run_benchmark(req.models)
