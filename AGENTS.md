@@ -111,42 +111,74 @@ botkin/
 │   │   ├── deps.py          # Зависимости (get_user_id)
 │   │   └── routes/          # Роуты
 │   │       ├── upload.py    # POST /upload (бот и веб-кабинет)
-│   │       ├── documents.py # /api/* — лента, карточка, статус кабинета
-│   │       └── analytics.py # /api/* — селекторы, динамика, периоды, статистика
+│   │       ├── documents.py # /api/* — лента, карточка, статус, верификация, правка
+│   │       ├── analytics.py # /api/* — селекторы, динамика, периоды, статистика
+│   │       ├── patient.py   # /api/patient/* — профиль, жалобы, препараты
+│   │       ├── admin.py     # /api/admin/* — пользователи, анализы (роль admin)
+│   │       ├── health_sync.py # /api/health/* — Garmin Connect, метрики
+│   │       ├── rag.py       # /api/rag/* — индексация, рекомендации, research, бенчмарк
+│   │       ├── external.py  # /api/external/* — погода, геомагнитка, гороскоп
+│   │       └── directory.py # /api/directory/* — автодополнение: препараты, города
 │   ├── bot/                 # Telegram-бот (aiogram)
 │   │   ├── main.py          # Точка входа бота
 │   │   └── handlers/        # /start, /help, /show, /dynamics, upload
 │   ├── db/                  # База данных
 │   │   ├── connection.py    # Подключение, init_db, Python-lower для кириллицы
-│   │   ├── schema.sql       # DDL-схема (5 таблиц)
+│   │   ├── schema.sql       # DDL-схема (5 таблиц + rag_chunks + patient_*)
 │   │   ├── queries.py       # Аналитические запросы
-│   │   └── repos.py         # Репозитории (DocumentRepo, LabRepo, ReportRepo, UserRepo)
+│   │   └── repos.py         # Репозитории (DocumentRepo, LabRepo, ReportRepo, UserRepo, PatientRepo)
 │   ├── domain/              # Доменные модели
 │   │   └── models.py        # LabResult, DoctorReport, ClassifyResult, etc.
+│   ├── external/            # Внешние данные для рекомендаций
+│   │   ├── weather.py       # Open-Meteo + wttr.in fallback
+│   │   └── astrology.py    # Развлекательный гороскоп
 │   ├── llm/                 # VLM-интеграция (qwen3-vl)
 │   │   ├── client.py        # Ollama OpenAI-совместимый клиент
 │   │   ├── classify.py      # Классификация документа
 │   │   ├── extract.py       # Извлечение данных
 │   │   └── prompts.py       # Все VLM-промпты
+│   ├── normalize/           # numbers.py, dates.py, units.py, drugs.py, analytes.py
 │   ├── pipeline/            # Пайплайн обработки
 │   │   ├── orchestrator.py  # classify → extract → persist
 │   │   └── notifications.py # Telegram-уведомления
+│   ├── preprocess/images.py # Подготовка PDF/фото к VLM (DPI, даунскейл, EXIF, HEIC)
+│   ├── rag/                 # RAG: векторный поиск + рекомендации
+│   │   ├── embeddings.py    # bge-m3 через Ollama /api/embed
+│   │   ├── store.py         # sqlite-vec хранение
+│   │   ├── retriever.py     # Векторный поиск + гибридный reranking
+│   │   ├── indexer.py       # Индексация справочников ГРЛС/ФСЛИ
+│   │   ├── recommend.py     # LLM-рекомендации с контекстом
+│   │   ├── research.py      # Подгрузка публикаций PubMed
+│   │   ├── benchmark.py     # Бенчмарк embedding-моделей (hit_rate, MRR)
+│   │   └── websearch.py     # Веб-поиск (DuckDuckGo)
+│   ├── reference/           # Справочники
+│   │   ├── units.py         # Эталонные единицы измерения
+│   │   ├── drugs/           # ГРЛС (registry.jsonl)
+│   │   ├── analytes/        # ФСЛИ (registry.jsonl)
+│   │   ├── cities.py        # Локальный справочник городов РФ
+│   │   └── cities.json      # ~150 городов с координатами
+│   ├── storage.py           # LocalStorage / MinioStorage (S3)
 │   ├── viz/                 # Визуализация
 │   │   └── plots.py         # Plotly-графики динамики
 │   ├── web/                 # Веб-кабинет пациента (SPA, без сборщика)
-│   │   ├── index.html       # Каркас на Alpine.js: 7 экранов + bottom-nav
-│   │   ├── styles.css       # Дизайн-система: бренд, темы, анимации, SVG
-│   │   ├── app.js           # Компонент cabinet(): API-клиент, экраны, график
+│   │   ├── index.html       # Каркас на Alpine.js: экраны + bottom-nav
+│   │   ├── styles.css       # Дизайн-система: бренд, темы, анимации, SVG, автодополнение
+│   │   ├── app.js           # Компонент cabinet(): API-клиент, экраны, график, RAG
 │   │   └── vendor/alpine.min.js  # Alpine.js 3.15.12 (MIT, заендорено локально)
 │   ├── config.py            # Централизованная конфигурация
 │   └── exceptions.py        # Типизированные исключения
 ├── tests/                   # Тесты
-│   ├── conftest.py          # Фикстуры
-│   ├── test_cabinet_repo.py # 12 тестов репозиториев кабинета
-│   ├── test_cabinet_api.py  # 13 тестов /api/* через TestClient
+│   ├── conftest.py          # Фикстуры (PDF-генератор, БД)
+│   ├── test_cabinet_repo.py # Тесты репозиториев кабинета
+│   ├── test_cabinet_api.py  # Тесты /api/* через TestClient
+│   ├── test_directory.py    # Тесты автодополнения (города, препараты)
+│   ├── test_integration_chain.py # Интеграционные тесты цепочки
 │   └── test_smoke.py        # smoke-тесты
+├── scripts/                 # Сборка справочников, бенчмарки
 ├── config.json              # Переопределения конфигурации
 ├── pyproject.toml           # Зависимости, entry points, tool config
+├── docker-compose.yml       # MinIO + API + Telegram-бот
+├── Dockerfile               # python:3.12-slim + uv
 ├── .env.example             # Шаблон переменных окружения
 ├── AGENTS.md                # Этот файл
 ├── LICENSE                  # MIT
@@ -161,6 +193,54 @@ botkin/
 - `idx_lab_user_analyte` на `lab_results(user_id, analyte_name, taken_at)`
 - `idx_doctor_reports_user` на `doctor_reports(user_id, visit_date)`
 - `idx_doctor_reports_document` на `doctor_reports(document_id)` — оптимизирует `/show`
+
+---
+
+## 🐳 5.1. Деплой через Docker Compose
+
+```bash
+cp .env.example .env         # заполнить TG_BOT_TOKEN
+docker compose up -d         # MinIO + API + бот
+# API:    http://localhost:8000
+# MinIO:  http://localhost:9001 (minioadmin/minioadmin)
+```
+
+Ollama должна быть доступна по `OLLAMA_URL` (по умолчанию `http://host.docker.internal:11434`).
+
+Контейнеры:
+- **minio** — S3-хранилище оригиналов документов (порт 9000 API, 9001 консоль)
+- **api** — FastAPI-сервер (порт 8000), `STORAGE_BACKEND=minio`
+- **bot** — Telegram-бот (aiogram), подключается к API по внутренней сети
+
+---
+
+## 📡 5.2. Новые API-эндпоинты (справочники, RAG, внешние данные)
+
+### Справочники (автодополнение в формах)
+- `GET /api/directory/drugs?q=парацет` — поиск препаратов по ГРЛС (префикс, ≥2 символа)
+- `GET /api/directory/cities?q=Моск` — поиск городов РФ с координатами (префикс, ≥2 символа)
+
+### RAG
+- `POST /api/rag/reindex` — индексация справочников ГРЛС/ФСЛИ в векторный индекс
+- `GET /api/rag/status` — статус индексации и число чанков
+- `POST /api/rag/recommend` — RAG-рекомендация (вопрос → контекст → LLM-ответ)
+- `POST /api/rag/research/update` — подгрузка публикаций PubMed в локальный индекс
+- `GET /api/rag/research/status` — статус обновления PubMed
+- `POST /api/rag/benchmark` — бенчмарк embedding-моделей (hit_rate, MRR, avg_distance)
+
+### Внешние данные
+- `GET /api/external/today` — погода, геомагнитная активность, гороскоп (по координатам профиля)
+
+### Пациент
+- `GET/PUT /api/patient/profile` — профиль тела (пол, рост, вес, группа крови, аллергии, координаты)
+- `GET/POST/DELETE /api/patient/complaints` — жалобы
+- `GET/POST/PATCH/DELETE /api/patient/medications` — текущие препараты
+
+### Health-sync
+- `GET /api/health/status` — статус подключения Garmin
+- `GET /api/health/metrics` — метрики (пульс, шаги, сон)
+- `GET /api/health/activities` — активности
+- `POST /api/health/sync` — ручной запуск синхронизации
 
 ---
 

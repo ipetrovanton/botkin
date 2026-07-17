@@ -1,16 +1,28 @@
-# Dr. Botkin — Telegram-бот для парсинга медицинских документов
+# Dr. Botkin — Telegram-бот и веб-кабинет для медицинских документов
 
-Telegram-бот, который принимает фото и PDF медицинских документов (анализы, выписки, заключения),
-распознаёт их через vision-модель **qwen3-vl:8b-instruct** (Ollama) и сохраняет
+Telegram-бот и SPA-кабинет, которые принимают фото и PDF медицинских документов (анализы, выписки, заключения),
+распознают их через vision-модель **qwen3-vl:8b-instruct** (Ollama) и сохраняют
 **нормализованные** структурированные данные в SQLite. Названия лекарств сверяются с офлайн-
 справочником ГРЛС, а названия лабораторных показателей — со справочником ФСЛИ (исправление
 ошибок распознавания, обогащение кодами LOINC/НМУ, сверка единиц измерения), сохраняются статусы
-регистрации и оригинал извлечения. Умеет строить графики динамики показателей.
+регистрации и оригинал извлечения. Умеет строить графики динамики показателей, давать
+RAG-рекомендации на основе анализов, данных носимых устройств и внешних факторов (погода, геомагнитная активность).
 
 ## Возможности
 
-- Приём PDF и изображений (`.jpg`, `.png`, `.heic`, `.webp`) через Telegram
+- Приём PDF и изображений (`.jpg`, `.png`, `.heic`, `.webp`) через Telegram и веб-кабинет
 - Распознавание анализов и заключений врача через `qwen3-vl:8b-instruct` (рецепты пока не поддерживаются)
+- **Веб-кабинет пациента** (SPA на Alpine.js, тёмная тема, mobile-first):
+  - Дашборд со статистикой и внешними факторами (погода, геомагнитная активность, гороскоп)
+  - Лента документов с фильтрами (тип/клиника/врач/даты/статус/поиск) и пагинацией
+  - Загрузка документов через drag&drop с поллингом прогресса
+  - Аналитика: SVG-график динамики показателя с коридором нормы
+  - Верификация и правка распознанных данных (инлайн-редактор, ручное добавление)
+  - Формы пациента: профиль тела (пол/рост/вес/группа крови/аллергии), жалобы, препараты
+  - Автодополнение: города РФ (с указанием области), препараты из справочника ГРЛС
+  - Ассистент: RAG-рекомендации на основе анализов, данных устройств и справочников
+  - Обновление базы знаний: подгрузка публикаций PubMed, бенчмарк embedding-моделей
+  - Админпанель: управление пользователями и анализами (роль admin)
 - **Нормализация данных:** даты → единый ISO, единицы → канон, числа (запятая → точка)
 - **Коррекция названий лекарств** по справочнику ГРЛС (фаззи-матчинг, дистанция
   Дамерау-Левенштейна): `Элкап` → `Элькар`, `Глиалатин` → `Глиатилин` и т.п.; редкие/неизвестные
@@ -26,22 +38,33 @@ Telegram-бот, который принимает фото и PDF медици�
 - Поддержка односторонних референсов (`<5.0`, `>120`) и текстовых результатов
   (`отрицательно`, `не обнаружено`)
 - Сохранение **сырого извлечения** (`raw_extraction`) — данные восстановимы без потерь
-- Хранение истории в SQLite с изоляцией данных пользователей
+- Хранение оригиналов документов: локальный диск или **MinIO** (S3 с версионированием)
+- Интеграция с носимыми устройствами: **Garmin Connect** (автосинк по расписанию)
+- RAG: локальный векторный поиск (sqlite-vec, bge-m3) + веб-поиск (DuckDuckGo, PubMed)
+- Внешние данные для рекомендаций: погода (Open-Meteo + wttr.in fallback), геомагнитная
+  активность (NOAA SWPC), развлекательный гороскоп
 - Построение графиков динамики показателей (`/dynamics гемоглобин`), просмотр (`/last`, `/show`)
+- **Деплой через Docker Compose** (MinIO + API + Telegram-бот)
 
 ## Архитектура
 
 ```
 ┌───────────────┐     ┌─────────────────┐     ┌─────────┐
 │  Telegram     │────▶│  FastAPI        │────▶│  SQLite │
-│  Bot (aiogram)│     │  Backend (:8000)│     │         │
+│  Bot (aiogram)│     │  Backend (:8000)│     │ +vec-vec│
 └───────────────┘     └───────┬─────────┘     └─────────┘
-                              │
+                              │                    │
               classify → extract → normalize → persist
                               │                    │
                    ┌──────────▼─────────┐   ┌──────▼─────────────────────┐
                    │  Ollama (WSL2)     │   │ reference/drugs/  (ГРЛС)   │
                    │  qwen3-vl:8b-instr │   │ reference/analytes/ (ФСЛИ) │
+                   │  bge-m3 (embed)    │   │ reference/cities.json     │
+                   └────────────────────┘   └────────────────────────────┘
+                              │
+                   ┌──────────▼─────────┐   ┌────────────────────────────┐
+                   │  SPA веб-кабинет   │   │  MinIO (S3, опционально)   │
+                   │  Alpine.js         │   │  Хранилище оригиналов      │
                    └────────────────────┘   └────────────────────────────┘
 ```
 
@@ -53,6 +76,17 @@ Telegram-бот, который принимает фото и PDF медици�
 - Токен Telegram-бота (получить у [@BotFather](https://t.me/BotFather))
 - Справочники `src/botkin/reference/drugs/registry.jsonl` (ГРЛС) и
   `src/botkin/reference/analytes/registry.jsonl` (ФСЛИ) — уже в репозитории; пересборка — см. ниже
+
+## Запуск через Docker Compose
+
+```bash
+cp .env.example .env         # заполнить TG_BOT_TOKEN
+docker compose up -d         # MinIO + API + бот
+# API:        http://localhost:8000
+# MinIO:      http://localhost:9001 (minioadmin/minioadmin)
+```
+
+Ollama должна быть доступна по `OLLAMA_URL` (по умолчанию `http://host.docker.internal:11434`).
 
 ## Запуск под Windows (WSL2 + Ollama)
 
@@ -153,6 +187,9 @@ uv run python -m scripts.build_analyte_reference \
 | `VLM_MODEL`      | Название vision-модели      | `qwen3-vl:8b-instruct`    |
 | `SQLITE_PATH`    | Путь к файлу БД             | `./data/botkin.db`        |
 | `API_URL`        | URL бэкенда (для бота)      | `http://localhost:8000`   |
+| `STORAGE_BACKEND`| Хранилище оригиналов        | `local` (`minio` для S3)  |
+| `MINIO_ENDPOINT` | Адрес MinIO (если backend=minio) | `localhost:9000`     |
+| `MINIO_BUCKET`   | Bucket MinIO                | `botkin-documents`        |
 
 Детальные параметры — в `config.json`: VLM (`temperature`, `num_ctx`, `num_predict`,
 `repeat_penalty`), `ollama.keep_alive` (держит модель в VRAM между вызовами), подготовка
@@ -172,23 +209,31 @@ uv run python -m scripts.build_analyte_reference \
 ```
 botkin/
 ├── src/botkin/
-│   ├── api/                 # FastAPI: app.py, deps.py, routes/upload.py
+│   ├── api/                 # FastAPI: app.py, deps.py, routes/
+│   │   └── routes/          # upload, documents, analytics, patient, admin,
+│   │                        # health_sync, rag, external, directory
 │   ├── bot/                 # Telegram-бот (aiogram): main.py, handlers/
 │   ├── db/                  # SQLite: connection.py (+миграция), schema.sql, queries.py, repos.py
 │   ├── domain/models.py     # Pydantic-модели (+*_raw поля)
+│   ├── external/            # Внешние данные: weather.py (Open-Meteo+wttr.in), astrology.py
 │   ├── llm/                 # Ollama: client.py, classify.py, extract.py, prompts.py
-│   ├── preprocess/images.py # Подготовка PDF/фото к VLM (DPI, даунскейл, EXIF, HEIC)
 │   ├── normalize/           # numbers.py, dates.py, units.py, drugs.py, analytes.py
-│   ├── reference/           # units.py + drugs/ (ГРЛС) и analytes/ (ФСЛИ) registry.jsonl
-│   ├── pipeline/            # orchestrator.py (classify→extract→normalize→persist), notifications.py
+│   ├── pipeline/            # orchestrator.py, notifications.py
+│   ├── preprocess/images.py # Подготовка PDF/фото к VLM
+│   ├── rag/                 # embeddings.py, store.py, retriever.py, indexer.py,
+│   │                        # recommend.py, research.py, benchmark.py, websearch.py
+│   ├── reference/           # units.py, drugs/ (ГРЛС), analytes/ (ФСЛИ), cities.json
+│   ├── storage.py           # LocalStorage / MinioStorage (S3)
 │   ├── viz/plots.py         # Графики динамики (Plotly)
+│   ├── web/                 # SPA: index.html, app.js, styles.css, vendor/alpine.min.js
 │   ├── config.py            # Централизованная конфигурация
 │   └── exceptions.py        # Типизированные исключения
-├── scripts/build_drug_reference.py     # Сборка registry.jsonl из выгрузки ГРЛС (openpyxl)
-├── scripts/build_analyte_reference.py  # Сборка registry.jsonl из выгрузки ФСЛИ (JSON)
 ├── tests/                   # pytest (LLM мокается; модель в тестах не запускается)
+├── scripts/                 # Сборка справочников, бенчмарки
 ├── config.json              # Детальные настройки
 ├── pyproject.toml           # Зависимости (uv)
+├── docker-compose.yml       # MinIO + API + бот
+├── Dockerfile               # python:3.12-slim + uv
 └── .env.example             # Шаблон переменных окружения
 ```
 

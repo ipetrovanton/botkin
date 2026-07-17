@@ -1,33 +1,28 @@
 """API веб-кабинета: пользователь, лента документов, детальная карточка, статус,
 исходники, удаление и повторное распознавание."""
+import hashlib
 import json
 import mimetypes
-from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile,
+)
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..deps import get_telegram_user_id, get_user_id
+from botkin.config import UPLOAD_ALLOWED_EXTENSIONS, UPLOAD_MAX_BYTES
 from botkin.db.connection import get_conn
 from botkin.db.repos import DocumentRepo, LabRepo, ReportRepo
 from botkin.pipeline.orchestrator import process_document
 from botkin.pipeline.progress_model import StageDurationStore, estimate_progress
+from botkin.preprocess.formats import resolve_extension
+from botkin.storage import delete_quietly, is_stored_file, open_local, storage_for
 
 router = APIRouter(prefix="/api", tags=["cabinet"])
 
 # iPhone-фото: стандартный mimetypes может не знать HEIC/HEIF.
 _EXTRA_MEDIA_TYPES = {".heic": "image/heic", ".heif": "image/heif"}
-
-
-def _unlink_quietly(path_str: str | None) -> None:
-    """Удаляет файл-исходник; отсутствие файла — не ошибка (мог быть утрачен)."""
-    if not path_str:
-        return
-    try:
-        Path(path_str).unlink(missing_ok=True)
-    except OSError:
-        pass
 
 
 def _loads_list(raw: str | None) -> list[str]:
@@ -46,7 +41,8 @@ def me(user_id: int = Depends(get_user_id)) -> dict:
     """Текущий пользователь кабинета (user_id + исходный telegram-идентификатор)."""
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id, telegram_user_id, created_at FROM users WHERE id = ?", (user_id,)
+            "SELECT id, telegram_user_id, role, display_name, created_at "
+            "FROM users WHERE id = ?", (user_id,)
         ).fetchone()
     return dict(row) if row else {"id": user_id}
 
@@ -91,9 +87,11 @@ def document_detail(document_id: int, user_id: int = Depends(get_user_id)) -> di
             rows = ReportRepo(conn, user_id).for_document(document_id)
             reports = [
                 {
+                    "id": r["id"],
                     "diagnosis": r["diagnosis"],
                     "doctor_name": r["doctor_name"],
                     "department": r["department"],
+                    "visit_date": r["visit_date"],
                     "recommendations": _loads_list(r["recommendations_json"]),
                     "complaints": _loads_list(r["complaints_json"]),
                     "medications": _loads_list(r["medications_json"]),
@@ -135,8 +133,8 @@ def document_source(document_id: int, user_id: int = Depends(get_user_id)) -> Fi
         doc = DocumentRepo(conn, user_id).get(document_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
-    path = Path(doc["source_path"])
-    if not path.is_file():
+    path = open_local(doc["source_path"])
+    if path is None:
         raise HTTPException(status_code=404, detail="Файл-исходник утрачен")
     media_type = (
         _EXTRA_MEDIA_TYPES.get(path.suffix.lower())
@@ -156,8 +154,183 @@ def delete_document(document_id: int, user_id: int = Depends(get_user_id)) -> di
         source_path = DocumentRepo(conn, user_id).delete(document_id)
     if source_path is None:
         raise HTTPException(status_code=404, detail="Документ не найден")
-    _unlink_quietly(source_path)
+    delete_quietly(source_path)
     return {"deleted": 1}
+
+
+# ===== Верификация распознанного (этап 2) =====
+# Пользователь проверяет и правит извлечённые данные своего документа.
+# Любая правка сбрасывает verified_at: подтверждение относилось к старой версии данных.
+
+
+class LabEditRequest(BaseModel):
+    """Редактируемые поля показателя; учитываются только явно переданные."""
+
+    analyte_name: str | None = Field(None, max_length=300)
+    value_num: float | None = None
+    value_text: str | None = Field(None, max_length=300)
+    unit: str | None = Field(None, max_length=50)
+    ref_low: float | None = None
+    ref_high: float | None = None
+    ref_text: str | None = Field(None, max_length=200)
+    taken_at: str | None = Field(None, max_length=30)
+
+    def set_fields(self) -> dict:
+        return {k: getattr(self, k) for k in self.model_fields_set}
+
+
+class ReportEditRequest(BaseModel):
+    """Правка заключения: списки приходят как list[str], в БД лежат JSON-колонки."""
+
+    diagnosis: str | None = Field(None, max_length=4000)
+    doctor_name: str | None = Field(None, max_length=200)
+    department: str | None = Field(None, max_length=200)
+    recommendations: list[str] | None = None
+    medications: list[str] | None = None
+
+    def set_fields(self) -> dict:
+        fields: dict = {}
+        for key in ("diagnosis", "doctor_name", "department"):
+            if key in self.model_fields_set:
+                fields[key] = getattr(self, key)
+        for key, column in (("recommendations", "recommendations_json"),
+                            ("medications", "medications_json")):
+            if key in self.model_fields_set:
+                fields[column] = json.dumps(getattr(self, key) or [], ensure_ascii=False)
+        return fields
+
+
+def _require_own_document(conn, user_id: int, document_id: int) -> dict:
+    doc = DocumentRepo(conn, user_id).get(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    return doc
+
+
+@router.post("/documents/{document_id}/labs", status_code=201)
+def add_document_lab(
+    document_id: int, req: LabEditRequest, user_id: int = Depends(get_user_id),
+) -> dict:
+    """Ручное добавление показателя, пропущенного распознаванием."""
+    fields = req.set_fields()
+    if not fields.get("analyte_name"):
+        raise HTTPException(status_code=422, detail="analyte_name обязателен")
+    with get_conn() as conn:
+        _require_own_document(conn, user_id, document_id)
+        repo = LabRepo(conn, user_id)
+        lab_id = repo.insert_manual(document_id, fields)
+        DocumentRepo(conn, user_id).clear_verified(document_id)
+        return repo.get_row(lab_id)
+
+
+@router.patch("/documents/{document_id}/labs/{lab_id}")
+def edit_document_lab(
+    document_id: int, lab_id: int, req: LabEditRequest,
+    user_id: int = Depends(get_user_id),
+) -> dict:
+    with get_conn() as conn:
+        _require_own_document(conn, user_id, document_id)
+        repo = LabRepo(conn, user_id)
+        row = repo.get_row(lab_id)
+        if not row or row["document_id"] != document_id:
+            raise HTTPException(status_code=404, detail="Показатель не найден")
+        repo.update_row(lab_id, req.set_fields())
+        DocumentRepo(conn, user_id).clear_verified(document_id)
+        return repo.get_row(lab_id)
+
+
+@router.delete("/documents/{document_id}/labs/{lab_id}")
+def delete_document_lab(
+    document_id: int, lab_id: int, user_id: int = Depends(get_user_id),
+) -> dict:
+    with get_conn() as conn:
+        _require_own_document(conn, user_id, document_id)
+        repo = LabRepo(conn, user_id)
+        row = repo.get_row(lab_id)
+        if not row or row["document_id"] != document_id:
+            raise HTTPException(status_code=404, detail="Показатель не найден")
+        repo.delete_row(lab_id)
+        DocumentRepo(conn, user_id).clear_verified(document_id)
+    return {"deleted": 1}
+
+
+@router.patch("/documents/{document_id}/reports/{report_id}")
+def edit_document_report(
+    document_id: int, report_id: int, req: ReportEditRequest,
+    user_id: int = Depends(get_user_id),
+) -> dict:
+    with get_conn() as conn:
+        _require_own_document(conn, user_id, document_id)
+        repo = ReportRepo(conn, user_id)
+        if not repo.update_row(report_id, req.set_fields()):
+            raise HTTPException(status_code=404, detail="Заключение не найдено")
+        DocumentRepo(conn, user_id).clear_verified(document_id)
+        rows = [r for r in repo.for_document(document_id) if r["id"] == report_id]
+    return rows[0] if rows else {"id": report_id}
+
+
+@router.get("/documents/{document_id}/versions")
+def document_versions(document_id: int, user_id: int = Depends(get_user_id)) -> dict:
+    """История версий файла-исходника (появляются после замены файла)."""
+    with get_conn() as conn:
+        doc = _require_own_document(conn, user_id, document_id)
+    if not is_stored_file(doc["source_path"]):
+        return {"items": []}
+    return {"items": storage_for(doc["source_path"]).versions(doc["source_path"])}
+
+
+@router.post("/documents/{document_id}/replace")
+async def replace_document_source(
+    document_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    user_id: int = Depends(get_user_id),
+    telegram_user_id: int = Depends(get_telegram_user_id),
+) -> dict:
+    """Замена файла-исходника новой версией (переснятый бланк) + перераспознавание.
+
+    Валидация изменений: тот же контент-контроль, что и при загрузке (тип/размер),
+    плюс запрет no-op замены тем же самым файлом (по sha256). Старая версия
+    сохраняется бэкендом хранилища (versioning MinIO / .versions на диске).
+    """
+    body = await file.read()
+    if len(body) > UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large: {len(body)} bytes")
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if resolve_extension(file.filename, body[:32], UPLOAD_ALLOWED_EXTENSIONS) is None:
+        raise HTTPException(status_code=415, detail="Unsupported file content")
+
+    new_sha = hashlib.sha256(body).hexdigest()
+    with get_conn() as conn:
+        repo = DocumentRepo(conn, user_id)
+        doc = _require_own_document(conn, user_id, document_id)
+        if not is_stored_file(doc["source_path"]):
+            raise HTTPException(status_code=409, detail="У документа нет файла-исходника")
+        if doc["file_sha256"] == new_sha:
+            raise HTTPException(status_code=409, detail="Этот же файл уже загружен")
+        storage_for(doc["source_path"]).replace(doc["source_path"], body)
+        conn.execute(
+            "UPDATE documents SET file_sha256 = ? WHERE id = ? AND user_id = ?",
+            (new_sha, document_id, user_id),
+        )
+        conn.commit()
+        # Новое содержимое — новое распознавание: старые данные относятся к старой версии.
+        repo.clear_extracted_data(document_id)
+        repo.clear_verified(document_id)
+    background_tasks.add_task(process_document, document_id, telegram_user_id)
+    return {"document_id": document_id, "status": "received", "file_sha256": new_sha}
+
+
+@router.post("/documents/{document_id}/verify")
+def verify_document(document_id: int, user_id: int = Depends(get_user_id)) -> dict:
+    """Пользователь подтверждает: распознанные данные соответствуют оригиналу."""
+    with get_conn() as conn:
+        repo = DocumentRepo(conn, user_id)
+        if not repo.mark_verified(document_id):
+            raise HTTPException(status_code=404, detail="Документ не найден")
+        doc = repo.get(document_id)
+    return {"document_id": document_id, "verified_at": doc["verified_at"]}
 
 
 class DeleteBatchRequest(BaseModel):
@@ -175,7 +348,7 @@ def delete_documents_batch(
         for doc_id in payload.ids:
             source_path = repo.delete(doc_id)
             if source_path is not None:
-                _unlink_quietly(source_path)
+                delete_quietly(source_path)
                 deleted += 1
     return {"deleted": deleted}
 
@@ -198,7 +371,7 @@ def reparse_document(
         doc = repo.get(document_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Документ не найден")
-        if not Path(doc["source_path"]).is_file():
+        if open_local(doc["source_path"]) is None:
             raise HTTPException(
                 status_code=409,
                 detail="Файл-исходник утрачен — повторное распознавание невозможно",

@@ -62,6 +62,16 @@ function cabinet() {
     doctors: [],
     docs: { items: [], total: 0 },
     current: { doc: null, kind: null, labs: [], reports: [] },
+    currentVersions: [],
+    // Верификация распознанного: режим правки внутри карточки документа
+    verify: {
+      editing: false,
+      editLab: null,          // копия строки показателя в редакторе
+      newLabOpen: false,
+      newLab: { analyte_name: "", value_num: "", unit: "", ref_low: "", ref_high: "", taken_at: "" },
+      editReport: null,       // копия заключения (списки — текстом, строка = пункт)
+      busy: false,
+    },
     reports: { items: [], total: 0 },
     dynamics: { points: [], analyte: "", unit: "", ref_low: null, ref_high: null },
 
@@ -95,7 +105,34 @@ function cabinet() {
       garminEmail: "", garminPassword: "", connecting: false,
     },
     assistant: { question: "", answer: "", chunks: [], busy: false },
-    ragIndex: { chunks: {}, reindex: { state: "idle" } },
+    external: { today: null },
+
+    // Формы пациента: профиль тела, жалобы, текущие препараты (учитываются в рекомендациях)
+    patient: {
+      profile: { sex: "", birth_date: "", height_cm: "", weight_kg: "", blood_type: "", allergies: "", chronic_conditions: "", latitude: "", longitude: "" },
+      complaints: [],
+      medications: [],
+      newComplaint: "",
+      newMed: { name: "", dosage: "", schedule: "" },
+      busy: false,
+      cityQuery: "", cityResults: [], showCities: false,
+      drugResults: [], showDrugs: false,
+    },
+
+    // Администрирование (видно только роли admin — см. user.role)
+    admin: {
+      users: [],
+      newUser: { telegram_user_id: "", display_name: "" },
+      labsUser: null,          // пользователь, чьи анализы открыты
+      labs: { items: [], total: 0 },
+      labsQuery: "",
+      labsOffset: 0,
+      editLab: null,           // копия строки в форме редактирования (null = закрыта)
+      newLabOpen: false,
+      newLab: { analyte_name: "", value_num: "", unit: "", ref_low: "", ref_high: "", taken_at: "" },
+      busy: false,
+    },
+    ragIndex: { chunks: {}, reindex: { state: "idle" }, research: { state: "idle" }, benching: false, benchModels: "", benchResults: null },
 
     // UI-состояние
     loading: { stats: false, docs: false, doc: false, reports: false, dynamics: false },
@@ -146,8 +183,10 @@ function cabinet() {
       this.screen = s;
       if (s === "documents") this.loadDocs();
       else if (s === "reports") this.loadReports();
-      else if (s === "overview") this.loadStats();
+      else if (s === "overview") { this.loadStats(); this.loadExternal(); }
       else if (s === "health") this.loadHealth();
+      else if (s === "admin") this.adminLoadUsers();
+      else if (s === "profile") this.loadPatient();
       if (s !== "documents" && this.selMode) this.toggleSelMode();
     },
 
@@ -213,6 +252,44 @@ function cabinet() {
       this.toast("Документ отправлен на повторное распознавание", "info");
       this.go("upload");
     },
+    async replaceSource(event) {
+      // Замена файла-исходника: старая версия сохраняется в хранилище,
+      // данные перераспознаются заново (прогресс — на экране загрузки).
+      const doc = this.current.doc;
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!doc || !file) return;
+      const form = new FormData();
+      form.append("file", file);
+      try {
+        const res = await fetch(`/api/documents/${doc.id}/replace`, {
+          method: "POST", headers: { "X-Telegram-User-Id": this.tgUserId }, body: form,
+        });
+        if (res.status === 409) {
+          this.toast((await res.json())?.detail || "Замена отклонена", "error");
+          return;
+        }
+        if (!res.ok) throw new Error(String(res.status));
+      } catch (e) { this.toast("Не удалось заменить файл", "error"); console.error(e); return; }
+      this.queue.unshift({
+        id: ++this._seq, name: `${doc.title || "Документ #" + doc.id} (новая версия)`,
+        state: "processing", status: "received", docId: doc.id,
+        progress: 2, etaSeconds: null, stageElapsedSeconds: 0, alive: true,
+      });
+      this.pollStatus(this.queue[0]);
+      this.toast("Файл заменён — распознаём заново", "info");
+      this.go("upload");
+    },
+
+    async loadVersions() {
+      const id = this.current.doc?.id;
+      if (!id) return;
+      try {
+        const data = await this.api(`/api/documents/${id}/versions`);
+        this.currentVersions = data?.items || [];
+      } catch (e) { console.error("versions", e); this.currentVersions = []; }
+    },
+
     async openSource() {
       // Файл открывается через blob: заголовок идентификации нельзя передать в window.open.
       const id = this.current.doc?.id;
@@ -258,6 +335,398 @@ function cabinet() {
       } catch (e) { this.toast("Не удалось загрузить сводку", "error"); console.error(e); }
       finally { this.loading.stats = false; }
     },
+    async loadExternal() {
+      try {
+        this.external.today = await this.api("/api/external/today");
+      } catch (e) { console.error("external", e); }
+    },
+
+    // ===== Формы пациента =====
+    async loadPatient() {
+      try {
+        const [profile, complaints, meds] = await Promise.all([
+          this.api("/api/patient/profile"),
+          this.api("/api/patient/complaints"),
+          this.api("/api/patient/medications"),
+        ]);
+        const p = profile || {};
+        this.patient.profile = {
+          sex: p.sex || "", birth_date: p.birth_date || "",
+          height_cm: p.height_cm ?? "", weight_kg: p.weight_kg ?? "",
+          blood_type: p.blood_type || "", allergies: p.allergies || "",
+          chronic_conditions: p.chronic_conditions || "",
+          latitude: p.latitude ?? "", longitude: p.longitude ?? "",
+        };
+        this.patient.complaints = complaints?.items || [];
+        this.patient.medications = meds?.items || [];
+        // Восстанавливаем город по координатам
+        if (p.latitude && p.longitude) {
+          this.patient.cityQuery = p.city_name || "";
+        }
+      } catch (e) { console.error("patient", e); }
+    },
+
+    async savePatientProfile() {
+      const p = this.patient.profile;
+      this.patient.busy = true;
+      try {
+        await this.api("/api/patient/profile", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sex: p.sex || null,
+            birth_date: p.birth_date || null,
+            height_cm: p.height_cm === "" ? null : Number(p.height_cm),
+            weight_kg: p.weight_kg === "" ? null : Number(p.weight_kg),
+            blood_type: p.blood_type || null,
+            allergies: p.allergies || null,
+            chronic_conditions: p.chronic_conditions || null,
+            latitude: p.latitude === "" ? null : Number(p.latitude),
+            longitude: p.longitude === "" ? null : Number(p.longitude),
+          }),
+        });
+        this.toast("Профиль сохранён — будет учтён в рекомендациях", "success");
+      } catch (e) { this.toast("Не удалось сохранить профиль", "error"); console.error(e); }
+      finally { this.patient.busy = false; }
+    },
+
+    async searchCities() {
+      const q = this.patient.cityQuery.trim();
+      if (q.length < 2) { this.patient.cityResults = []; return; }
+      try {
+        this.patient.cityResults = await this.api(`/api/directory/cities?q=${encodeURIComponent(q)}`);
+      } catch (e) { console.error("cities", e); }
+    },
+
+    selectCity(c) {
+      this.patient.cityQuery = c.name;
+      this.patient.profile.latitude = c.lat;
+      this.patient.profile.longitude = c.lon;
+      this.patient.showCities = false;
+    },
+
+    async searchDrugs() {
+      const q = this.patient.newMed.name.trim();
+      if (q.length < 2) { this.patient.drugResults = []; return; }
+      try {
+        this.patient.drugResults = await this.api(`/api/directory/drugs?q=${encodeURIComponent(q)}`);
+      } catch (e) { console.error("drugs", e); }
+    },
+
+    selectDrug(d) {
+      this.patient.newMed.name = d.name;
+      this.patient.showDrugs = false;
+    },
+
+    async addComplaint() {
+      const text = this.patient.newComplaint.trim();
+      if (text.length < 3) { this.toast("Опишите жалобу подробнее", "error"); return; }
+      try {
+        await this.api("/api/patient/complaints", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        this.patient.newComplaint = "";
+        this.toast("Жалоба записана", "success");
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось сохранить", "error"); console.error(e); }
+    },
+
+    async deleteComplaint(c) {
+      try {
+        await this.api(`/api/patient/complaints/${c.id}`, { method: "DELETE" });
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
+    },
+
+    async addMedication() {
+      const m = this.patient.newMed;
+      if (!m.name.trim()) { this.toast("Укажите название препарата", "error"); return; }
+      try {
+        await this.api("/api/patient/medications", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: m.name.trim(), dosage: m.dosage || null, schedule: m.schedule || null }),
+        });
+        this.patient.newMed = { name: "", dosage: "", schedule: "" };
+        this.toast("Препарат добавлен", "success");
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось добавить", "error"); console.error(e); }
+    },
+
+    async toggleMedication(m) {
+      try {
+        await this.api(`/api/patient/medications/${m.id}?is_active=${m.is_active ? "false" : "true"}`,
+                       { method: "PATCH" });
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось изменить статус", "error"); console.error(e); }
+    },
+
+    async deleteMedication(m) {
+      try {
+        await this.api(`/api/patient/medications/${m.id}`, { method: "DELETE" });
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
+    },
+
+    // ===== Верификация распознанного =====
+    async reloadDoc() {
+      // Тихая перезагрузка карточки без сброса режима редактирования.
+      const id = this.current.doc?.id;
+      if (!id) return;
+      const data = await this.api(`/api/documents/${id}`);
+      if (data) this.current = { doc: data.document, kind: data.kind, labs: data.labs, reports: data.reports };
+    },
+
+    async verifyDoc() {
+      try {
+        await this.api(`/api/documents/${this.current.doc.id}/verify`, { method: "POST" });
+        this.verify.editing = false;
+        this.toast("Данные подтверждены", "success");
+        this.reloadDoc();
+      } catch (e) { this.toast("Не удалось подтвердить", "error"); console.error(e); }
+    },
+
+    vToggleEditing() {
+      this.verify.editing = !this.verify.editing;
+      this.verify.editLab = null;
+      this.verify.newLabOpen = false;
+      this.verify.editReport = null;
+    },
+
+    vStartEditLab(row) {
+      this.verify.editLab = { ...row };
+    },
+
+    async vSaveLab() {
+      const l = this.verify.editLab;
+      if (!l) return;
+      this.verify.busy = true;
+      try {
+        await this.api(`/api/documents/${this.current.doc.id}/labs/${l.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analyte_name: l.analyte_name,
+            value_num: l.value_num === "" || l.value_num === null ? null : Number(l.value_num),
+            unit: l.unit || null,
+            ref_low: l.ref_low === "" || l.ref_low === null ? null : Number(l.ref_low),
+            ref_high: l.ref_high === "" || l.ref_high === null ? null : Number(l.ref_high),
+            taken_at: l.taken_at || null,
+          }),
+        });
+        this.verify.editLab = null;
+        this.toast("Показатель исправлен", "success");
+        this.reloadDoc();
+      } catch (e) { this.toast("Не удалось сохранить", "error"); console.error(e); }
+      finally { this.verify.busy = false; }
+    },
+
+    async vDeleteLab(row) {
+      if (!confirm(`Удалить показатель «${row.analyte_name}»?`)) return;
+      try {
+        await this.api(`/api/documents/${this.current.doc.id}/labs/${row.id}`, { method: "DELETE" });
+        this.toast("Показатель удалён", "success");
+        this.reloadDoc();
+      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
+    },
+
+    async vAddLab() {
+      const n = this.verify.newLab;
+      if (!n.analyte_name.trim()) { this.toast("Название показателя обязательно", "error"); return; }
+      this.verify.busy = true;
+      try {
+        await this.api(`/api/documents/${this.current.doc.id}/labs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analyte_name: n.analyte_name.trim(),
+            value_num: n.value_num === "" ? null : Number(n.value_num),
+            unit: n.unit || null,
+            ref_low: n.ref_low === "" ? null : Number(n.ref_low),
+            ref_high: n.ref_high === "" ? null : Number(n.ref_high),
+            taken_at: n.taken_at || null,
+          }),
+        });
+        this.verify.newLab = { analyte_name: "", value_num: "", unit: "", ref_low: "", ref_high: "", taken_at: "" };
+        this.verify.newLabOpen = false;
+        this.toast("Показатель добавлен", "success");
+        this.reloadDoc();
+      } catch (e) { this.toast("Не удалось добавить", "error"); console.error(e); }
+      finally { this.verify.busy = false; }
+    },
+
+    vStartEditReport(rep) {
+      // Списки редактируются как текст: одна строка = один пункт.
+      this.verify.editReport = {
+        id: rep.id,
+        diagnosis: rep.diagnosis || "",
+        doctor_name: rep.doctor_name || "",
+        department: rep.department || "",
+        recommendations: (rep.recommendations || []).join("\n"),
+        medications: (rep.medications || []).join("\n"),
+      };
+    },
+
+    async vSaveReport() {
+      const r = this.verify.editReport;
+      if (!r) return;
+      const toList = (text) => text.split("\n").map((s) => s.trim()).filter(Boolean);
+      this.verify.busy = true;
+      try {
+        await this.api(`/api/documents/${this.current.doc.id}/reports/${r.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            diagnosis: r.diagnosis || null,
+            doctor_name: r.doctor_name || null,
+            department: r.department || null,
+            recommendations: toList(r.recommendations),
+            medications: toList(r.medications),
+          }),
+        });
+        this.verify.editReport = null;
+        this.toast("Заключение исправлено", "success");
+        this.reloadDoc();
+      } catch (e) { this.toast("Не удалось сохранить", "error"); console.error(e); }
+      finally { this.verify.busy = false; }
+    },
+
+    // ===== Администрирование =====
+    isAdmin() { return this.user?.role === "admin"; },
+
+    async adminLoadUsers() {
+      try {
+        const data = await this.api("/api/admin/users");
+        this.admin.users = data?.items || [];
+      } catch (e) { this.toast("Нет доступа к администрированию", "error"); console.error(e); }
+    },
+
+    async adminCreateUser() {
+      const tg = parseInt(String(this.admin.newUser.telegram_user_id).trim(), 10);
+      if (!tg || tg <= 0) { this.toast("Введите числовой Telegram ID", "error"); return; }
+      try {
+        await this.api("/api/admin/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ telegram_user_id: tg, display_name: this.admin.newUser.display_name || null }),
+        });
+        this.admin.newUser = { telegram_user_id: "", display_name: "" };
+        this.toast("Пользователь добавлен", "success");
+        this.adminLoadUsers();
+      } catch (e) {
+        this.toast(String(e.message).includes("409") ? "Такой пользователь уже есть" : "Не удалось добавить пользователя", "error");
+      }
+    },
+
+    async adminSetRole(u, role) {
+      try {
+        await this.api(`/api/admin/users/${u.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role }),
+        });
+        this.toast(`Роль обновлена: ${role}`, "success");
+      } catch (e) {
+        this.toast(String(e.message).includes("409") ? "Нельзя разжаловать последнего администратора" : "Не удалось сменить роль", "error");
+      }
+      this.adminLoadUsers();
+    },
+
+    async adminDeleteUser(u) {
+      if (!confirm(`Удалить пользователя ${u.display_name || u.telegram_user_id} со всеми данными? Это необратимо.`)) return;
+      try {
+        await this.api(`/api/admin/users/${u.id}`, { method: "DELETE" });
+        this.toast("Пользователь удалён", "success");
+        if (this.admin.labsUser?.id === u.id) this.admin.labsUser = null;
+      } catch (e) {
+        this.toast(String(e.message).includes("409") ? "Нельзя удалить самого себя" : "Не удалось удалить", "error");
+      }
+      this.adminLoadUsers();
+    },
+
+    async adminOpenLabs(u) {
+      this.admin.labsUser = u;
+      this.admin.labsQuery = "";
+      this.admin.labsOffset = 0;
+      this.admin.editLab = null;
+      this.admin.newLabOpen = false;
+      await this.adminLoadLabs();
+    },
+
+    async adminLoadLabs() {
+      if (!this.admin.labsUser) return;
+      try {
+        const p = new URLSearchParams({ limit: 50, offset: this.admin.labsOffset });
+        if (this.admin.labsQuery) p.set("q", this.admin.labsQuery);
+        const data = await this.api(`/api/admin/users/${this.admin.labsUser.id}/labs?${p}`);
+        this.admin.labs = data || { items: [], total: 0 };
+      } catch (e) { this.toast("Не удалось загрузить анализы", "error"); console.error(e); }
+    },
+
+    adminStartEditLab(row) {
+      // Копия, а не ссылка: отмена редактирования не должна портить список.
+      this.admin.editLab = { ...row };
+    },
+
+    async adminSaveLab() {
+      const l = this.admin.editLab;
+      if (!l) return;
+      this.admin.busy = true;
+      try {
+        await this.api(`/api/admin/labs/${l.id}?user_id=${this.admin.labsUser.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analyte_name: l.analyte_name,
+            value_num: l.value_num === "" ? null : Number(l.value_num),
+            unit: l.unit || null,
+            ref_low: l.ref_low === "" ? null : Number(l.ref_low),
+            ref_high: l.ref_high === "" ? null : Number(l.ref_high),
+            taken_at: l.taken_at || null,
+          }),
+        });
+        this.admin.editLab = null;
+        this.toast("Показатель обновлён", "success");
+        this.adminLoadLabs();
+      } catch (e) { this.toast("Не удалось сохранить", "error"); console.error(e); }
+      finally { this.admin.busy = false; }
+    },
+
+    async adminDeleteLab(row) {
+      if (!confirm(`Удалить показатель «${row.analyte_name}»?`)) return;
+      try {
+        await this.api(`/api/admin/labs/${row.id}?user_id=${this.admin.labsUser.id}`, { method: "DELETE" });
+        this.toast("Показатель удалён", "success");
+        this.adminLoadLabs();
+      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
+    },
+
+    async adminAddLab() {
+      const n = this.admin.newLab;
+      if (!n.analyte_name.trim()) { this.toast("Название показателя обязательно", "error"); return; }
+      this.admin.busy = true;
+      try {
+        await this.api(`/api/admin/users/${this.admin.labsUser.id}/labs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analyte_name: n.analyte_name.trim(),
+            value_num: n.value_num === "" ? null : Number(n.value_num),
+            unit: n.unit || null,
+            ref_low: n.ref_low === "" ? null : Number(n.ref_low),
+            ref_high: n.ref_high === "" ? null : Number(n.ref_high),
+            taken_at: n.taken_at || null,
+          }),
+        });
+        this.admin.newLab = { analyte_name: "", value_num: "", unit: "", ref_low: "", ref_high: "", taken_at: "" };
+        this.admin.newLabOpen = false;
+        this.toast("Показатель добавлен", "success");
+        this.adminLoadLabs();
+      } catch (e) { this.toast("Не удалось добавить", "error"); console.error(e); }
+      finally { this.admin.busy = false; }
+    },
 
     async loadSelectors() {
       try {
@@ -292,6 +761,7 @@ function cabinet() {
       this.screen = "document";
       this.loading.doc = true;
       this.current = { doc: null, kind: null, labs: [], reports: [] };
+      this.verify = { ...this.verify, editing: false, editLab: null, newLabOpen: false, editReport: null };
       try {
         const data = await this.api(`/api/documents/${id}`);
         if (req !== this._req.doc) return;
@@ -300,6 +770,8 @@ function cabinet() {
         this.current = {
           doc: data.document, kind: data.kind, labs: data.labs, reports: data.reports,
         };
+        this.currentVersions = [];
+        this.loadVersions();
       } catch (e) {
         if (req !== this._req.doc) return;
         this.toast("Ошибка загрузки документа", "error"); console.error(e);
@@ -586,6 +1058,19 @@ function cabinet() {
         this.pollSync();
       } catch (e) { this.toast("Не удалось запустить синхронизацию", "error"); console.error(e); }
     },
+    async setSyncSchedule(event) {
+      const val = event.target.value;
+      const hours = val ? parseInt(val, 10) : null;
+      try {
+        await this.api("/api/health/accounts/garmin/schedule", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ interval_hours: hours }),
+        });
+        this.toast(hours ? `Автосинк: каждые ${hours} ч` : "Автосинк выключен", "success");
+        this.loadHealth();
+      } catch (e) { this.toast("Не удалось сохранить расписание", "error"); console.error(e); }
+    },
     async pollSync() {
       try {
         const st = await this.api("/api/health/sync/status");
@@ -711,6 +1196,58 @@ function cabinet() {
     },
     ragTotalChunks() {
       return Object.values(this.ragIndex.chunks || {}).reduce((a, b) => a + b, 0);
+    },
+
+    async ragResearchUpdate() {
+      try {
+        await this.api("/api/rag/research/update", { method: "POST" });
+        this.ragIndex.research = { state: "running" };
+        this.toast("Обновление PubMed запущено", "info");
+        this._pollResearch();
+      } catch (e) {
+        if (e?.status === 409) this.toast("Обновление уже идёт", "error");
+        else this.toast("Не удалось запустить обновление", "error");
+        console.error(e);
+      }
+    },
+
+    async ragResearchStatus() {
+      try {
+        const st = await this.api("/api/rag/research/status");
+        if (st) this.ragIndex.research = st;
+      } catch (e) { console.error(e); }
+    },
+
+    _pollResearch() {
+      setTimeout(async () => {
+        try {
+          const st = await this.api("/api/rag/research/status");
+          if (st) this.ragIndex.research = st;
+          if (st?.state === "running") this._pollResearch();
+          else if (st?.state === "done") this.toast("PubMed обновлён: " + (st.indexed ?? 0) + " публикаций", "success");
+        } catch (e) { console.error(e); }
+      }, 5000);
+    },
+
+    async ragBenchmark() {
+      const raw = this.ragIndex.benchModels.trim();
+      if (!raw) { this.toast("Укажите модели через запятую", "error"); return; }
+      const models = raw.split(",").map(m => m.trim()).filter(Boolean);
+      if (!models.length) { this.toast("Укажите хотя бы одну модель", "error"); return; }
+      this.ragIndex.benching = true;
+      this.ragIndex.benchResults = null;
+      try {
+        const data = await this.api("/api/rag/benchmark", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ models }),
+        });
+        this.ragIndex.benchResults = data.models || [];
+        this.toast("Бенчмарк завершён", "success");
+      } catch (e) {
+        this.toast("Бенчмарк недоступен (проверьте Ollama)", "error");
+        console.error(e);
+      } finally { this.ragIndex.benching = false; }
     },
 
     // ===== Форматтеры =====

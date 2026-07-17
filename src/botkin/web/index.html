@@ -45,6 +45,9 @@
         <svg x-show="theme==='dark'" viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         <svg x-show="theme==='light'" viewBox="0 0 24 24" width="20" height="20" style="display:none"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
       </button>
+      <button class="icon-btn" x-show="isAdmin()" @click="go('admin')" :class="{active: screen==='admin'}" title="Администрирование" aria-label="Администрирование" style="display:none">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 3l7 3v5c0 4.4-3 8.4-7 9.5C8 19.4 5 15.4 5 11V6l7-3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 12l1.8 1.8 3.4-3.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
       <button class="icon-btn" @click="go('profile')" :class="{active: screen==='profile'}" title="Профиль" aria-label="Профиль">
         <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
@@ -126,9 +129,39 @@
           </button>
         </div>
       </div>
-    </section>
 
-    <!-- ====== ДОКУМЕНТЫ ====== -->
+      <!-- Внешние факторы: погода, геомагнитная активность -->
+      <div class="panel" x-show="external.today" x-cloak>
+        <div class="panel-head"><h2 class="panel-title">Внешние факторы</h2></div>
+        <div class="external-grid">
+          <template x-if="external.today?.weather">
+            <div class="external-card">
+              <div class="external-icon">🌤️</div>
+              <div class="external-val" x-text="external.today.weather.temperature + '°C'"></div>
+              <div class="external-lbl" x-text="external.today.weather.description"></div>
+              <div class="muted" style="font-size:11px;margin-top:2px">
+                Ветер <span x-text="external.today.weather.windspeed + ' км/ч'"></span>,
+                влажность <span x-text="external.today.weather.humidity + '%'"></span>
+              </div>
+            </div>
+          </template>
+          <template x-if="external.today?.geomagnetic">
+            <div class="external-card">
+              <div class="external-icon">🧲</div>
+              <div class="external-val" x-text="'Kp ' + external.today.geomagnetic.kp_index"></div>
+              <div class="external-lbl" x-text="external.today.geomagnetic.level"></div>
+            </div>
+          </template>
+          <template x-if="external.today?.horoscope">
+            <div class="external-card external-card--fun">
+              <div class="external-icon">♈</div>
+              <div class="external-val" x-text="external.today.horoscope.sign"></div>
+              <div class="external-lbl" style="font-size:11px" x-text="external.today.horoscope.text"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </section>
     <section x-show="screen==='documents'" class="screen">
       <div class="screen-head">
         <h1 class="screen-title">Документы</h1>
@@ -245,34 +278,101 @@
               <svg viewBox="0 0 24 24" width="16" height="16"><path d="M20 12a8 8 0 11-2.34-5.66M20 3v4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Обновить
             </button>
+            <label class="btn btn-ghost" style="cursor:pointer">
+              <svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 16V4M7 9l5-5 5 5M4 20h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Заменить файл
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,image/*,application/pdf"
+                     style="display:none" @change="replaceSource($event)">
+            </label>
             <button class="btn btn-danger" @click="deleteCurrentDoc()">
               <svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Удалить
             </button>
           </div>
+          <!-- Верификация: пользователь подтверждает или правит распознанное -->
+          <div class="verify-bar" x-show="current.kind==='analysis' || current.kind==='doctor_report'">
+            <template x-if="current.doc?.verified_at">
+              <span class="verify-badge">
+                <svg viewBox="0 0 24 24" width="14" height="14"><path d="M5 12l5 5 9-10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Данные проверены вами
+              </span>
+            </template>
+            <template x-if="!current.doc?.verified_at">
+              <span class="verify-hint">Проверьте, что распознано без ошибок</span>
+            </template>
+            <div class="verify-actions">
+              <button class="btn btn-ghost" @click="vToggleEditing()"
+                      x-text="verify.editing ? 'Завершить правку' : 'Исправить'"></button>
+              <button class="btn btn-primary" x-show="!current.doc?.verified_at" @click="verifyDoc()">Всё верно</button>
+            </div>
+          </div>
         </div>
 
         <!-- Анализы -->
         <div class="panel" x-show="current.kind==='analysis'">
-          <div class="panel-head"><h2 class="panel-title">Показатели</h2><span class="panel-cnt" x-text="current.labs.length"></span></div>
+          <div class="panel-head">
+            <h2 class="panel-title">Показатели</h2>
+            <span class="panel-cnt" x-text="current.labs.length"></span>
+          </div>
           <div class="labs-table">
-            <!-- key=индекс: у строк нет id, а имя+значение коллидируют на дублях панели -->
-            <template x-for="(r, ri) in current.labs" :key="ri">
-              <div class="lab-row" :class="{'lab-row--warn': r.unit_mismatch}">
-                <div class="lab-name" x-text="r.analyte_canonical || r.analyte_name"></div>
-                <div class="lab-value">
-                  <span class="val" :class="labValueClass(r)" x-text="fmtValue(r)"></span>
-                  <span class="unit" x-text="r.unit"></span>
+            <template x-for="r in current.labs" :key="r.id">
+              <div>
+                <div class="lab-row" :class="{'lab-row--warn': r.unit_mismatch}" x-show="verify.editLab?.id !== r.id">
+                  <div class="lab-name" x-text="r.analyte_canonical || r.analyte_name"></div>
+                  <div class="lab-value">
+                    <span class="val" :class="labValueClass(r)" x-text="fmtValue(r)"></span>
+                    <span class="unit" x-text="r.unit"></span>
+                  </div>
+                  <div class="lab-ref" x-text="fmtRef(r)"></div>
+                  <!-- Мини-шкала: положение значения в коридоре нормы -->
+                  <div class="ref-scale" x-show="refPosition(r) !== null" aria-hidden="true">
+                    <span class="ref-scale-dot"
+                          :class="labValueClass(r) ? 'ref-scale-dot--'+labValueClass(r) : ''"
+                          :style="`left:${refPosition(r)}%`"></span>
+                  </div>
+                  <div class="admin-user-actions" x-show="verify.editing" style="grid-column:1/-1">
+                    <button class="btn btn-ghost" @click="vStartEditLab(r)">Изменить</button>
+                    <button class="btn btn-ghost btn-danger" @click="vDeleteLab(r)">Удалить</button>
+                  </div>
                 </div>
-                <div class="lab-ref" x-text="fmtRef(r)"></div>
-                <!-- Мини-шкала: положение значения в коридоре нормы -->
-                <div class="ref-scale" x-show="refPosition(r) !== null" aria-hidden="true">
-                  <span class="ref-scale-dot"
-                        :class="labValueClass(r) ? 'ref-scale-dot--'+labValueClass(r) : ''"
-                        :style="`left:${refPosition(r)}%`"></span>
-                </div>
+                <!-- Инлайн-редактор показателя (x-if: x-model не должен читать null) -->
+                <template x-if="verify.editLab?.id === r.id">
+                  <div class="admin-lab-form">
+                    <input type="text" class="filter-input" placeholder="Название" x-model="verify.editLab.analyte_name">
+                    <div class="filter-row">
+                      <input type="number" step="any" class="filter-input" placeholder="Значение" x-model="verify.editLab.value_num">
+                      <input type="text" class="filter-input" placeholder="Ед." x-model="verify.editLab.unit">
+                    </div>
+                    <div class="filter-row">
+                      <input type="number" step="any" class="filter-input" placeholder="Норма от" x-model="verify.editLab.ref_low">
+                      <input type="number" step="any" class="filter-input" placeholder="Норма до" x-model="verify.editLab.ref_high">
+                    </div>
+                    <div class="filter-row">
+                      <button class="btn btn-primary" @click="vSaveLab()" :disabled="verify.busy">Сохранить</button>
+                      <button class="btn btn-ghost" @click="verify.editLab = null">Отмена</button>
+                    </div>
+                  </div>
+                </template>
               </div>
             </template>
+          </div>
+          <!-- Ручное добавление пропущенного показателя -->
+          <div x-show="verify.editing" style="margin-top:10px">
+            <button class="btn btn-ghost" @click="verify.newLabOpen = !verify.newLabOpen"
+                    x-text="verify.newLabOpen ? 'Скрыть форму' : 'Добавить показатель'"></button>
+            <div class="admin-lab-form" x-show="verify.newLabOpen">
+              <input type="text" class="filter-input" placeholder="Название показателя *" x-model="verify.newLab.analyte_name">
+              <div class="filter-row">
+                <input type="number" step="any" class="filter-input" placeholder="Значение" x-model="verify.newLab.value_num">
+                <input type="text" class="filter-input" placeholder="Ед." x-model="verify.newLab.unit">
+              </div>
+              <div class="filter-row">
+                <input type="number" step="any" class="filter-input" placeholder="Норма от" x-model="verify.newLab.ref_low">
+                <input type="number" step="any" class="filter-input" placeholder="Норма до" x-model="verify.newLab.ref_high">
+                <input type="date" class="filter-input" title="Дата взятия" x-model="verify.newLab.taken_at">
+              </div>
+              <button class="btn btn-primary" @click="vAddLab()" :disabled="verify.busy">Сохранить показатель</button>
+            </div>
           </div>
         </div>
 
@@ -280,6 +380,28 @@
         <div class="panel" x-show="current.kind==='doctor_report'">
           <template x-for="(rep, repi) in current.reports" :key="repi">
             <div class="report-block">
+              <div class="admin-user-actions" x-show="verify.editing && verify.editReport?.id !== rep.id" style="margin-bottom:10px">
+                <button class="btn btn-ghost" @click="vStartEditReport(rep)">Изменить заключение</button>
+              </div>
+              <!-- Редактор заключения: списки — по пункту на строку -->
+              <template x-if="verify.editReport?.id === rep.id">
+                <div class="admin-lab-form">
+                  <label class="report-h">Диагноз</label>
+                  <textarea class="filter-input" rows="2" x-model="verify.editReport.diagnosis"></textarea>
+                  <div class="filter-row">
+                    <input type="text" class="filter-input" placeholder="Врач" x-model="verify.editReport.doctor_name">
+                    <input type="text" class="filter-input" placeholder="Отделение" x-model="verify.editReport.department">
+                  </div>
+                  <label class="report-h">Рекомендации (по одной на строку)</label>
+                  <textarea class="filter-input" rows="4" x-model="verify.editReport.recommendations"></textarea>
+                  <label class="report-h">Назначения (по одному на строку)</label>
+                  <textarea class="filter-input" rows="3" x-model="verify.editReport.medications"></textarea>
+                  <div class="filter-row">
+                    <button class="btn btn-primary" @click="vSaveReport()" :disabled="verify.busy">Сохранить</button>
+                    <button class="btn btn-ghost" @click="verify.editReport = null">Отмена</button>
+                  </div>
+                </div>
+              </template>
               <div x-show="rep.diagnosis" class="report-field">
                 <h3 class="report-h">Диагноз</h3>
                 <p x-text="rep.diagnosis"></p>
@@ -311,6 +433,26 @@
         <div class="empty" x-show="current.kind!=='analysis' && current.kind!=='doctor_report'">
           <p>Распознавание этого типа документа пока не поддерживается.</p>
           <p class="muted">Файл сохранён, его можно обработать позже.</p>
+        </div>
+
+        <!-- История версий файла (появляется после первой замены) -->
+        <div class="panel" x-show="currentVersions.length > 1">
+          <div class="panel-head">
+            <h2 class="panel-title">Версии файла</h2>
+            <span class="panel-cnt" x-text="currentVersions.length"></span>
+          </div>
+          <template x-for="(v, vi) in currentVersions" :key="vi">
+            <div class="profile-row">
+              <span class="profile-lbl">
+                <span x-text="v.is_current ? 'Текущая' : 'Версия ' + (currentVersions.length - vi)"></span>
+                <span class="verify-badge" x-show="v.is_current" style="margin-left:6px">●</span>
+              </span>
+              <span class="profile-val" style="font-weight:400;font-size:13px">
+                <span x-text="fmtDate(v.last_modified)"></span> ·
+                <span x-text="Math.round((v.size||0)/1024) + ' КБ'"></span>
+              </span>
+            </div>
+          </template>
         </div>
       </div>
     </section>
@@ -488,6 +630,20 @@
             <div class="muted" style="margin-top:8px;font-size:12px" x-show="healthAccount('garmin')?.last_sync_at">
               Последняя синхронизация: <span x-text="fmtDate(healthAccount('garmin')?.last_sync_at)"></span>
             </div>
+            <!-- Автосинк по расписанию -->
+            <div style="margin-top:12px">
+              <label class="muted" style="font-size:13px;display:block;margin-bottom:4px">Автосинхронизация</label>
+              <div class="filter-row">
+                <select class="filter-input" @change="setSyncSchedule($event)" style="max-width:240px">
+                  <option value="" :selected="!healthAccount('garmin')?.sync_interval_hours">Только вручную</option>
+                  <option value="1" :selected="healthAccount('garmin')?.sync_interval_hours===1">Каждый час</option>
+                  <option value="3" :selected="healthAccount('garmin')?.sync_interval_hours===3">Каждые 3 часа</option>
+                  <option value="6" :selected="healthAccount('garmin')?.sync_interval_hours===6">Каждые 6 часов</option>
+                  <option value="12" :selected="healthAccount('garmin')?.sync_interval_hours===12">Каждые 12 часов</option>
+                  <option value="24" :selected="healthAccount('garmin')?.sync_interval_hours===24">Раз в сутки</option>
+                </select>
+              </div>
+            </div>
           </div>
         </template>
 
@@ -586,6 +742,175 @@
           </div>
         </div>
       </div>
+
+      <!-- Управление RAG: обновление PubMed + бенчмарк -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Обновление базы знаний</h2>
+        </div>
+        <p class="muted" style="margin-bottom:10px;font-size:13px">Подтянуть свежие медицинские публикации из PubMed в локальный индекс.</p>
+        <div class="filter-row">
+          <button class="btn btn-primary" @click="ragResearchUpdate()"
+                  :disabled="ragIndex.research.state==='running'"
+                  x-text="ragIndex.research.state==='running' ? 'Обновление…' : 'Обновить из PubMed'"></button>
+          <button class="btn btn-ghost" @click="ragResearchStatus()"
+                  x-show="ragIndex.research.state==='done' || ragIndex.research.state==='error'">Статус</button>
+        </div>
+        <template x-if="ragIndex.research.state==='done'">
+          <div class="muted" style="margin-top:8px;font-size:12px"
+               x-text="'Проиндексировано: ' + (ragIndex.research.indexed ?? 0) + ' публикаций'"></div>
+        </template>
+        <template x-if="ragIndex.research.state==='error'">
+          <div class="muted" style="margin-top:8px;font-size:12px;color:var(--danger)"
+               x-text="'Ошибка: ' + (ragIndex.research.error || '')"></div>
+        </template>
+
+        <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
+          <h3 class="panel-title" style="font-size:15px;margin-bottom:8px">Бенчмарк embedding-моделей</h3>
+          <p class="muted" style="margin-bottom:10px;font-size:13px">Сравнить модели на тестовом наборе медицинских запросов (hit_rate, MRR).</p>
+          <div class="filter-row">
+            <input type="text" class="filter-input" placeholder="Модели через запятую (bge-m3,nomic-embed-text)"
+                   x-model="ragIndex.benchModels">
+            <button class="btn btn-primary" @click="ragBenchmark()" :disabled="ragIndex.benching">Запустить</button>
+          </div>
+          <template x-if="ragIndex.benching">
+            <div class="muted" style="margin-top:8px;font-size:12px">Сравнение моделей…</div>
+          </template>
+          <template x-if="ragIndex.benchResults">
+            <div style="margin-top:10px">
+              <template x-for="r in ragIndex.benchResults" :key="r.model">
+                <div class="admin-user-row">
+                  <div class="admin-user-main">
+                    <span class="admin-user-name" x-text="r.model"></span>
+                    <span class="admin-user-meta"
+                          x-text="'hit_rate: ' + (r.hit_rate*100).toFixed(0) + '%, MRR: ' + r.mrr.toFixed(3) + ', dist: ' + r.avg_distance.toFixed(4)"></span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </div>
+    </section>
+    <section x-show="screen==='admin'" class="screen">
+      <div class="screen-head">
+        <h1 class="screen-title">Администрирование</h1>
+        <p class="screen-sub">Пользователи и их анализы</p>
+      </div>
+
+      <div class="panel" x-show="!isAdmin()">
+        <p class="muted">Доступ только для администратора.</p>
+      </div>
+
+      <template x-if="isAdmin()">
+        <div>
+          <!-- Пользователи -->
+          <div class="panel">
+            <div class="panel-head">
+              <h2 class="panel-title">Пользователи</h2>
+              <span class="panel-cnt" x-text="admin.users.length"></span>
+            </div>
+            <template x-for="u in admin.users" :key="u.id">
+              <div class="admin-user-row">
+                <div class="admin-user-main">
+                  <span class="admin-user-name" x-text="u.display_name || ('ID ' + u.telegram_user_id)"></span>
+                  <span class="admin-user-meta">
+                    <span x-text="'tg:' + u.telegram_user_id"></span> ·
+                    <span x-text="u.documents + ' док.'"></span> ·
+                    <span x-text="u.lab_results + ' показ.'"></span>
+                  </span>
+                </div>
+                <div class="admin-user-actions">
+                  <select class="filter-input admin-role-select" :value="u.role" @change="adminSetRole(u, $event.target.value)" :disabled="u.id===user?.id" :title="u.id===user?.id ? 'Свою роль меняет другой администратор' : 'Роль'">
+                    <option value="user">пациент</option>
+                    <option value="admin">админ</option>
+                  </select>
+                  <button class="btn btn-ghost" @click="adminOpenLabs(u)">Анализы</button>
+                  <button class="btn btn-ghost btn-danger" @click="adminDeleteUser(u)" :disabled="u.id===user?.id">Удалить</button>
+                </div>
+              </div>
+            </template>
+            <!-- Добавление пользователя -->
+            <div class="filter-row" style="margin-top:12px">
+              <input type="text" inputmode="numeric" class="filter-input" placeholder="Telegram ID" x-model="admin.newUser.telegram_user_id">
+              <input type="text" class="filter-input" placeholder="Имя (необязательно)" x-model="admin.newUser.display_name">
+              <button class="btn btn-primary" @click="adminCreateUser()">Добавить</button>
+            </div>
+          </div>
+
+          <!-- Анализы выбранного пользователя -->
+          <div class="panel" x-show="admin.labsUser">
+            <div class="panel-head">
+              <h2 class="panel-title" x-text="'Анализы: ' + (admin.labsUser?.display_name || ('ID ' + admin.labsUser?.telegram_user_id))"></h2>
+              <span class="panel-cnt" x-text="admin.labs.total"></span>
+            </div>
+            <div class="filter-row">
+              <input type="search" class="filter-input" placeholder="Поиск по показателю" x-model.debounce.400ms="admin.labsQuery" @input="admin.labsOffset=0; adminLoadLabs()">
+              <button class="btn btn-ghost" @click="admin.newLabOpen = !admin.newLabOpen" x-text="admin.newLabOpen ? 'Скрыть форму' : 'Добавить показатель'"></button>
+            </div>
+
+            <!-- Форма добавления -->
+            <div class="admin-lab-form" x-show="admin.newLabOpen">
+              <input type="text" class="filter-input" placeholder="Название показателя *" x-model="admin.newLab.analyte_name">
+              <div class="filter-row">
+                <input type="number" step="any" class="filter-input" placeholder="Значение" x-model="admin.newLab.value_num">
+                <input type="text" class="filter-input" placeholder="Ед." x-model="admin.newLab.unit">
+              </div>
+              <div class="filter-row">
+                <input type="number" step="any" class="filter-input" placeholder="Норма от" x-model="admin.newLab.ref_low">
+                <input type="number" step="any" class="filter-input" placeholder="Норма до" x-model="admin.newLab.ref_high">
+                <input type="date" class="filter-input" title="Дата взятия" x-model="admin.newLab.taken_at">
+              </div>
+              <button class="btn btn-primary" @click="adminAddLab()" :disabled="admin.busy">Сохранить показатель</button>
+            </div>
+
+            <!-- Список с редактированием -->
+            <template x-for="r in admin.labs.items" :key="r.id">
+              <div>
+                <div class="admin-lab-row" x-show="admin.editLab?.id !== r.id">
+                  <div class="admin-lab-main">
+                    <span class="lab-name" x-text="r.analyte_canonical || r.analyte_name"></span>
+                    <span class="admin-user-meta">
+                      <span x-text="(r.value_num ?? r.value_text ?? '—') + (r.unit ? ' ' + r.unit : '')"></span>
+                      · <span x-text="r.taken_at || 'без даты'"></span>
+                    </span>
+                  </div>
+                  <div class="admin-user-actions">
+                    <button class="btn btn-ghost" @click="adminStartEditLab(r)">Изменить</button>
+                    <button class="btn btn-ghost btn-danger" @click="adminDeleteLab(r)">Удалить</button>
+                  </div>
+                </div>
+                <!-- Инлайн-редактор: x-if (не x-show) — x-model не должен читать null-editLab -->
+                <template x-if="admin.editLab?.id === r.id">
+                  <div class="admin-lab-form">
+                    <input type="text" class="filter-input" placeholder="Название" x-model="admin.editLab.analyte_name">
+                    <div class="filter-row">
+                      <input type="number" step="any" class="filter-input" placeholder="Значение" x-model="admin.editLab.value_num">
+                      <input type="text" class="filter-input" placeholder="Ед." x-model="admin.editLab.unit">
+                    </div>
+                    <div class="filter-row">
+                      <input type="number" step="any" class="filter-input" placeholder="Норма от" x-model="admin.editLab.ref_low">
+                      <input type="number" step="any" class="filter-input" placeholder="Норма до" x-model="admin.editLab.ref_high">
+                      <input type="date" class="filter-input" title="Дата взятия" x-model="admin.editLab.taken_at">
+                    </div>
+                    <div class="filter-row">
+                      <button class="btn btn-primary" @click="adminSaveLab()" :disabled="admin.busy">Сохранить</button>
+                      <button class="btn btn-ghost" @click="admin.editLab = null">Отмена</button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <p class="muted" x-show="!admin.labs.items.length" style="font-size:13px">Показателей нет.</p>
+
+            <!-- Пагинация -->
+            <div class="filter-row" x-show="admin.labs.total > 50" style="margin-top:10px">
+              <button class="btn btn-ghost" :disabled="admin.labsOffset===0" @click="admin.labsOffset=Math.max(0,admin.labsOffset-50); adminLoadLabs()">← Новее</button>
+              <button class="btn btn-ghost" :disabled="admin.labsOffset+50>=admin.labs.total" @click="admin.labsOffset+=50; adminLoadLabs()">Старее →</button>
+            </div>
+          </div>
+        </div>
+      </template>
     </section>
 
     <!-- ====== ПРОФИЛЬ ====== -->
@@ -605,6 +930,127 @@
           <span class="profile-val" x-text="stats.total ?? 0"></span>
         </div>
       </div>
+      <!-- Профиль тела: учитывается ассистентом в рекомендациях -->
+      <div class="panel">
+        <div class="panel-head"><h2 class="panel-title">О себе</h2></div>
+        <p class="muted" style="margin-bottom:12px;font-size:13px">Эти данные видит только ассистент — они уточняют его рекомендации.</p>
+        <div class="filter-row">
+          <select class="filter-input" x-model="patient.profile.sex">
+            <option value="">Пол — не указан</option>
+            <option value="male">Мужской</option>
+            <option value="female">Женский</option>
+          </select>
+          <input type="date" class="filter-input" title="Дата рождения" x-model="patient.profile.birth_date">
+        </div>
+        <div class="filter-row" style="margin-top:10px">
+          <input type="number" step="any" class="filter-input" placeholder="Рост, см" x-model="patient.profile.height_cm">
+          <input type="number" step="any" class="filter-input" placeholder="Вес, кг" x-model="patient.profile.weight_kg">
+          <select class="filter-input" x-model="patient.profile.blood_type">
+            <option value="">Группа крови —</option>
+            <option value="O−">O(I) Rh−</option>
+            <option value="O+">O(I) Rh+</option>
+            <option value="A−">A(II) Rh−</option>
+            <option value="A+">A(II) Rh+</option>
+            <option value="B−">B(III) Rh−</option>
+            <option value="B+">B(III) Rh+</option>
+            <option value="AB−">AB(IV) Rh−</option>
+            <option value="AB+">AB(IV) Rh+</option>
+          </select>
+        </div>
+        <textarea class="filter-input" rows="2" placeholder="Аллергии (лекарства, продукты…)" style="margin-top:10px" x-model="patient.profile.allergies"></textarea>
+        <textarea class="filter-input" rows="2" placeholder="Хронические состояния" style="margin-top:10px" x-model="patient.profile.chronic_conditions"></textarea>
+        <div class="filter-row" style="margin-top:10px">
+          <input type="text" class="filter-input" placeholder="Город (для погоды)"
+                 x-model="patient.cityQuery"
+                 @input="searchCities()"
+                 @focus="patient.showCities = true"
+                 @blur="setTimeout(() => patient.showCities = false, 200)">
+          <input type="hidden" x-model="patient.profile.latitude">
+          <input type="hidden" x-model="patient.profile.longitude">
+        </div>
+        <div x-show="patient.showCities && patient.cityResults.length" x-cloak
+             style="position:relative;z-index:10">
+          <div class="autocomplete-list">
+            <template x-for="c in patient.cityResults" :key="c.label">
+              <div class="autocomplete-item" @mousedown="selectCity(c)">
+                <span x-text="c.name"></span>
+                <span class="muted" style="font-size:12px;margin-left:6px" x-text="c.region"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+        <button class="btn btn-primary" style="margin-top:10px" @click="savePatientProfile()" :disabled="patient.busy">Сохранить</button>
+      </div>
+
+      <!-- Жалобы в свободной форме -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Жалобы</h2>
+          <span class="panel-cnt" x-text="patient.complaints.length"></span>
+        </div>
+        <div class="filter-row">
+          <input type="text" class="filter-input" placeholder="Что беспокоит? Своими словами"
+                 x-model="patient.newComplaint" @keydown.enter="addComplaint()">
+          <button class="btn btn-primary" @click="addComplaint()">Записать</button>
+        </div>
+        <template x-for="c in patient.complaints" :key="c.id">
+          <div class="admin-user-row">
+            <div class="admin-user-main">
+              <span x-text="c.text" style="font-size:14px"></span>
+              <span class="admin-user-meta" x-text="fmtDate(c.created_at)"></span>
+            </div>
+            <button class="btn btn-ghost btn-danger" @click="deleteComplaint(c)">Удалить</button>
+          </div>
+        </template>
+      </div>
+
+      <!-- Текущие препараты -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Принимаю сейчас</h2>
+          <span class="panel-cnt" x-text="patient.medications.filter(m => m.is_active).length"></span>
+        </div>
+        <div class="filter-row" style="position:relative">
+          <input type="text" class="filter-input" placeholder="Препарат *"
+                 x-model="patient.newMed.name"
+                 @input="searchDrugs()"
+                 @focus="patient.showDrugs = true"
+                 @blur="setTimeout(() => patient.showDrugs = false, 200)">
+          <input type="text" class="filter-input" placeholder="Дозировка" x-model="patient.newMed.dosage">
+        </div>
+        <div x-show="patient.showDrugs && patient.drugResults.length" x-cloak
+             style="position:relative;z-index:10">
+          <div class="autocomplete-list">
+            <template x-for="d in patient.drugResults" :key="d.ref_key">
+              <div class="autocomplete-item" @mousedown="selectDrug(d)">
+                <span x-text="d.name"></span>
+                <span class="muted" style="font-size:11px;margin-left:6px" x-text="d.mnn && d.mnn !== d.name ? d.mnn : ''"></span>
+                <template x-if="d.statuses && d.statuses.includes('excluded')">
+                  <span class="drug-status drug-status--excluded" title="Исключён из реестра ГРЛС">исключён</span>
+                </template>
+              </div>
+            </template>
+          </div>
+        </div>
+        <div class="filter-row" style="margin-top:10px">
+          <input type="text" class="filter-input" placeholder="Как принимаете (2 раза в день…)" x-model="patient.newMed.schedule">
+          <button class="btn btn-primary" @click="addMedication()">Добавить</button>
+        </div>
+        <template x-for="m in patient.medications" :key="m.id">
+          <div class="admin-user-row" :style="m.is_active ? '' : 'opacity:.55'">
+            <div class="admin-user-main">
+              <span class="admin-user-name" x-text="m.name + (m.dosage ? ' · ' + m.dosage : '')"></span>
+              <span class="admin-user-meta" x-text="(m.schedule || '') + (m.is_active ? '' : ' — приём завершён')"></span>
+            </div>
+            <div class="admin-user-actions">
+              <button class="btn btn-ghost" @click="toggleMedication(m)"
+                      x-text="m.is_active ? 'Завершить' : 'Возобновить'"></button>
+              <button class="btn btn-ghost btn-danger" @click="deleteMedication(m)">Удалить</button>
+            </div>
+          </div>
+        </template>
+      </div>
+
       <div class="panel">
         <div class="panel-head"><h2 class="panel-title">Идентификация (demo)</h2></div>
         <p class="muted" style="margin-bottom:12px;font-size:13px">На этапе разработки кабинет привязывается к идентификатору пользователя. Введите значение или используйте демонстрационный аккаунт.</p>

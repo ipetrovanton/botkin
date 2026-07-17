@@ -27,6 +27,7 @@ from botkin.pipeline.notifications import (
     classify_failed, document_processed, duplicate_document, extract_failed,
     notify_user, pipeline_failed,
 )
+from botkin.storage import open_local
 
 log = logging.getLogger("botkin.pipeline")
 
@@ -73,7 +74,14 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
         return
 
     user_id = doc["user_id"]
-    source_path = Path(doc["source_path"])
+    # Через storage-слой: для MinIO объект скачивается в локальный кэш,
+    # для локального бэкенда возвращается сам путь.
+    source_path = open_local(doc["source_path"])
+    if source_path is None:
+        log.error("Doc %d: файл-исходник недоступен: %s", document_id, doc["source_path"])
+        _mark_failed(document_id)
+        await notify_user(telegram_user_id, pipeline_failed(document_id))
+        return
 
     log.info(
         "[CONFIG] Doc %d | model=%s temp=%.2f num_ctx=%d num_predict=%d | "

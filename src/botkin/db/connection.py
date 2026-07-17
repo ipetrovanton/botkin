@@ -12,6 +12,15 @@ SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
 # Колонки, добавляемые поверх существующих таблиц (идемпотентно).
 _MIGRATIONS: dict[str, dict[str, str]] = {
+    "health_accounts": {
+        # частота автосинка (часы); NULL = только вручную
+        "sync_interval_hours": "INTEGER",
+    },
+    "users": {
+        # CHECK через ALTER в SQLite не добавить — инвариант ролей держит UserRepo.
+        "role": "TEXT NOT NULL DEFAULT 'user'",
+        "display_name": "TEXT",
+    },
     "documents": {
         "file_sha256": "TEXT",
         "raw_extraction": "TEXT",
@@ -20,6 +29,8 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "delivered_at": "TIMESTAMP",
         # unix-время входа в текущую стадию — для достоверного прогресс-бара
         "stage_started_at": "REAL",
+        # когда пользователь подтвердил корректность распознанных данных (верификация)
+        "verified_at": "TIMESTAMP",
     },
     "lab_results": {
         "value_raw": "TEXT", "unit_raw": "TEXT", "taken_at_raw": "TEXT",
@@ -34,6 +45,10 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "unit_mismatch": "INTEGER",
     },
     "doctor_reports": {"medications_normalized_json": "TEXT"},
+    "patient_profile": {
+        "latitude": "REAL",
+        "longitude": "REAL",
+    },
 }
 
 

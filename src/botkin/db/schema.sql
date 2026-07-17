@@ -9,6 +9,11 @@ PRAGMA busy_timeout = 5000;
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     telegram_user_id INTEGER NOT NULL UNIQUE,
+    -- ролевая модель демо-уровня: admin управляет пользователями и их данными.
+    -- CHECK только для свежих БД: в мигрированных колонка добавляется через ALTER без CHECK,
+    -- инвариант поддерживает UserRepo.
+    role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin','user')),
+    display_name TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -30,6 +35,8 @@ CREATE TABLE IF NOT EXISTS documents (
     delivered_at TIMESTAMP,
     -- unix-время входа в текущую стадию: достоверный прогресс-бар считает elapsed внутри стадии
     stage_started_at REAL,
+    -- когда пользователь подтвердил корректность распознанных данных (NULL = не проверено)
+    verified_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
@@ -88,6 +95,44 @@ CREATE TABLE IF NOT EXISTS doctor_reports (
 CREATE INDEX IF NOT EXISTS idx_doctor_reports_user ON doctor_reports(user_id, visit_date);
 CREATE INDEX IF NOT EXISTS idx_doctor_reports_document ON doctor_reports(document_id);
 
+-- ============ PATIENT FORMS (профиль тела, жалобы, текущие препараты) ============
+-- Данные форм подмешиваются в контекст RAG-рекомендаций (см. rag/recommend.py).
+
+CREATE TABLE IF NOT EXISTS patient_profile (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+    sex TEXT CHECK(sex IN ('male','female')),
+    birth_date TEXT,          -- ISO YYYY-MM-DD; возраст вычисляется, а не хранится
+    height_cm REAL,
+    weight_kg REAL,
+    blood_type TEXT,          -- «O(I) Rh+» и т.п.
+    allergies TEXT,
+    chronic_conditions TEXT,
+    latitude REAL,            -- геолокация для погодного контекста рекомендаций
+    longitude REAL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS patient_complaints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    text TEXT NOT NULL,       -- жалоба в свободной форме
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_patient_complaints_user
+    ON patient_complaints(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS patient_medications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    dosage TEXT,              -- «500 мг», свободный формат
+    schedule TEXT,            -- «2 раза в день после еды»
+    is_active INTEGER NOT NULL DEFAULT 1,  -- 0 = приём завершён (история сохраняется)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_patient_medications_user
+    ON patient_medications(user_id, is_active);
+
 -- ============ HEALTH SYNC (Garmin / Strava / Apple Health) ============
 
 -- Подключённые источники данных о здоровье. Секреты (пароль) НЕ хранятся:
@@ -104,6 +149,8 @@ CREATE TABLE IF NOT EXISTS health_accounts (
         CHECK(status IN ('connected','error','disconnected')),
     last_error TEXT,
     last_sync_at TIMESTAMP,
+    -- частота автосинка в часах; NULL = только вручную (см. api/routes/health_sync.py)
+    sync_interval_hours INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, provider)
 );

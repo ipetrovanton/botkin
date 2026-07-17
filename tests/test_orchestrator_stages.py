@@ -1,6 +1,8 @@
 import asyncio
 from unittest.mock import patch
 
+from pathlib import Path
+
 from botkin.domain.models import ClassifyResult, LabResult
 
 
@@ -11,6 +13,8 @@ async def _anoop(*a, **k):
 def _make_doc():
     from botkin.db.connection import get_conn
     from botkin.db.repos import DocumentRepo, UserRepo
+    # Пайплайн проверяет существование исходника через storage-слой.
+    Path("/tmp/a.jpg").touch()
     with get_conn() as conn:
         uid = UserRepo(conn).get_or_create(321)
         did = DocumentRepo(conn, uid).create(source_path="/tmp/a.jpg")

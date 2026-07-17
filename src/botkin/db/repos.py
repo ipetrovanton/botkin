@@ -28,20 +28,31 @@ class BaseRepo:
 class UserRepo:
     table = "users"
 
+    ROLES = ("admin", "user")
+
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
 
     def get_or_create(self, telegram_user_id: int) -> int:
-        """Возвращает user_id по telegram_user_id, создаёт при необходимости."""
+        """Возвращает user_id по telegram_user_id, создаёт при необходимости.
+
+        Бутстрап ролей: id из ADMIN_TELEGRAM_IDS получает роль admin и при создании,
+        и при повторном входе (список в конфиге мог пополниться после регистрации).
+        """
+        from botkin.config import ADMIN_TELEGRAM_IDS
+
+        is_admin = telegram_user_id in ADMIN_TELEGRAM_IDS
         row = self.conn.execute(
-            "SELECT id FROM users WHERE telegram_user_id = ?",
+            "SELECT id, role FROM users WHERE telegram_user_id = ?",
             (telegram_user_id,),
         ).fetchone()
         if row:
+            if is_admin and row["role"] != "admin":
+                self.set_role(row["id"], "admin")
             return row["id"]
         cur = self.conn.execute(
-            "INSERT INTO users(telegram_user_id) VALUES (?)",
-            (telegram_user_id,),
+            "INSERT INTO users(telegram_user_id, role) VALUES (?, ?)",
+            (telegram_user_id, "admin" if is_admin else "user"),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -53,6 +64,83 @@ class UserRepo:
             (telegram_user_id,),
         ).fetchone()
         return row["id"] if row else None
+
+    def get(self, user_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT id, telegram_user_id, role, display_name, created_at "
+            "FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def role_of(self, user_id: int) -> str | None:
+        row = self.conn.execute(
+            "SELECT role FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        return row["role"] if row else None
+
+    def list_all(self) -> list[dict]:
+        """Все пользователи со счётчиками данных — для экрана администратора."""
+        rows = self.conn.execute(
+            """
+            SELECT u.id, u.telegram_user_id, u.role, u.display_name, u.created_at,
+                   (SELECT COUNT(*) FROM documents d WHERE d.user_id = u.id) AS documents,
+                   (SELECT COUNT(*) FROM lab_results l WHERE l.user_id = u.id) AS lab_results,
+                   (SELECT COUNT(*) FROM doctor_reports r WHERE r.user_id = u.id) AS reports
+            FROM users u ORDER BY u.id
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def create(
+        self, telegram_user_id: int, display_name: str | None = None, role: str = "user",
+    ) -> int:
+        """Создание пользователя админом. IntegrityError по UNIQUE ловит вызывающий."""
+        if role not in self.ROLES:
+            raise ValueError(f"Недопустимая роль: {role}")
+        cur = self.conn.execute(
+            "INSERT INTO users(telegram_user_id, display_name, role) VALUES (?, ?, ?)",
+            (telegram_user_id, display_name, role),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def set_role(self, user_id: int, role: str) -> None:
+        # CHECK в мигрированных БД отсутствует — инвариант держим здесь.
+        if role not in self.ROLES:
+            raise ValueError(f"Недопустимая роль: {role}")
+        self.conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+        self.conn.commit()
+
+    def set_display_name(self, user_id: int, display_name: str | None) -> None:
+        self.conn.execute(
+            "UPDATE users SET display_name = ? WHERE id = ?", (display_name, user_id)
+        )
+        self.conn.commit()
+
+    def admin_count(self) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) AS c FROM users WHERE role = 'admin'"
+        ).fetchone()["c"]
+
+    def delete_cascade(self, user_id: int) -> list[str]:
+        """Удаляет пользователя со всеми данными; возвращает source_path документов —
+        файлы-исходники удаляет вызывающий (доступ к хранилищу — забота API-слоя)."""
+        paths = [
+            r["source_path"]
+            for r in self.conn.execute(
+                "SELECT source_path FROM documents WHERE user_id = ?", (user_id,)
+            ).fetchall()
+        ]
+        with transaction(self.conn):
+            for table in (
+                "lab_results", "doctor_reports", "documents",
+                "health_metrics", "health_activities", "health_accounts",
+                "patient_profile", "patient_complaints", "patient_medications",
+            ):
+                self.conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
+            self.conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        return paths
 
 
 class DocumentRepo(BaseRepo):
@@ -153,6 +241,23 @@ class DocumentRepo(BaseRepo):
         self.conn.execute(
             "UPDATE documents SET raw_extraction = ? WHERE id = ? AND user_id = ?",
             (payload, document_id, self.user_id),
+        )
+        self.conn.commit()
+
+    def mark_verified(self, document_id: int) -> bool:
+        """Пользователь подтвердил корректность распознанных данных."""
+        cur = self.conn.execute(
+            "UPDATE documents SET verified_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+            (document_id, self.user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def clear_verified(self, document_id: int) -> None:
+        """Сброс отметки после любой правки данных — подтверждение относилось к старой версии."""
+        self.conn.execute(
+            "UPDATE documents SET verified_at = NULL WHERE id = ? AND user_id = ?",
+            (document_id, self.user_id),
         )
         self.conn.commit()
 
@@ -465,9 +570,10 @@ class LabRepo(BaseRepo):
         # Карточка документа показывает ВСЕ строки панели в порядке документа.
         # Дефолтного LIMIT нет: панель ОАК+СРБ (21 строка) обрезалась на LIMIT 20.
         # ORDER BY id ASC сохраняет порядок вставки (= порядок в документе).
+        # id нужен форме верификации в кабинете — правка/удаление конкретной строки.
         sql = (
-            "SELECT analyte_name, value_num, value_text, unit, "
-            "ref_low, ref_high, ref_operator, ref_text, "
+            "SELECT id, analyte_name, value_num, value_text, unit, "
+            "ref_low, ref_high, ref_operator, ref_text, taken_at, "
             "analyte_canonical, loinc, nmu_code, analyte_group, "
             "match_status, unit_expected, unit_mismatch "
             "FROM lab_results WHERE document_id = ? AND user_id = ? ORDER BY id ASC"
@@ -478,6 +584,58 @@ class LabRepo(BaseRepo):
             params = (document_id, self.user_id, limit)
         rows = self.conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
+
+    # --- строчный CRUD (верификация распознанного и админка) ---
+
+    # Колонки, редактируемые через форму. Служебные (id, user_id, document_id,
+    # created_at) и трассировочные *_raw намеренно вне списка.
+    EDITABLE_COLUMNS = frozenset({
+        "analyte_name", "value_num", "value_text", "unit",
+        "ref_low", "ref_high", "ref_operator", "ref_text",
+        "taken_at", "analyte_canonical", "analyte_group", "match_status",
+    })
+
+    def get_row(self, lab_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM lab_results WHERE id = ? AND user_id = ?",
+            (lab_id, self.user_id),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_row(self, lab_id: int, fields: dict) -> bool:
+        """Частичное обновление строки; False — строка не найдена/чужая."""
+        cols = {k: v for k, v in fields.items() if k in self.EDITABLE_COLUMNS}
+        if not cols:
+            return False
+        assignments = ", ".join(f"{c} = ?" for c in cols)
+        cur = self.conn.execute(
+            f"UPDATE lab_results SET {assignments} WHERE id = ? AND user_id = ?",
+            (*cols.values(), lab_id, self.user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def delete_row(self, lab_id: int) -> bool:
+        cur = self.conn.execute(
+            "DELETE FROM lab_results WHERE id = ? AND user_id = ?",
+            (lab_id, self.user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def insert_manual(self, document_id: int, fields: dict) -> int:
+        """Ручное добавление показателя к документу (форма верификации/админка)."""
+        cols = {k: v for k, v in fields.items() if k in self.EDITABLE_COLUMNS}
+        cols.setdefault("match_status", "manual")
+        names = ", ".join(cols)
+        marks = ", ".join("?" for _ in cols)
+        cur = self.conn.execute(
+            f"INSERT INTO lab_results(document_id, user_id, {names}) "
+            f"VALUES (?, ?, {marks})",
+            (document_id, self.user_id, *cols.values()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
 
     def dynamics(self, analyte_name: str, limit: int = 30) -> list[dict]:
         """Серия точек одного показателя по времени (свежие, хронологический порядок).
@@ -558,12 +716,31 @@ class ReportRepo(BaseRepo):
 
     def for_document(self, document_id: int) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT diagnosis, recommendations_json, complaints_json, "
-            "medications_json, doctor_name, department "
+            "SELECT id, diagnosis, recommendations_json, complaints_json, "
+            "medications_json, doctor_name, department, visit_date "
             "FROM doctor_reports WHERE document_id = ? AND user_id = ?",
             (document_id, self.user_id),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # Колонки, редактируемые формой верификации. JSON-списки сериализует API-слой.
+    EDITABLE_COLUMNS = frozenset({
+        "diagnosis", "recommendations_json", "complaints_json",
+        "medications_json", "doctor_name", "department", "visit_date",
+    })
+
+    def update_row(self, report_id: int, fields: dict) -> bool:
+        """Частичное обновление заключения; False — не найдено/чужое."""
+        cols = {k: v for k, v in fields.items() if k in self.EDITABLE_COLUMNS}
+        if not cols:
+            return False
+        assignments = ", ".join(f"{c} = ?" for c in cols)
+        cur = self.conn.execute(
+            f"UPDATE doctor_reports SET {assignments} WHERE id = ? AND user_id = ?",
+            (*cols.values(), report_id, self.user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
 
     def distinct_doctors(self) -> list[dict]:
         """Уникальные врачи с отделением — для селектора фильтра."""
@@ -614,6 +791,106 @@ class ReportRepo(BaseRepo):
         return [dict(r) for r in rows], total
 
 
+class PatientRepo(BaseRepo):
+    """Формы пациента: профиль тела (1:1), жалобы и текущие препараты (история)."""
+
+    table = "patient_profile"
+
+    PROFILE_COLUMNS = frozenset({
+        "sex", "birth_date", "height_cm", "weight_kg",
+        "blood_type", "allergies", "chronic_conditions",
+        "latitude", "longitude",
+    })
+
+    # --- профиль тела ---
+
+    def get_profile(self) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM patient_profile WHERE user_id = ?", (self.user_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_profile(self, fields: dict) -> dict:
+        """Частичное обновление: непереданные поля не трогаются."""
+        cols = {k: v for k, v in fields.items() if k in self.PROFILE_COLUMNS}
+        if cols:
+            names = ", ".join(cols)
+            marks = ", ".join("?" for _ in cols)
+            updates = ", ".join(f"{c} = excluded.{c}" for c in cols)
+            self.conn.execute(
+                f"INSERT INTO patient_profile(user_id, {names}) VALUES (?, {marks}) "
+                f"ON CONFLICT(user_id) DO UPDATE SET {updates}, "
+                "updated_at = CURRENT_TIMESTAMP",
+                (self.user_id, *cols.values()),
+            )
+            self.conn.commit()
+        return self.get_profile() or {"user_id": self.user_id}
+
+    # --- жалобы ---
+
+    def list_complaints(self, limit: int = 20) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, text, created_at FROM patient_complaints "
+            "WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+            (self.user_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_complaint(self, text: str) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO patient_complaints(user_id, text) VALUES (?, ?)",
+            (self.user_id, text),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def delete_complaint(self, complaint_id: int) -> bool:
+        cur = self.conn.execute(
+            "DELETE FROM patient_complaints WHERE id = ? AND user_id = ?",
+            (complaint_id, self.user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    # --- текущие препараты ---
+
+    def list_medications(self, active_only: bool = False) -> list[dict]:
+        sql = (
+            "SELECT id, name, dosage, schedule, is_active, created_at "
+            "FROM patient_medications WHERE user_id = ?"
+        )
+        if active_only:
+            sql += " AND is_active = 1"
+        sql += " ORDER BY is_active DESC, created_at DESC, id DESC"
+        rows = self.conn.execute(sql, (self.user_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_medication(self, name: str, dosage: str | None, schedule: str | None) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO patient_medications(user_id, name, dosage, schedule) "
+            "VALUES (?, ?, ?, ?)",
+            (self.user_id, name, dosage, schedule),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def set_medication_active(self, med_id: int, is_active: bool) -> bool:
+        cur = self.conn.execute(
+            "UPDATE patient_medications SET is_active = ? WHERE id = ? AND user_id = ?",
+            (1 if is_active else 0, med_id, self.user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def delete_medication(self, med_id: int) -> bool:
+        cur = self.conn.execute(
+            "DELETE FROM patient_medications WHERE id = ? AND user_id = ?",
+            (med_id, self.user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+
 class HealthRepo(BaseRepo):
     """Подключённые источники здоровья, time-series метрик и активности."""
 
@@ -650,9 +927,35 @@ class HealthRepo(BaseRepo):
 
     def list_accounts(self) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT provider, identifier, status, last_error, last_sync_at, created_at "
+            "SELECT provider, identifier, status, last_error, last_sync_at, "
+            "sync_interval_hours, created_at "
             "FROM health_accounts WHERE user_id = ? ORDER BY provider",
             (self.user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def set_sync_interval(self, provider: str, hours: int | None) -> bool:
+        """Частота автосинка; None = только вручную."""
+        cur = self.conn.execute(
+            "UPDATE health_accounts SET sync_interval_hours = ? "
+            "WHERE user_id = ? AND provider = ?",
+            (hours, self.user_id, provider),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    @staticmethod
+    def accounts_due_for_sync(conn) -> list[dict]:
+        """Аккаунты, чей интервал автосинка истёк (для планировщика; все пользователи).
+
+        Сравнение на стороне SQLite: last_sync_at хранится в UTC (CURRENT_TIMESTAMP),
+        поэтому и сравниваем с datetime('now'). NULL last_sync_at = ни разу не синкали — пора."""
+        rows = conn.execute(
+            "SELECT user_id, provider FROM health_accounts "
+            "WHERE status = 'connected' AND sync_interval_hours IS NOT NULL "
+            "AND (last_sync_at IS NULL OR "
+            "     datetime(last_sync_at, '+' || sync_interval_hours || ' hours') "
+            "       <= datetime('now'))"
         ).fetchall()
         return [dict(r) for r in rows]
 

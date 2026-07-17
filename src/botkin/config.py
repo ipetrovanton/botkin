@@ -78,6 +78,15 @@ _DEFAULTS: dict = {
     "bot": {
         "api_url": "http://localhost:8000",
     },
+    "storage": {
+        # local — файлы на диске (по умолчанию); minio — S3-хранилище с версиями.
+        "backend": "local",
+        "minio": {
+            "endpoint": "localhost:9000",
+            "bucket": "botkin-documents",
+            "secure": False,
+        },
+    },
     "upload": {
         "max_bytes": 20 * 1024 * 1024,
         "allowed_extensions": [".pdf", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"],
@@ -117,10 +126,24 @@ _DEFAULTS: dict = {
             ],
         },
     },
+    "auth": {
+        # telegram_user_id, которым при первом входе присваивается роль admin.
+        # Демо-уровень: идентификация остаётся по заголовку, ролью управляет БД.
+        "admin_telegram_ids": [],
+    },
     "health": {
         "tokens_dir": "./data/health_tokens",
         "sync_days": 30,
         "request_pause": 0.5,
+    },
+    "external": {
+        # Координаты по умолчанию для погоды (Москва).
+        # Пользователь может переопределить через профиль.
+        "default_latitude": 55.7558,
+        "default_longitude": 37.6173,
+        "weather_enabled": True,
+        "geomagnetic_enabled": True,
+        "astrology_enabled": False,
     },
 }
 
@@ -302,6 +325,22 @@ BOT_PROGRESS_TIMEOUT = float(os.getenv("BOT_PROGRESS_TIMEOUT", str(30 + 3 * VLM_
 # telegram_user_id. ТОЛЬКО для локального запуска/дебага; в проде не задавать.
 WEB_DEBUG_USER_ID = int(os.getenv("WEB_DEBUG_USER_ID", "0") or 0)
 
+# Бутстрап ролей: перечисленные telegram_user_id получают роль admin при первом
+# обращении (get_or_create). Дальше ролями управляет админ через /api/admin/users.
+_admin_ids_env = os.getenv("ADMIN_TELEGRAM_IDS", "")
+ADMIN_TELEGRAM_IDS: frozenset[int] = frozenset(
+    int(x) for x in _admin_ids_env.split(",") if x.strip().isdigit()
+) or frozenset(int(x) for x in _get("auth.admin_telegram_ids"))
+
+# Хранилище оригиналов документов: local (диск) или minio (S3 с версионированием).
+# Секреты MinIO — только из env (не хранить ключи в config.json под git).
+STORAGE_BACKEND = setting("storage.backend", "STORAGE_BACKEND", str)
+MINIO_ENDPOINT = setting("storage.minio.endpoint", "MINIO_ENDPOINT", str)
+MINIO_BUCKET = setting("storage.minio.bucket", "MINIO_BUCKET", str)
+MINIO_SECURE = _as_bool(setting("storage.minio.secure", "MINIO_SECURE", str))
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+
 # Загрузка файлов
 UPLOAD_MAX_BYTES = setting("upload.max_bytes", "UPLOAD_MAX_BYTES", int)
 UPLOAD_ALLOWED_EXTENSIONS: set[str] = set(_get("upload.allowed_extensions"))
@@ -336,3 +375,11 @@ HEALTH_REQUEST_PAUSE = setting("health.request_pause", "HEALTH_REQUEST_PAUSE", f
 # Strava OAuth (опционально): без client_id/secret подключение Strava отключено.
 STRAVA_CLIENT_ID = os.getenv("STRAVA_CLIENT_ID", "")
 STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET", "")
+
+# Внешние данные для рекомендаций: погода (Open-Meteo), геомагнитная активность
+# (NOAA SWPC), астрология (развлекательный модуль, по умолчанию выключен).
+EXT_DEFAULT_LAT = setting("external.default_latitude", "EXT_DEFAULT_LAT", float)
+EXT_DEFAULT_LON = setting("external.default_longitude", "EXT_DEFAULT_LON", float)
+EXT_WEATHER_ENABLED = setting("external.weather_enabled", "EXT_WEATHER_ENABLED", _as_bool)
+EXT_GEOMAGNETIC_ENABLED = setting("external.geomagnetic_enabled", "EXT_GEOMAGNETIC_ENABLED", _as_bool)
+EXT_ASTROLOGY_ENABLED = setting("external.astrology_enabled", "EXT_ASTROLOGY_ENABLED", _as_bool)
