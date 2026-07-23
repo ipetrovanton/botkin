@@ -20,6 +20,9 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         # CHECK через ALTER в SQLite не добавить — инвариант ролей держит UserRepo.
         "role": "TEXT NOT NULL DEFAULT 'user'",
         "display_name": "TEXT",
+        # Веб-регистрация: email + пароль (пилот без подтверждения почты).
+        "email": "TEXT",
+        "password_hash": "TEXT",
     },
     "documents": {
         "file_sha256": "TEXT",
@@ -64,6 +67,43 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
 def _drop_prescriptions(conn: sqlite3.Connection) -> None:
     """Тип prescription снят с поддержки — удаляем таблицу из старых БД."""
     conn.execute("DROP TABLE IF EXISTS prescriptions")
+    conn.commit()
+
+
+def _migrate_users_schema(conn: sqlite3.Connection) -> None:
+    """Пересоздаёт users, если telegram_user_id ещё NOT NULL — нужно для веб-регистрации
+    без Telegram. Также переносит UNIQUE-индексы и добавляет sessions-таблицу.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+    ).fetchone()
+    if not row:
+        return
+    sql = row["sql"] or ""
+    # NOT NULL UNIQUE на telegram_user_id — признак старой схемы.
+    if "telegram_user_id INTEGER NOT NULL UNIQUE" not in sql:
+        return  # уже мигрировано или свежая схема
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("ALTER TABLE users RENAME TO _users_old")
+    conn.executescript("""
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_user_id INTEGER UNIQUE,
+            email TEXT UNIQUE,
+            password_hash TEXT,
+            role TEXT NOT NULL DEFAULT 'user',
+            display_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # Переносим все колонки, которые существуют в старой таблице.
+    old_cols = {r["name"] for r in conn.execute("PRAGMA table_info(_users_old)").fetchall()}
+    new_cols = ["id", "telegram_user_id", "role", "display_name", "created_at"]
+    shared = ", ".join(c for c in new_cols if c in old_cols)
+    conn.execute(f"INSERT INTO users ({shared}) SELECT {shared} FROM _users_old")
+    conn.execute("DROP TABLE _users_old")
+    conn.execute("PRAGMA foreign_keys=ON")
     conn.commit()
 
 
@@ -156,6 +196,7 @@ def init_db() -> None:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         conn.commit()
         _apply_migrations(conn)
+        _migrate_users_schema(conn)
         _migrate_documents_schema(conn)
         _migrate_rag_chunks_schema(conn)
         _drop_prescriptions(conn)

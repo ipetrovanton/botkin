@@ -50,9 +50,11 @@ function cabinet() {
     screen: "overview",
     theme: localStorage.getItem("botkin.theme") || "dark",
 
-    // Идентификация (demo): сохраняем между сессиями, дефолт — demo-аккаунт.
-    tgUserId: localStorage.getItem("botkin.tgUserId") || "113521070",
-    demoUserId: localStorage.getItem("botkin.tgUserId") || "113521070",
+    // Аутентификация
+    isAuthed: false,
+    authMode: "login",
+    authForm: { email: "", password: "", display_name: "" },
+    authBusy: false,
     user: null,
 
     // Данные
@@ -145,8 +147,16 @@ function cabinet() {
     // ===== Инициализация =====
     async init() {
       document.documentElement.setAttribute("data-theme", this.theme);
-      // Подгрузим всё параллельно — кабинету нужны и сводка, и селекторы фильтров.
+      // Проверяем сессию: cookie отправляется автоматически.
+      try {
+        this.user = await this.api("/api/auth/me", { headers: {} });
+        this.isAuthed = true;
+      } catch (e) {
+        this.isAuthed = false;
+        return;
+      }
       await Promise.all([this.loadStats(), this.loadSelectors()]);
+      this.loadExternal();
       // Закрытие подсказок анализов по клику вне.
       document.addEventListener("click", (e) => {
         if (!e.target.closest(".analyte-picker")) this.analyteFocused = false;
@@ -155,8 +165,8 @@ function cabinet() {
 
     // ===== API-клиент =====
     async api(path, opts = {}) {
-      const headers = { "X-Telegram-User-Id": this.tgUserId, ...(opts.headers || {}) };
-      const res = await fetch(path, { ...opts, headers });
+      const headers = { ...(opts.headers || {}) };
+      const res = await fetch(path, { ...opts, headers, credentials: "same-origin" });
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => "")}`);
       const ct = res.headers.get("content-type") || "";
@@ -263,7 +273,7 @@ function cabinet() {
       form.append("file", file);
       try {
         const res = await fetch(`/api/documents/${doc.id}/replace`, {
-          method: "POST", headers: { "X-Telegram-User-Id": this.tgUserId }, body: form,
+          method: "POST", body: form, credentials: "same-origin",
         });
         if (res.status === 409) {
           this.toast((await res.json())?.detail || "Замена отклонена", "error");
@@ -296,7 +306,7 @@ function cabinet() {
       if (!id) return;
       try {
         const res = await fetch(`/api/documents/${id}/source`, {
-          headers: { "X-Telegram-User-Id": this.tgUserId },
+          credentials: "same-origin",
         });
         if (!res.ok) throw new Error(String(res.status));
         const url = URL.createObjectURL(await res.blob());
@@ -305,19 +315,50 @@ function cabinet() {
       } catch (e) { this.toast("Оригинал недоступен", "error"); console.error(e); }
     },
 
-    // ===== Идентификация =====
-    setDemoUser() {
-      const v = String(this.demoUserId || "").trim();
-      if (!v) { this.toast("Введите идентификатор", "error"); return; }
-      this.tgUserId = v;
-      localStorage.setItem("botkin.tgUserId", v);
-      this.toast("Идентификатор применён", "success");
-      this.loadSelectors();
-      this.go("overview");
+    // ===== Аутентификация =====
+    toggleAuthMode() {
+      this.authMode = this.authMode === "login" ? "register" : "login";
+      this.authForm.password = "";
     },
-    useDemoUser() {
-      this.demoUserId = "113521070";
-      this.setDemoUser();
+    async submitAuth() {
+      this.authBusy = true;
+      const endpoint = this.authMode === "login" ? "/api/auth/login" : "/api/auth/register";
+      const body = this.authMode === "login"
+        ? { email: this.authForm.email, password: this.authForm.password }
+        : { email: this.authForm.email, password: this.authForm.password, display_name: this.authForm.display_name || null };
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          credentials: "same-origin",
+        });
+        if (!res.ok) {
+          const detail = (await res.json().catch(() => ({})))?.detail || `Ошибка ${res.status}`;
+          this.toast(detail, "error");
+          return;
+        }
+        this.user = await this.api("/api/auth/me", { headers: {} });
+        this.isAuthed = true;
+        this.authForm = { email: "", password: "", display_name: "" };
+        await Promise.all([this.loadStats(), this.loadSelectors()]);
+        this.loadExternal();
+        this.go("overview");
+        this.toast(this.authMode === "login" ? "Вход выполнен" : "Аккаунт создан", "success");
+      } catch (e) {
+        this.toast("Ошибка сети", "error"); console.error(e);
+      } finally {
+        this.authBusy = false;
+      }
+    },
+    async logout() {
+      try {
+        await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+      } catch (e) { /* ignored */ }
+      this.isAuthed = false;
+      this.user = null;
+      this.screen = "overview";
+      this.authMode = "login";
     },
 
     // ===== Загрузка данных =====
@@ -935,8 +976,8 @@ function cabinet() {
         fd.append("file", file);
         const res = await fetch("/upload", {
           method: "POST",
-          headers: { "X-Telegram-User-Id": this.tgUserId },
           body: fd,
+          credentials: "same-origin",
         });
         if (!res.ok) throw new Error(`upload ${res.status}`);
         const data = await res.json();
@@ -1141,7 +1182,7 @@ function cabinet() {
       this.toast("Импорт экспорта Apple Health…", "info");
       try {
         const res = await fetch("/api/health/apple/import", {
-          method: "POST", headers: { "X-Telegram-User-Id": this.tgUserId }, body: fd,
+          method: "POST", body: fd, credentials: "same-origin",
         });
         if (!res.ok) throw new Error(`import ${res.status}`);
         const data = await res.json();

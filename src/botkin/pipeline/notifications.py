@@ -24,6 +24,8 @@ def _shared_bot(token: str) -> Bot:
 
 async def notify_user(telegram_user_id: int, text: str) -> None:
     """Отправляет сообщение пользователю в Telegram."""
+    if not telegram_user_id:
+        return  # веб-пользователь без Telegram-аккаунта — уведомлять некуда
     token = os.getenv("TG_BOT_TOKEN")
     if not token:
         log.error("TG_BOT_TOKEN is not set, cannot send notification")

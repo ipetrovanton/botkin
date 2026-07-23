@@ -18,7 +18,7 @@
 <body>
 
   <!-- Шапка с брендом и ECG-анимацией -->
-  <header class="app-header">
+  <header class="app-header" x-show="isAuthed" x-cloak>
     <div class="brand" @click="go('overview')">
       <!-- Логотип «значение в коридоре нормы»: пунктирные границы референса,
            кривая динамики и точка-показатель внутри коридора. -->
@@ -54,8 +54,47 @@
     </div>
   </header>
 
-  <!-- Основной контент -->
-  <main class="app-main">
+  <!-- Экран авторизации -->
+  <section x-show="!isAuthed" x-cloak class="screen" style="max-width:420px;margin:60px auto;padding:0 16px">
+    <div class="brand" style="justify-content:center;margin-bottom:24px">
+      <span class="brand-logo" aria-hidden="true">
+        <svg viewBox="0 0 40 40" width="48" height="48">
+          <defs>
+            <linearGradient id="bk-login-logo" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#0FA593"/>
+              <stop offset="1" stop-color="#22D3EE"/>
+            </linearGradient>
+          </defs>
+          <rect width="40" height="40" rx="10" fill="url(#bk-login-logo)"/>
+          <path d="M8 14.5h24M8 25.5h24" stroke="#fff" stroke-width="1.1" stroke-dasharray="2.4 3.2" opacity=".5"/>
+          <path d="M6.5 27.5c5 0 6.5-9 12.5-9s8.5 5.5 14.5-1.5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+          <circle cx="19" cy="18.5" r="3.1" fill="#fff"/>
+        </svg>
+      </span>
+      <span class="brand-name" style="font-size:28px">BOT<span class="brand-accent">kin</span></span>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2 class="panel-title" x-text="authMode === 'login' ? 'Вход' : 'Регистрация'"></h2></div>
+      <form @submit.prevent="submitAuth()">
+        <div style="margin-bottom:12px">
+          <input type="email" x-model="authForm.email" placeholder="Email" class="filter-input" required style="width:100%">
+        </div>
+        <div x-show="authMode === 'register'" style="margin-bottom:12px">
+          <input type="text" x-model="authForm.display_name" placeholder="Имя (необязательно)" class="filter-input" style="width:100%">
+        </div>
+        <div style="margin-bottom:16px">
+          <input type="password" x-model="authForm.password" placeholder="Пароль" class="filter-input" required style="width:100%" :minlength="authMode === 'register' ? 6 : 1">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%" :disabled="authBusy" x-text="authBusy ? '...' : (authMode === 'login' ? 'Войти' : 'Создать аккаунт')"></button>
+      </form>
+      <button class="btn btn-ghost" style="width:100%;margin-top:8px" @click="toggleAuthMode()"
+              x-text="authMode === 'login' ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'"></button>
+    </div>
+  </section>
+
+  <!-- Основной контент (только после авторизации) -->
+  <main class="app-main" x-show="isAuthed" x-cloak>
 
     <!-- ====== ОБЗОР ====== -->
     <section x-show="screen==='overview'" class="screen">
@@ -1052,20 +1091,23 @@
       </div>
 
       <div class="panel">
-        <div class="panel-head"><h2 class="panel-title">Идентификация (demo)</h2></div>
-        <p class="muted" style="margin-bottom:12px;font-size:13px">На этапе разработки кабинет привязывается к идентификатору пользователя. Введите значение или используйте демонстрационный аккаунт.</p>
-        <div class="filter-row">
-          <input type="text" x-model="demoUserId" placeholder="X-Telegram-User-Id" class="filter-input">
-          <button class="btn btn-primary" @click="setDemoUser()">Применить</button>
+        <div class="panel-head"><h2 class="panel-title">Аккаунт</h2></div>
+        <div class="admin-user-row">
+          <div class="admin-user-main">
+            <span class="admin-user-name" x-text="user?.email || 'Telegram #' + (user?.telegram_user_id || '')"></span>
+            <span class="admin-user-meta" x-text="user?.display_name || ''"></span>
+          </div>
+          <div class="admin-user-actions">
+            <button class="btn btn-ghost btn-danger" @click="logout()">Выйти</button>
+          </div>
         </div>
-        <button class="btn btn-ghost" style="margin-top:10px;width:100%" @click="useDemoUser()">Использовать demo (113521070)</button>
       </div>
     </section>
 
   </main>
 
   <!-- Нижняя навигация (mobile-first) -->
-  <nav class="bottom-nav">
+  <nav class="bottom-nav" x-show="isAuthed" x-cloak>
     <button class="nav-item" :class="{active: screen==='overview'}" @click="go('overview')">
       <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span>Обзор</span>

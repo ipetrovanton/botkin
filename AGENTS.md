@@ -57,19 +57,20 @@ uv run uvicorn botkin.api.app:app --host 0.0.0.0 --port 8000
 start http://localhost:8000
 ```
 
-Кабинет — SPA на Alpine.js (заендорено локально, без CDN/сборщика). Идентификация на demo-этапе
-— через `X-Telegram-User-Id`: на экране «Профиль» введите идентификатор или нажмите
-«Использовать demo (113521070)» (под этим пользователем в `data/botkin.db` есть реальные данные:
-32 документа, 276 показателей, 9 заключений). Значение сохраняется в `localStorage`.
+Кабинет — SPA на Alpine.js (заендорено локально, без CDN/сборщика). Аутентификация —
+регистрация/вход по email + паролю (пилот, без подтверждения почты). Сессия — HttpOnly
+cookie `botkin_session` на 30 дней. Telegram-бот продолжает использовать заголовок
+`X-Telegram-User-Id` — приоритет: cookie → заголовок → `WEB_DEBUG_USER_ID`.
 
 Экраны: Обзор (дашборд), Документы (фильтры: тип/клиника/врач/даты/статус/поиск + пагинация),
 Загрузка (drag&drop + поллинг прогресса по стадиям), Аналитика (SVG-график динамики с коридором
 нормы), Заключения (лента с фильтрами), детальная карточка документа. Тёмная тема по умолчанию,
 переключатель в шапке. Mobile-first: нижняя навигация, `safe-area-inset` под notch.
 
+Auth API: `/api/auth/register`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`.
 API кабинета: `/api/me`, `/api/documents`, `/api/documents/{id}`, `/api/documents/{id}/status`,
 `/api/analytes`, `/api/clinics`, `/api/doctors`, `/api/dynamics?name=`, `/api/labs/period`,
-`/api/reports`, `/api/stats`. Все требуют заголовок `X-Telegram-User-Id`.
+`/api/reports`, `/api/stats`. Требуют cookie сессии или заголовок `X-Telegram-User-Id`.
 
 ---
 

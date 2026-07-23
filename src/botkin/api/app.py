@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from botkin.db.connection import init_db
-from botkin.api.routes import admin, analytics, directory, documents, external, health_sync, patient, rag, upload
+from botkin.api.routes import admin, analytics, auth, directory, documents, external, health_sync, patient, rag, upload
 from botkin.llm.client import warmup
 from botkin.log_config import setup_logging
 
@@ -31,6 +31,7 @@ app = FastAPI(title="botkin API", version="0.2.0", lifespan=lifespan)
 
 # API-роуты регистрируются ДО монтирования статики — Starlette проверяет маршруты
 # по порядку, поэтому /api/*, /upload и /health перехватываются раньше catch-all '/'.
+app.include_router(auth.router)
 app.include_router(upload.router)
 app.include_router(documents.router)
 app.include_router(analytics.router)

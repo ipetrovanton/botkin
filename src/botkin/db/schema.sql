@@ -8,7 +8,11 @@ PRAGMA busy_timeout = 5000;
 
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    telegram_user_id INTEGER NOT NULL UNIQUE,
+    -- Telegram-бот создаёт пользователей с telegram_user_id; веб-регистрация — с email.
+    -- Один из двух идентификаторов обязан быть не-NULL (инвариант в UserRepo).
+    telegram_user_id INTEGER UNIQUE,
+    email TEXT UNIQUE,
+    password_hash TEXT,
     -- ролевая модель демо-уровня: admin управляет пользователями и их данными.
     -- CHECK только для свежих БД: в мигрированных колонка добавляется через ALTER без CHECK,
     -- инвариант поддерживает UserRepo.
@@ -16,6 +20,18 @@ CREATE TABLE IF NOT EXISTS users (
     display_name TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Сессии веб-кабинета: token_hash хранится как SHA-256 от session_token,
+-- сам token отдаётся клиенту в HttpOnly cookie и не сохранится в БД.
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
 -- ============ DOCUMENTS ============
 

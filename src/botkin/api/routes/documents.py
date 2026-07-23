@@ -10,10 +10,10 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from ..deps import get_telegram_user_id, get_user_id
+from ..deps import get_user_id
 from botkin.config import UPLOAD_ALLOWED_EXTENSIONS, UPLOAD_MAX_BYTES
 from botkin.db.connection import get_conn
-from botkin.db.repos import DocumentRepo, LabRepo, ReportRepo
+from botkin.db.repos import DocumentRepo, LabRepo, ReportRepo, UserRepo
 from botkin.pipeline.orchestrator import process_document
 from botkin.pipeline.progress_model import StageDurationStore, estimate_progress
 from botkin.preprocess.formats import resolve_extension
@@ -23,6 +23,12 @@ router = APIRouter(prefix="/api", tags=["cabinet"])
 
 # iPhone-фото: стандартный mimetypes может не знать HEIC/HEIF.
 _EXTRA_MEDIA_TYPES = {".heic": "image/heic", ".heif": "image/heif"}
+
+
+def _get_telegram_id(conn, user_id: int) -> int:
+    """telegram_user_id пользователя для уведомлений; 0 если нет Telegram-аккаунта."""
+    row = UserRepo(conn).get(user_id)
+    return row.get("telegram_user_id") or 0 if row else 0
 
 
 def _loads_list(raw: str | None) -> list[str]:
@@ -285,7 +291,6 @@ async def replace_document_source(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     user_id: int = Depends(get_user_id),
-    telegram_user_id: int = Depends(get_telegram_user_id),
 ) -> dict:
     """Замена файла-исходника новой версией (переснятый бланк) + перераспознавание.
 
@@ -318,7 +323,8 @@ async def replace_document_source(
         # Новое содержимое — новое распознавание: старые данные относятся к старой версии.
         repo.clear_extracted_data(document_id)
         repo.clear_verified(document_id)
-    background_tasks.add_task(process_document, document_id, telegram_user_id)
+        tg_id = _get_telegram_id(conn, user_id)
+    background_tasks.add_task(process_document, document_id, tg_id)
     return {"document_id": document_id, "status": "received", "file_sha256": new_sha}
 
 
@@ -358,7 +364,6 @@ def reparse_document(
     document_id: int,
     background_tasks: BackgroundTasks,
     user_id: int = Depends(get_user_id),
-    telegram_user_id: int = Depends(get_telegram_user_id),
 ) -> dict:
     """Повторное распознавание: очистка извлечённых данных + перезапуск pipeline.
 
@@ -377,5 +382,6 @@ def reparse_document(
                 detail="Файл-исходник утрачен — повторное распознавание невозможно",
             )
         repo.clear_extracted_data(document_id)
-    background_tasks.add_task(process_document, document_id, telegram_user_id)
+        tg_id = _get_telegram_id(conn, user_id)
+    background_tasks.add_task(process_document, document_id, tg_id)
     return {"document_id": document_id, "status": "received"}

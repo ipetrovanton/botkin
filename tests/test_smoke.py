@@ -56,7 +56,7 @@ def test_db_init(set_test_db):
     expected = {"users", "documents", "lab_results", "doctor_reports"}
     assert expected.issubset(tables), f"Missing tables: {expected - tables}"
 
-    forbidden = {"patients", "invites", "sessions", "tenants", "prescriptions"}
+    forbidden = {"patients", "invites", "tenants", "prescriptions"}
     found_forbidden = forbidden & tables
     assert not found_forbidden, f"Found old tables: {found_forbidden}"
 
