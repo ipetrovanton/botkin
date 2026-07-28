@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+from functools import lru_cache
 from pathlib import Path
 
 from botkin.config import (
@@ -33,26 +34,17 @@ log = logging.getLogger("botkin.pipeline")
 
 LLM_SEMAPHORE = asyncio.Semaphore(1)
 
-_DRUG_NORMALIZER: DrugNormalizer | None = None
 
-
+@lru_cache(maxsize=1)
 def get_drug_normalizer() -> DrugNormalizer:
     """Ленивый синглтон: справочник лекарств читается из registry.jsonl один раз."""
-    global _DRUG_NORMALIZER
-    if _DRUG_NORMALIZER is None:
-        _DRUG_NORMALIZER = load_default()
-    return _DRUG_NORMALIZER
+    return load_default()
 
 
-_ANALYTE_NORMALIZER: AnalyteNormalizer | None = None
-
-
+@lru_cache(maxsize=1)
 def get_analyte_normalizer() -> AnalyteNormalizer:
     """Ленивый синглтон: справочник анализов ФСЛИ читается из registry.jsonl один раз."""
-    global _ANALYTE_NORMALIZER
-    if _ANALYTE_NORMALIZER is None:
-        _ANALYTE_NORMALIZER = load_analytes()
-    return _ANALYTE_NORMALIZER
+    return load_analytes()
 
 
 async def process_document(document_id: int, telegram_user_id: int) -> None:

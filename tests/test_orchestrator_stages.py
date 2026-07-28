@@ -32,7 +32,7 @@ def test_title_generalized_by_group(set_test_db, monkeypatch):
         {"name": "Глюкоза", "synonyms": [], "units": ["ммоль/л"],
          "group": "Биохимические исследования"},
     ])
-    monkeypatch.setattr(orchestrator, "_ANALYTE_NORMALIZER", fake)
+    monkeypatch.setattr(orchestrator, "get_analyte_normalizer", lambda: fake)
     uid, did = _make_doc()
     with patch.object(orchestrator.classify, "run_vlm",
                       return_value=ClassifyResult(doc_type="analysis", confidence=0.9,

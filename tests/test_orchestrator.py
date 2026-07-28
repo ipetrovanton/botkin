@@ -59,7 +59,7 @@ def test_persist_lab_normalizes_and_checks_unit(set_test_db, monkeypatch):
         {"name": "Глюкоза", "synonyms": ["GLU", "Glucose"], "units": ["ммоль/л"],
          "group": "Биохимические исследования"},
     ])
-    monkeypatch.setattr(orchestrator, "_ANALYTE_NORMALIZER", fake)
+    monkeypatch.setattr(orchestrator, "get_analyte_normalizer", lambda: fake)
 
     with get_conn() as conn:
         uid = UserRepo(conn).get_or_create(9100)
@@ -103,7 +103,7 @@ def test_persist_lab_overrides_cbc_group(set_test_db, monkeypatch):
         {"name": "Лейкоциты", "units": ["10^9/л"], "group": "Химико-микроскопические исследования"},
         {"name": "Тромбоциты", "units": ["10^9/л"], "group": "Гематологические исследования"},
     ])
-    monkeypatch.setattr(orchestrator, "_ANALYTE_NORMALIZER", fake)
+    monkeypatch.setattr(orchestrator, "get_analyte_normalizer", lambda: fake)
 
     with get_conn() as conn:
         uid = UserRepo(conn).get_or_create(9200)
@@ -158,7 +158,7 @@ def test_persist_lab_is_atomic_on_midway_failure(set_test_db, monkeypatch):
     from botkin.normalize.analytes import AnalyteNormalizer
     from botkin.pipeline import orchestrator
 
-    monkeypatch.setattr(orchestrator, "_ANALYTE_NORMALIZER", AnalyteNormalizer([]))
+    monkeypatch.setattr(orchestrator, "get_analyte_normalizer", lambda: AnalyteNormalizer([]))
 
     with get_conn() as conn:
         uid = UserRepo(conn).get_or_create(9300)
