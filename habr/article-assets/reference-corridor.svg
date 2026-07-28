@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 460" width="1200" height="460" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="1200" height="460" fill="#f2f7f4"/>
+  <rect x="40" y="30" width="1120" height="400" rx="20" fill="#ffffff" stroke="#dfeae5" stroke-width="2"/>
+
+  <text x="72" y="76" font-size="18" font-weight="700" fill="#0b1f1c">Показатели</text>
+  <line x1="72" y1="94" x2="1168" y2="94" stroke="#e6efeb" stroke-width="1.5"/>
+
+  <!-- shared track geometry: x 220..820, corridor 25%-75% -->
+
+  <!-- row 1: in range -->
+  <g transform="translate(0,150)">
+    <text x="72" y="6" font-size="16" fill="#0b1f1c">Гемоглобин</text>
+    <text x="72" y="28" font-size="12" fill="#8a978f">137 г/л · норма 120–160</text>
+    <line x1="220" y1="0" x2="820" y2="0" stroke="#e6efeb" stroke-width="10" stroke-linecap="round"/>
+    <rect x="370" y="-5" width="300" height="10" rx="5" fill="#d8f3e9"/>
+    <line x1="370" y1="-14" x2="370" y2="14" stroke="#34d399" stroke-width="2" stroke-dasharray="4 4"/>
+    <line x1="670" y1="-14" x2="670" y2="14" stroke="#34d399" stroke-width="2" stroke-dasharray="4 4"/>
+    <circle cx="520" cy="0" r="10" fill="#34d399" stroke="#ffffff" stroke-width="2"/>
+    <text x="900" y="6" font-size="13" fill="#34d399" font-weight="700">в норме</text>
+  </g>
+
+  <!-- row 2: above range -->
+  <g transform="translate(0,260)">
+    <text x="72" y="6" font-size="16" fill="#0b1f1c">Лимфоциты</text>
+    <text x="72" y="28" font-size="12" fill="#8a978f">40% · норма 19–37</text>
+    <line x1="220" y1="0" x2="820" y2="0" stroke="#e6efeb" stroke-width="10" stroke-linecap="round"/>
+    <rect x="370" y="-5" width="300" height="10" rx="5" fill="#fdecec"/>
+    <line x1="370" y1="-14" x2="370" y2="14" stroke="#f0564a" stroke-width="2" stroke-dasharray="4 4"/>
+    <line x1="670" y1="-14" x2="670" y2="14" stroke="#f0564a" stroke-width="2" stroke-dasharray="4 4"/>
+    <circle cx="805" cy="0" r="10" fill="#f0564a" stroke="#ffffff" stroke-width="2"/>
+    <text x="900" y="6" font-size="13" fill="#f0564a" font-weight="700">выше нормы</text>
+  </g>
+
+  <!-- row 3: below range -->
+  <g transform="translate(0,370)">
+    <text x="72" y="6" font-size="16" fill="#0b1f1c">Витамин D</text>
+    <text x="72" y="28" font-size="12" fill="#8a978f">18 нг/мл · норма 30–100</text>
+    <line x1="220" y1="0" x2="820" y2="0" stroke="#e6efeb" stroke-width="10" stroke-linecap="round"/>
+    <rect x="370" y="-5" width="300" height="10" rx="5" fill="#fdf3e3"/>
+    <line x1="370" y1="-14" x2="370" y2="14" stroke="#f5a623" stroke-width="2" stroke-dasharray="4 4"/>
+    <line x1="670" y1="-14" x2="670" y2="14" stroke="#f5a623" stroke-width="2" stroke-dasharray="4 4"/>
+    <circle cx="240" cy="0" r="10" fill="#f5a623" stroke="#ffffff" stroke-width="2"/>
+    <text x="900" y="6" font-size="13" fill="#f5a623" font-weight="700">ниже нормы</text>
+  </g>
+</svg>

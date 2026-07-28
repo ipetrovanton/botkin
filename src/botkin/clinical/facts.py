@@ -10,6 +10,8 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
+from botkin.parsing.constants import RANGE_SEARCH_RE, UPPER_SEARCH_RE, LOWER_SEARCH_RE
+
 
 @dataclass(frozen=True)
 class LabFact:
@@ -45,9 +47,6 @@ def classify_value(
     return "normal"
 
 
-_RANGE_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*[-–—]\s*(\d+(?:[.,]\d+)?)")
-_UPPER_RE = re.compile(r"[<≤]\s*(\d+(?:[.,]\d+)?)")
-_LOWER_RE = re.compile(r"[>≥]\s*(\d+(?:[.,]\d+)?)")
 
 
 def parse_reference_range(ref_text: object) -> tuple[float | None, float | None]:
@@ -62,13 +61,13 @@ def parse_reference_range(ref_text: object) -> tuple[float | None, float | None]
     text = _as_text(ref_text)
     if not text:
         return (None, None)
-    match = _RANGE_RE.search(text)
+    match = RANGE_SEARCH_RE.search(text)
     if match:
         return (_num(match.group(1)), _num(match.group(2)))
-    match = _UPPER_RE.search(text)
+    match = UPPER_SEARCH_RE.search(text)
     if match:
         return (None, _num(match.group(1)))
-    match = _LOWER_RE.search(text)
+    match = LOWER_SEARCH_RE.search(text)
     if match:
         return (_num(match.group(1)), None)
     return (None, None)

@@ -15,6 +15,7 @@ def test_structure_text_maps_raw_to_rows(monkeypatch):
         {"parameter": "Эритроциты", "value": "4.64", "unit": "млн/мкл",
          "reference_range": "3.8 - 5.1"},
     ]})
+    monkeypatch.setattr(ex, "TEXT_COMPACT_OUTPUT", False)  # тест про JSON-путь, не про компакт
     monkeypatch.setattr(ex, "_call_text", lambda messages, name, structured=None: raw)
     rows = ex._structure_text(["Гемоглобин 13.7 г/дл 11.7 - 15.5",
                                "Эритроциты 4.64 млн/мкл 3.8 - 5.1"], "doc.pdf")
@@ -40,6 +41,7 @@ def test_structure_text_retries_without_grammar_on_empty(monkeypatch):
         # Первый (structured) вызов пуст, повтор без grammar — с данными.
         return empty if structured is None else filled
 
+    monkeypatch.setattr(ex, "TEXT_COMPACT_OUTPUT", False)  # тест про JSON-путь, не про компакт
     monkeypatch.setattr(ex, "_call_text", fake_call_text)
     rows = ex._structure_text(["Гемоглобин 13.7 г/дл 11.7 - 15.5"], "doc.pdf")
 
@@ -56,12 +58,51 @@ def test_structure_text_stops_retrying_after_limit(monkeypatch):
         calls.append(structured)
         return empty
 
+    monkeypatch.setattr(ex, "TEXT_COMPACT_OUTPUT", False)  # тест про JSON-путь, не про компакт
     monkeypatch.setattr(ex, "_call_text", fake_call_text)
     rows = ex._structure_text(["мусор без показателей"], "doc.pdf")
 
     assert rows == []
     # 1 structured + _TEXT_EMPTY_RETRIES unstructured-попыток.
     assert calls == [None] + [False] * ex._TEXT_EMPTY_RETRIES
+
+
+def test_structure_text_uses_compact_and_skips_json_call(monkeypatch):
+    """Компактный путь основной: при непустом разборе JSON-схему не дёргаем вовсе."""
+    monkeypatch.setattr(ex, "TEXT_COMPACT_OUTPUT", True)
+    monkeypatch.setattr(ex, "_call_text_compact",
+                        lambda messages, name: [LabResult(analyte_name="Гемоглобин", value_num=13.7)])
+
+    def must_not_be_called(*a, **kw):
+        raise AssertionError("JSON-схема не должна вызываться, если компакт дал строки")
+
+    monkeypatch.setattr(ex, "_call_text", must_not_be_called)
+    rows = ex._structure_text(["Гемоглобин 13.7 г/дл"], "doc.pdf")
+    assert [r.analyte_name for r in rows] == ["Гемоглобин"]
+
+
+def test_structure_text_falls_back_to_json_when_compact_empty(monkeypatch):
+    """Пустой компакт не должен терять страницу — откат на прежний JSON-путь."""
+    filled = RawAnalysis.model_validate({"results": [{"parameter": "СРБ", "value": "1.0"}]})
+    monkeypatch.setattr(ex, "TEXT_COMPACT_OUTPUT", True)
+    monkeypatch.setattr(ex, "_call_text_compact", lambda messages, name: [])
+    monkeypatch.setattr(ex, "_call_text", lambda messages, name, structured=None: filled)
+    rows = ex._structure_text(["СРБ 1.0"], "doc.pdf")
+    assert [r.analyte_name for r in rows] == ["СРБ"]
+
+
+def test_structure_text_falls_back_to_json_when_compact_raises(monkeypatch):
+    """Сбой сервера на компактном вызове тоже не должен терять страницу."""
+    filled = RawAnalysis.model_validate({"results": [{"parameter": "СРБ", "value": "1.0"}]})
+
+    def boom(messages, name):
+        raise RuntimeError("500 server error")
+
+    monkeypatch.setattr(ex, "TEXT_COMPACT_OUTPUT", True)
+    monkeypatch.setattr(ex, "_call_text_compact", boom)
+    monkeypatch.setattr(ex, "_call_text", lambda messages, name, structured=None: filled)
+    rows = ex._structure_text(["СРБ 1.0"], "doc.pdf")
+    assert [r.analyte_name for r in rows] == ["СРБ"]
 
 
 def _make_pdf_data(pages: list[list[str]]) -> PdfTextData:
@@ -129,7 +170,7 @@ def test_run_analysis_falls_back_when_text_layer_weak(monkeypatch):
     monkeypatch.setattr(ex, "_prepare_b64", lambda p: ["img1"])
     called = {"vlm": False}
 
-    def fake_extract_once(images, name):
+    def fake_extract_once(images, name, low_res_retry_fn=None):
         called["vlm"] = True
         return [LabResult(analyte_name="Глюкоза", value_num=5.0)], 1
 
@@ -148,7 +189,7 @@ def test_run_analysis_falls_back_when_guard_rejects_majority(monkeypatch):
         LabResult(analyte_name="B", value_num=999.0, value_raw="999")])
     monkeypatch.setattr(ex, "_prepare_b64", lambda p: ["img1"])
     monkeypatch.setattr(ex, "_extract_once",
-                        lambda images, name: ([LabResult(analyte_name="Глюкоза", value_num=5.0)], 1))
+                        lambda images, name, low_res_retry_fn=None: ([LabResult(analyte_name="Глюкоза", value_num=5.0)], 1))
     rows = ex.run_analysis(Path("doc.pdf"))
     assert [r.analyte_name for r in rows] == ["Глюкоза"]
 

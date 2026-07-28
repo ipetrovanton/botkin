@@ -46,6 +46,10 @@ _DEFAULTS: dict = {
         "num_predict": 8192,
         "repeat_penalty": 1.2,
         "structured_output": True,
+        # Компактный построчный вывод вместо JSON-схемы на текстовом слое: ключи JSON
+        # стоят больше токенов, чем данные (замер: вызов быстрее в 1.9–2.4 раза).
+        # При пустом разборе код сам откатывается на JSON-схему.
+        "compact_output": True,
     },
     "ollama": {
         "keep_alive": "30m",
@@ -244,6 +248,7 @@ TEXT_MAX_TOKENS = setting("text_model.max_tokens", "TEXT_MAX_TOKENS", int)
 TEXT_NUM_PREDICT = setting("text_model.num_predict", "TEXT_NUM_PREDICT", int)
 TEXT_REPEAT_PENALTY = setting("text_model.repeat_penalty", "TEXT_REPEAT_PENALTY", float)
 TEXT_STRUCTURED_OUTPUT = setting("text_model.structured_output", "TEXT_STRUCTURED_OUTPUT", _as_bool)
+TEXT_COMPACT_OUTPUT = setting("text_model.compact_output", "TEXT_COMPACT_OUTPUT", _as_bool)
 
 # Текстовый слой PDF (детерминированное извлечение без VLM).
 # Минимум символов на страницу, чтобы считать слой годным (отсекает PDF-сканы

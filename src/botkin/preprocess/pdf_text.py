@@ -14,22 +14,9 @@ from pathlib import Path
 import pymupdf
 
 from botkin.config import TEXT_LAYER_MIN_CHARS_PER_PAGE, TEXT_LAYER_Y_TOLERANCE
+from botkin.preprocess.constants import CONTINUATION_PREFIXES, PREPOSITIONS
 
 log = logging.getLogger(__name__)
-
-# Словарь известных продолжений многострочных имён показателей.
-_CONTINUATION_PREFIXES = {
-    "объем", "объему", "объема", "объемы",
-    "эритроцитов", "тромбоцитов", "лейкоцитов", "крови", "мочи",
-    "ширины", "распределения", "содержания", "концентрации", "среднего",
-}
-
-# Предлоги, после которых имя физически продолжается на следующей строке.
-_PREPOSITIONS = {
-    "по", "в", "во", "на", "к", "ко", "из", "для", "при", "об", "обо",
-    "с", "со", "от", "ото", "без", "до", "под", "подо", "над", "про",
-    "через", "между", "ради", "благодаря",
-}
 
 
 def _has_number(line: str) -> bool:
@@ -53,11 +40,11 @@ def _is_name_continuation(head: str, current: str) -> bool:
     if first and first[0].islower():
         return True
     # Известные продолжения (без учёта регистра).
-    if first.lower() in _CONTINUATION_PREFIXES:
+    if first.lower() in CONTINUATION_PREFIXES:
         return True
     # Предыдущая строка заканчивается предлогом.
     head_last = head.split()[-1].lower().rstrip(":;,.—–-") if head.split() else ""
-    if head_last in _PREPOSITIONS:
+    if head_last in PREPOSITIONS:
         return True
     return False
 

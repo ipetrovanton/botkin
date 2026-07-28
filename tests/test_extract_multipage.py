@@ -17,7 +17,7 @@ def test_multipage_reads_each_page_once_no_combined_call(monkeypatch):
     monkeypatch.setattr(ex, "_prepare_b64", lambda p: ["img1", "img2"])
     calls = []
 
-    def fake_extract_once(images, name):
+    def fake_extract_once(images, name, low_res_retry_fn=None):
         calls.append(len(images))
         return [LabResult(analyte_name=f"Показатель {name[-1]}", value_num=1.0)], 1
 
@@ -29,7 +29,7 @@ def test_multipage_reads_each_page_once_no_combined_call(monkeypatch):
 def test_page_failure_does_not_lose_document(monkeypatch):
     monkeypatch.setattr(ex, "_prepare_b64", lambda p: ["img1", "img2"])
 
-    def fake_extract_once(images, name):
+    def fake_extract_once(images, name, low_res_retry_fn=None):
         if name.endswith("#стр1"):
             return [LabResult(analyte_name="Гемоглобин", value_num=140.0)], 1
         raise ExtractionError("стр2: обрезанный JSON (EOF)")
@@ -47,7 +47,7 @@ def test_single_page_uses_one_combined_call(monkeypatch):
     monkeypatch.setattr(ex, "_prepare_b64", lambda p: ["only"])
     calls = []
 
-    def fake_extract_once(images, name):
+    def fake_extract_once(images, name, low_res_retry_fn=None):
         calls.append(len(images))
         return [LabResult(analyte_name="Глюкоза", value_num=5.0)], 1
 

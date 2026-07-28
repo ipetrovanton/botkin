@@ -43,6 +43,9 @@ DEFAULT_MODELS = [
 ALL_KNOWN_MODELS = DEFAULT_MODELS + [
     "bge-m3",
     "qwen3:8b",
+    "paddleocr-vl16:latest",
+    "MedAIBase/MedGemma1.5:4b-it",
+    "puyangwang/medgemma-27b-it:q4_k_m",
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent

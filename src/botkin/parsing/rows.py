@@ -41,6 +41,83 @@ class RawAnalysis(BaseModel):
     results: list[_RawRow] = []
 
 
+# Шапка таблицы, если модель всё-таки её напечатала вопреки промпту.
+_COMPACT_HEADER_NAMES = frozenset({"имя", "показатель", "параметр", "name", "parameter"})
+
+# Текстовые результаты бланков: значение без цифр, но это именно результат.
+_TEXTUAL_VALUE_PREFIXES = (
+    "не обнар", "обнаруж", "отриц", "положит", "отсутств", "следы", "норм",
+    "выявлен", "не выявлен", "чист", "прозрач", "мутн",
+)
+_HAS_DIGIT = re.compile(r"\d")
+
+
+def _looks_like_value(field: str) -> bool:
+    """Поле похоже на результат: есть цифра либо это типовой текстовый результат."""
+    f = field.strip().lower()
+    if not f:
+        return False
+    return bool(_HAS_DIGIT.search(f)) or f.startswith(_TEXTUAL_VALUE_PREFIXES)
+
+
+def _drop_group_prefix(parts: list[str]) -> list[str]:
+    """Срезает лишнюю первую колонку с названием исследования.
+
+    Модель вопреки промпту иногда добавляет группу: «ОБЩИЙ АНАЛИЗ МОЧИ|Лейкоциты|1|в п/зр.|< 5».
+    Тогда parts[1] — это имя показателя, а не значение, и все поля уезжают на одно вправо
+    (наблюдалось на sample_012/sample_013: показатели микроскопии теряли значение).
+    Опираемся не на промпт, а на форму данных: ищем первое поле, похожее на результат,
+    и берём имя непосредственно перед ним.
+    """
+    if len(parts) <= 2 or _looks_like_value(parts[1]):
+        return parts
+    for i in range(2, len(parts)):
+        if _looks_like_value(parts[i]):
+            return parts[i - 1:]
+    return parts
+
+
+def parse_compact_rows(text: str) -> RawAnalysis:
+    """Компактный построчный ответ модели «имя|значение|единица|референс» → RawAnalysis.
+
+    Зачем формат вместо JSON-схемы: на строку таблицы ключи JSON ("parameter", "value",
+    "unit", "reference_range") стоят больше токенов, чем сами данные. Замер на реальных
+    страницах — вывод короче в 2.4 раза, вызов быстрее в 1.9–2.4 раза при том же наборе
+    строк. Тот же приём уже используется для АндроФлор/СИБР: сырой текст + детерминированный
+    разбор здесь, а не грамматика в декодере.
+
+    Разбор устойчив к типичному шуму модели: markdown-таблицы (ведущий/замыкающий «|»),
+    строки-заголовки, разделители вида «---», пустые поля.
+    """
+    rows: list[_RawRow] = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line or "|" not in line:
+            continue
+        # Markdown-таблица: срезаем обрамляющие «|», иначе первое поле окажется пустым.
+        if line.startswith("|"):
+            line = line[1:]
+        if line.endswith("|"):
+            line = line[:-1]
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 2:
+            continue
+        parts = _drop_group_prefix(parts)
+        name, value = parts[0], parts[1]
+        # Разделительная строка markdown («--- | --- | ---») и шапка таблицы.
+        if not name or set(name) <= set("-: ") or name.lower() in _COMPACT_HEADER_NAMES:
+            continue
+        if not value:
+            continue
+        rows.append(_RawRow(
+            parameter=name,
+            value=value,
+            unit=parts[2] or None if len(parts) > 2 else None,
+            reference_range=parts[3] or None if len(parts) > 3 else None,
+        ))
+    return RawAnalysis(results=rows)
+
+
 def rows_from_raw(raw: RawAnalysis) -> list[LabResult]:
     """Уплощает tests[].results[] (+ top-level results) в список LabResult."""
     rows: list[_RawRow] = list(raw.results)

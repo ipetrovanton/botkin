@@ -127,6 +127,7 @@ def test_classify_passes_tenacity_retrying_as_max_retries(tmp_path):
     resp.confidence = 0.9
     resp.title = None
     resp.clinic = None
+    resp.visible_text = None  # в ClassifySchema это str | None, мок должен совпадать
     resp._raw_response.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
     fake = MagicMock()
     fake.chat.completions.create.return_value = resp
@@ -192,6 +193,7 @@ def test_classify_passes_native_format_schema_when_enabled(tmp_path):
     resp.confidence = 0.9
     resp.title = None
     resp.clinic = None
+    resp.visible_text = None  # в ClassifySchema это str | None, мок должен совпадать
     resp._raw_response.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
     fake = MagicMock()
     fake.chat.completions.create.return_value = resp
@@ -214,6 +216,7 @@ def test_classify_uses_small_image_and_mocked_client(tmp_path):
     resp.confidence = 0.9
     resp.title = "Биохимия крови"
     resp.clinic = "Инвитро"
+    resp.visible_text = None  # в ClassifySchema это str | None, мок должен совпадать
     resp._raw_response.usage.prompt_tokens = 10
     resp._raw_response.usage.completion_tokens = 5
     fake.chat.completions.create.return_value = resp
@@ -241,6 +244,7 @@ def test_classify_survives_missing_usage(tmp_path):
     resp.confidence = 0.9
     resp.title = None
     resp.clinic = None
+    resp.visible_text = None  # в ClassifySchema это str | None, мок должен совпадать
     resp._raw_response.usage = None   # счётчики токенов недоступны
 
     fake = MagicMock()
@@ -368,7 +372,7 @@ def test_run_analysis_multipage_backfills_missing_page(tmp_path):
     srb = [LabResult(analyte_name="С-реактивный белок", value_num=1.8, unit="мг/л")]
     page1 = base64.b64encode(b"PAGE1").decode()
 
-    def fake_once(b64_images, doc_name):
+    def fake_once(b64_images, doc_name, low_res_retry_fn=None):
         if len(b64_images) == 2:
             return list(oak), 1            # общий: только ОАК (1 исследование) < 2 страниц
         if b64_images == [page1]:
@@ -392,7 +396,7 @@ def test_run_analysis_singlepage_no_backfill(tmp_path):
 
     calls = []
 
-    def fake_once(b64_images, doc_name):
+    def fake_once(b64_images, doc_name, low_res_retry_fn=None):
         calls.append(len(b64_images))
         return [LabResult(analyte_name="Глюкоза", value_num=5.4, unit="ммоль/л")], 1
 
@@ -419,6 +423,7 @@ def test_classify_sends_configured_temperature(tmp_path):
     resp.confidence = 0.9
     resp.title = None
     resp.clinic = None
+    resp.visible_text = None  # в ClassifySchema это str | None, мок должен совпадать
     resp._raw_response.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
     fake = MagicMock()
     fake.chat.completions.create.return_value = resp

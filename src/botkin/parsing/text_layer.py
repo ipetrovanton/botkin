@@ -5,8 +5,9 @@ import re
 from typing import Optional
 
 from botkin.domain.models import LabResult
+from botkin.parsing.constants import RANGE_RE, LE_RE, GE_RE, NUM_RE
 from botkin.parsing.scalars import (
-    _GE_RE, _LE_RE, _RANGE_RE, num_tokens, parse_lab_value, parse_reference_range,
+    num_tokens, parse_lab_value, parse_reference_range,
 )
 
 _VALUE_TOKEN_RE = re.compile(r"^-?\d+(?:[.,]\d+)?\*?$")  # чистый токен-значение (+флаг «*»)
@@ -63,7 +64,7 @@ def _extract_unit_ref(rest: list[str]) -> tuple[Optional[str], Optional[str], in
     """
     for i, tok in enumerate(rest):
         # одно-токенные формы: «<5.0», «<20», «35-45»
-        if _LE_RE.match(tok) or _GE_RE.match(tok) or _RANGE_RE.match(tok):
+        if LE_RE.match(tok) or GE_RE.match(tok) or RANGE_RE.match(tok):
             return (" ".join(rest[:i]) or None), tok, i + 1
         # «< 1.0» — оператор + число отдельными токенами
         if tok in _OPERATORS and i + 1 < len(rest) and re.match(r"^-?\d", rest[i + 1]):

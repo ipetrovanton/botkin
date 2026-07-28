@@ -33,3 +33,26 @@ def test_analysis_title_left_untouched():
 
 def test_no_content_left_untouched():
     assert _correct_classification_by_content("doctor_report", None, None) == "doctor_report"
+
+
+def test_doctor_footer_on_lab_form_does_not_flip_analysis():
+    # Регрессия sample_005 (бланк Тонус): VLM отдаёт analysis с conf 0.98, но в
+    # visible_text попадает стандартный колонтитул с врачом — вердикт не должен меняться.
+    assert _correct_classification_by_content(
+        "analysis", "Специальные иммунологические исследования", "Врач(и): Гринева Л. П."
+    ) == "analysis"
+    assert _correct_classification_by_content(
+        "analysis", None,
+        "Интерпретация результатов исследования содержит информацию для лечащего врача",
+    ) == "analysis"
+    assert _correct_classification_by_content("analysis", None, "Ф.И.О. врача:") == "analysis"
+
+
+def test_short_keyword_does_not_match_inside_word():
+    # «кт» не должно находиться внутри «бактерии»/«лактат»/«фруктоза»,
+    # иначе микробиологический бланк улетает в doctor_report.
+    assert _correct_classification_by_content(
+        "analysis", None, "Лактобактерии, фруктоза, лактат"
+    ) == "analysis"
+    # При этом самостоятельное «КТ» по-прежнему распознаётся.
+    assert _correct_classification_by_content("unknown", "КТ органов грудной клетки", None) == "doctor_report"

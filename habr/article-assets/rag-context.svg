@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="1200" height="600" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .src { fill:#0f2b26; stroke:#2dd4bf; stroke-width:2; }
+      .lbl { fill:#f2f7f4; font-size:16; font-weight:600; }
+      .sub { fill:#9fd8cd; font-size:12; }
+      .arrow { stroke:#4fd1c5; stroke-width:3; fill:none; }
+      .core { fill:#0a201c; stroke:#14b8a6; stroke-width:2.5; }
+      .out { fill:#f2f7f4; }
+    </style>
+  </defs>
+  <rect x="0" y="0" width="1200" height="600" fill="#081311"/>
+
+  <rect class="src" x="60" y="40" width="330" height="90" rx="14"/>
+  <text class="lbl" x="84" y="76">Отклонения анализов</text>
+  <text class="sub" x="84" y="98">выше / ниже нормы, тренд по SQL</text>
+
+  <rect class="src" x="60" y="160" width="330" height="90" rx="14"/>
+  <text class="lbl" x="84" y="196">Текущие лекарства</text>
+  <text class="sub" x="84" y="218">из заключений + формы пациента</text>
+
+  <rect class="src" x="60" y="280" width="330" height="90" rx="14"/>
+  <text class="lbl" x="84" y="316">Health-агрегаты</text>
+  <text class="sub" x="84" y="338">Garmin: пульс, сон, HRV, стресс</text>
+
+  <rect class="src" x="60" y="400" width="330" height="90" rx="14"/>
+  <text class="lbl" x="84" y="436">RAG-поиск</text>
+  <text class="sub" x="84" y="458">ГРЛС · ФСЛИ · свежие статьи PubMed</text>
+
+  <!-- arrows converge -->
+  <path class="arrow" d="M 390 85 C 520 85, 520 260, 640 270"/>
+  <path class="arrow" d="M 390 205 C 500 205, 520 260, 640 280"/>
+  <path class="arrow" d="M 390 325 C 500 325, 520 300, 640 300"/>
+  <path class="arrow" d="M 390 445 C 520 445, 520 320, 640 310"/>
+
+  <!-- core assistant -->
+  <rect class="core" x="650" y="230" width="280" height="140" rx="16"/>
+  <text class="lbl" x="676" y="270">Ассистент</text>
+  <text class="sub" x="676" y="292">qwen3:8b · контекст собран, а не выдуман</text>
+  <text class="sub" x="676" y="312">не назначает лечение</text>
+  <text class="sub" x="676" y="332">не находит холестерин, если его нет в данных</text>
+
+  <path class="arrow" d="M 930 300 L 1010 300"/>
+  <path d="M 995 288 L 1010 300 L 995 312" fill="#4fd1c5"/>
+
+  <rect class="out" x="1020" y="235" width="150" height="130" rx="14"/>
+  <text x="1095" y="290" text-anchor="middle" font-size="14" font-weight="700" fill="#0b1f1c">Рекомендация</text>
+  <text x="1095" y="312" text-anchor="middle" font-size="12" fill="#5b6b66">дня, по фактуре</text>
+  <circle cx="1095" cy="335" r="6" fill="#34d399"/>
+</svg>

@@ -21,38 +21,15 @@ from botkin.exceptions import ClassificationError
 from botkin.llm.client import (
     get_client, build_extra_body, build_retrying, default_options, usage_of,
 )
+from botkin.llm.constants import (
+    LAB_TABLE_MARKERS, UNKNOWN_TITLE_KEYWORDS, DOCTOR_REPORT_TITLE_KEYWORDS,
+    ANALYSIS_TITLE_KEYWORDS, QUOTED_ORG_RE, has_keyword,
+)
 from botkin.llm.prompts import CLASSIFY_INSTRUCTION, CLASSIFY_VLM_SYSTEM, PROMPTS_VERSION
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
 from botkin.preprocess.pdf_text import open_pdf
 
 log = logging.getLogger(__name__)
-
-# Заголовки колонок, специфичные для лабораторных бланков (Инвитро/Гемохелп/Тонус).
-# В заключениях врача их нет. Наивный список «диагноз/жалобы» НЕ годится: слово «диагноз»
-# протекает из поля «Диагноз направившего врача» во ВСЕ лабораторные бланки.
-_LAB_TABLE_MARKERS = ("референс", "ед. изм", "ед.изм", "единиц измер")
-
-# Название организации в шапке бланка почти всегда в кавычках («ИНВИТРО-Самара»,
-# ООО «АВК-МЕД»). Берём первую кавычку в первых строках слоя — общий приём, без
-# хардкода списка лабораторий. Длина 3–80 отсекает мусор и сверхдлинные госназвания.
-_QUOTED_ORG = re.compile(r'"([^"]{3,80})"')
-
-# Ключевые слова для корректировки классификации по извлечённому title.
-# Используем как safety-net: явные ошибки VLM (рецепт → doctor_report, МРТ → unknown)
-# исправляем детерминированно, не полагаясь только на промпт.
-_UNKNOWN_TITLE_KEYWORDS = ("рецепт", "назначение", "препарат")
-_DOCTOR_REPORT_TITLE_KEYWORDS = (
-    "мрт", "кт", "рентген", "узи", "экг", "заключение", "прием",
-    "осмотр", "врач", "выписка", "эпикриз", "справка",
-)
-# Однозначные названия лабораторных бланков. Документ, озаглавленный «Общий анализ
-# крови», является анализом по определению — что бы ни выдал VLM. На растровых бланках
-# (Тонус, sample_011) модель при temperature>0 иногда путает тип с doctor_report;
-# сильный заголовок перебивает эту флуктуацию детерминированно.
-_ANALYSIS_TITLE_KEYWORDS = (
-    "общий анализ", "клинический анализ", "биохимический анализ",
-    "анализ крови", "анализ мочи", "гемограмма",
-)
 
 
 def _correct_classification_by_content(doc_type: str, title: str | None, visible_text: str | None) -> str:
@@ -66,21 +43,21 @@ def _correct_classification_by_content(doc_type: str, title: str | None, visible
     text_lower = (visible_text or "").lower()
 
     # Явный лабораторный заголовок — сильнейший сигнал, проверяем первым.
-    if any(k in title_lower for k in _ANALYSIS_TITLE_KEYWORDS):
+    if has_keyword(title_lower, ANALYSIS_TITLE_KEYWORDS):
         return "analysis"
 
     # Сначала смотрим на видимый текст — он конкретнее и реже галлюцинирует.
     if text_lower:
-        if any(k in text_lower for k in _UNKNOWN_TITLE_KEYWORDS):
+        if has_keyword(text_lower, UNKNOWN_TITLE_KEYWORDS):
             return "unknown"
-        if any(k in text_lower for k in _DOCTOR_REPORT_TITLE_KEYWORDS):
+        if has_keyword(text_lower, DOCTOR_REPORT_TITLE_KEYWORDS):
             return "doctor_report"
 
     # Fallback на title.
     if title_lower:
-        if any(k in title_lower for k in _UNKNOWN_TITLE_KEYWORDS):
+        if has_keyword(title_lower, UNKNOWN_TITLE_KEYWORDS):
             return "unknown"
-        if any(k in title_lower for k in _DOCTOR_REPORT_TITLE_KEYWORDS):
+        if has_keyword(title_lower, DOCTOR_REPORT_TITLE_KEYWORDS):
             return "doctor_report"
 
     return doc_type
@@ -91,7 +68,7 @@ def _detect_clinic(pdf) -> str | None:
     if not pdf.pages:
         return None
     header = " ".join(pdf.pages[0][:6])
-    match = _QUOTED_ORG.search(header)
+    match = QUOTED_ORG_RE.search(header)
     return match.group(1).strip() if match else None
 
 
@@ -111,7 +88,7 @@ def _classify_from_text_layer(path: Path) -> ClassifyResult | None:
         return None
 
     text_lower = pdf.flat_text.lower()
-    is_lab = any(m in text_lower for m in _LAB_TABLE_MARKERS) or (
+    is_lab = any(m in text_lower for m in LAB_TABLE_MARKERS) or (
         "результат" in text_lower and "значения" in text_lower
     )
     if not is_lab:

@@ -19,7 +19,7 @@ def test_parse_sibr_ocr_returns_rows_for_all_gases():
     rows = parse_sibr_ocr(text)
     assert len(rows) == 8
     assert rows[0] == LabResult(
-        analyte_name="СИБР-тест: 0 минут, водород H2",
+        analyte_name="СИБР-тест: базовая проба, водород H2",
         value_num=7.0,
         value_raw="7",
         unit="ppm",

@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" width="1200" height="720" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .box { fill:#0f2b26; stroke:#2dd4bf; stroke-width:2; rx:14; }
+      .box2 { fill:#0c211d; stroke:#1c4d43; stroke-width:2; rx:14; }
+      .lbl { fill:#f2f7f4; font-size:18; font-weight:600; }
+      .sub { fill:#9fd8cd; font-size:13; }
+      .arrow { stroke:#4fd1c5; stroke-width:3; fill:none; }
+      .chip { fill:#0a201c; stroke:#14b8a6; stroke-width:1.5; rx:8; }
+      .chiptxt { fill:#7fe4d6; font-size:12; }
+    </style>
+  </defs>
+  <rect x="0" y="0" width="1200" height="720" fill="#081311"/>
+
+  <!-- clients -->
+  <rect class="box" x="90" y="40" width="330" height="100"/>
+  <text class="lbl" x="115" y="80">Telegram-бот</text>
+  <text class="sub" x="115" y="104">aiogram 3 · фото / PDF, прогресс, карточки</text>
+
+  <rect class="box" x="470" y="40" width="330" height="100"/>
+  <text class="lbl" x="495" y="80">Веб-кабинет</text>
+  <text class="sub" x="495" y="104">Alpine.js SPA · дашборд, аналитика, RAG-ассистент</text>
+
+  <rect class="box" x="850" y="40" width="260" height="100"/>
+  <text class="lbl" x="875" y="80">Носимые устройства</text>
+  <text class="sub" x="875" y="104">Garmin · Apple Health · Strava</text>
+
+  <!-- arrows down to backend -->
+  <path class="arrow" d="M 255 140 L 255 200 L 470 200"/>
+  <path class="arrow" d="M 635 140 L 635 200"/>
+  <path class="arrow" d="M 980 140 L 980 200 L 800 200"/>
+  <path class="arrow" d="M 630 200 L 635 210 L 640 200" fill="#4fd1c5"/>
+
+  <!-- backend -->
+  <rect class="box2" x="230" y="220" width="740" height="150"/>
+  <text class="lbl" x="255" y="252">FastAPI Backend (:8000)</text>
+  <text class="sub" x="255" y="274">приём, валидация, BackgroundTasks</text>
+
+  <g transform="translate(255,290)">
+    <rect class="chip" x="0" y="0" width="150" height="42"/>
+    <text class="chiptxt" x="14" y="26">classify</text>
+    <path class="arrow" d="M 150 21 L 172 21"/>
+    <rect class="chip" x="182" y="0" width="150" height="42"/>
+    <text class="chiptxt" x="196" y="26">extract</text>
+    <path class="arrow" d="M 332 21 L 354 21"/>
+    <rect class="chip" x="364" y="0" width="150" height="42"/>
+    <text class="chiptxt" x="378" y="26">normalize</text>
+    <path class="arrow" d="M 514 21 L 536 21"/>
+    <rect class="chip" x="546" y="0" width="140" height="42"/>
+    <text class="chiptxt" x="560" y="26">persist</text>
+  </g>
+
+  <!-- arrows down to infra -->
+  <path class="arrow" d="M 380 370 L 380 430"/>
+  <path class="arrow" d="M 600 370 L 600 430"/>
+  <path class="arrow" d="M 820 370 L 820 430"/>
+  <path class="arrow" d="M 1000 370 L 1000 430 L 1000 430"/>
+
+  <!-- Ollama -->
+  <rect class="box" x="90" y="440" width="320" height="150"/>
+  <text class="lbl" x="115" y="472">Ollama (GPU)</text>
+  <text class="sub" x="115" y="496">qwen3-vl:8b-instruct — vision</text>
+  <text class="sub" x="115" y="516">bge-m3 — эмбеддинги</text>
+  <text class="sub" x="115" y="536">RTX 3080 / Apple Silicon</text>
+
+  <!-- SQLite -->
+  <rect class="box" x="440" y="440" width="320" height="150"/>
+  <text class="lbl" x="465" y="472">SQLite (WAL)</text>
+  <text class="sub" x="465" y="496">documents · lab_results</text>
+  <text class="sub" x="465" y="516">doctor_reports · rag_vectors</text>
+  <text class="sub" x="465" y="536">(sqlite-vec)</text>
+
+  <!-- References + MinIO -->
+  <rect class="box" x="790" y="440" width="320" height="150"/>
+  <text class="lbl" x="815" y="472">Офлайн-справочники</text>
+  <text class="sub" x="815" y="496">ГРЛС · ФСЛИ · cities.json</text>
+  <text class="sub" x="815" y="516">MinIO — оригиналы (S3)</text>
+  <text class="sub" x="815" y="536">PubMed-индекс (research)</text>
+
+  <text x="600" y="670" text-anchor="middle" fill="#5b8a80" font-size="14">
+    Внешняя сеть используется только Telegram-транспортом — медицинские данные не покидают машину
+  </text>
+</svg>

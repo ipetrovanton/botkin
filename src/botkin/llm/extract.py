@@ -8,6 +8,7 @@ botkin.parsing и переиспользуется здесь.
 import logging
 import time
 from pathlib import Path
+from typing import Callable
 
 import instructor
 from pydantic import BaseModel
@@ -17,7 +18,7 @@ from botkin.config import (
     VERBATIM_MAX_REJECT_RATIO, VLM_STRUCTURED_OUTPUT, RAW_LOG_LIMIT, TEXT_LAYER_TEMPERATURE,
     OLLAMA_KEEP_ALIVE,
     TEXT_MODEL, TEXT_MAX_TOKENS, TEXT_NUM_CTX, TEXT_NUM_PREDICT,
-    TEXT_REPEAT_PENALTY, TEXT_STRUCTURED_OUTPUT,
+    TEXT_REPEAT_PENALTY, TEXT_STRUCTURED_OUTPUT, TEXT_COMPACT_OUTPUT,
 )
 from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ExtractionError
@@ -25,7 +26,7 @@ from botkin.llm.client import (
     get_client, get_raw_client, build_extra_body, build_retrying, default_options, usage_of,
 )
 from botkin.llm.prompts import (
-    ANALYSIS_INSTRUCTION, ANALYSIS_TEXT_SYSTEM, ANALYSIS_VLM_SYSTEM,
+    ANALYSIS_INSTRUCTION, ANALYSIS_TEXT_SYSTEM, ANALYSIS_TEXT_COMPACT_SYSTEM, ANALYSIS_VLM_SYSTEM,
     DOCTOR_REPORT_INSTRUCTION, DOCTOR_REPORT_VLM_SYSTEM, PROMPTS_VERSION, TEXT_INSTRUCTION,
 )
 from botkin.parsing.androflor import is_androflor_text, parse_androflor_ocr
@@ -33,7 +34,9 @@ from botkin.parsing.sibr import is_sibr_text, parse_sibr_ocr
 from botkin.parsing.harvester import (
     _collect_tables, harvest_lab_rows, loads_json, salvage_json_objects,
 )
-from botkin.parsing.rows import RawAnalysis, extraction_quality, merge_dedup, rows_from_raw
+from botkin.parsing.rows import (
+    RawAnalysis, extraction_quality, merge_dedup, parse_compact_rows, rows_from_raw,
+)
 from botkin.parsing.scalars import parse_lab_value, parse_reference_range
 from botkin.parsing.text_layer import _parse_text_line, _verbatim_guard, completeness_guard
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
@@ -49,6 +52,35 @@ _IMAGE_TABLE_OCR_PROMPT = (
 )
 # Порог строк, ниже которого «андрофлор-страница» считается описанием бланка, а не таблицей.
 _ANDROFLOR_MIN_ROWS = 4
+
+# Task-токен PaddleOCR-VL для повторного OCR-запроса на плотных Lg-таблицах (АндроФлор).
+# Модель специально обучена отвечать на короткие task-токены ("OCR:"/"Table Recognition:"),
+# а не на диалоговые инструкции — конверсационный _IMAGE_TABLE_OCR_PROMPT на плотной
+# Lg-нотации уводит её off-distribution (галлюцинация псевдо-арифметической прогрессии
+# "10 5.7, 10 4.8, 10 3.6, ..." вместо реальных значений; проверено вручную на sample_006).
+# См. HF card PaddlePaddle/PaddleOCR-VL-1.6, раздел PROMPTS (2026-05-28).
+_PADDLEOCR_TABLE_TASK_TOKEN = "Table Recognition:"
+
+# Разрешение для task-токен retry на плотных таблицах. PaddleOCR-VL официально работает как
+# ВТОРОЙ этап двухэтапного пайплайна: отдельная модель PP-DocLayout-V3 сначала режет страницу
+# на простые под-изображения (одна ячейка/абзац), и только потом 0.9B VLM читает каждый crop.
+# Мы подаём модели целую сложную страницу разом (у нас нет layout-детектора) — на дефолтном
+# IMAGE_EXTRACT_LONG_SIDE=2200 с upscale/enhance (тюнинг под qwen3-vl) модель хаотично
+# галлюцинирует. Эмпирически подобранное меньшее разрешение без enhance/upscale снижает частоту
+# срыва (проверено вручную на sample_006), хотя полностью не устраняет нестабильность модели —
+# см. github.com/ggml-org/llama.cpp/pull/18825 (генеративная часть всего 0.3B, "error-prone").
+_ANDROFLOR_RETRY_LONG_SIDE = 1264
+
+# Число OCR-попыток с разными task-токенами для voting на Андрофлор.
+# PaddleOCR-VL стохастичен: один прогон даёт 2 строки, другой — 11. Делаем N вызовов
+# с чередованием task-токенов ("Table Recognition:" / "OCR:") и разрешений (основное / low-res),
+# выбираем результат с максимальным числом распарсенных строк.
+_ANDROFLOR_VOTING_TRIES = 3
+# СИБР-таблица тоже читается одним VLM-вызовом при temperature=0.0, но GPU-инференс
+# не гарантирует побитовую детерминированность — редкий сбой формата/цифры роняет
+# результат ниже _SIBR_MIN_ROWS и весь блок из 32 показателей отбрасывается. Voting
+# по аналогии с Андрофлор устраняет эти стохастические провалы.
+_SIBR_VOTING_TRIES = 3
 
 _SIBR_OCR_PROMPT = (
     "На изображении — таблица водородно-метанового дыхательного теста с лактулозой (СИБР). "
@@ -102,13 +134,17 @@ def _prepare_b64(source_path: Path) -> list[str]:
 
 
 def _messages_from_images(system_prompt: str, instruction: str, b64_images: list[str]) -> list[dict]:
+    """system_prompt='' пропускает системное сообщение — нужно для task-токенов PaddleOCR-VL,
+    которая обучена на голый user-текст ("OCR:"/"Table Recognition:") без диалоговой обвязки.
+    """
     content: list[dict] = [{"type": "text", "text": instruction}]
     for b64 in b64_images:
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": content},
-    ]
+    messages: list[dict] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": content})
+    return messages
 
 
 def _build_messages(system_prompt: str, instruction: str, source_path: Path) -> list[dict]:
@@ -180,20 +216,40 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
         raise err from e
 
 
-def _call_image_ocr(b64_images: list[str], doc_name: str) -> str:
-    messages = _messages_from_images("Ты — точный OCR медицинских таблиц.", _IMAGE_TABLE_OCR_PROMPT, b64_images)
+# Число попыток на транзиентную 500-ошибку llama-server ("peg-native format" — известная
+# нестабильность GGUF-порта PaddleOCR-VL, см. github.com/ggml-org/llama.cpp/pull/18825).
+# SDK-ретраи openai-клиента по умолчанию (max_retries=2) не всегда достаточны на практике.
+_IMAGE_OCR_TRANSIENT_RETRIES = 5
+
+
+def _call_image_ocr(b64_images: list[str], doc_name: str, task_token: str | None = None) -> str:
+    if task_token is not None:
+        messages = _messages_from_images("", task_token, b64_images)
+    else:
+        messages = _messages_from_images("Ты — точный OCR медицинских таблиц.", _IMAGE_TABLE_OCR_PROMPT, b64_images)
     client = get_raw_client()
     t0 = time.perf_counter()
-    response = client.chat.completions.create(
-        model=VLM_MODEL,
-        messages=messages,
-        max_tokens=VLM_MAX_TOKENS,
-        extra_body={"options": {**default_options(), "temperature": 0.0}},
-    )
+    last_exc: Exception | None = None
+    for attempt in range(_IMAGE_OCR_TRANSIENT_RETRIES):
+        try:
+            response = client.chat.completions.create(
+                model=VLM_MODEL,
+                messages=messages,
+                max_tokens=VLM_MAX_TOKENS,
+                extra_body={"options": {**default_options(), "temperature": 0.0}},
+            )
+            break
+        except Exception as e:  # noqa: BLE001 — транзиентная 500 от llama-server, не наша ошибка схемы
+            last_exc = e
+            log.warning("[IMAGE_OCR_RETRY] Doc: '%s' | попытка %d/%d упала: %s",
+                        doc_name, attempt + 1, _IMAGE_OCR_TRANSIENT_RETRIES, e)
+    else:
+        raise last_exc  # все попытки исчерпаны
     elapsed = time.perf_counter() - t0
     content = response.choices[0].message.content
     text = content if isinstance(content, str) else ""
-    log.info("[IMAGE_OCR] Doc: '%s' | Elapsed: %.2fs | символов=%d", doc_name, elapsed, len(text))
+    log.info("[IMAGE_OCR] Doc: '%s' | Elapsed: %.2fs | символов=%d | task_token=%s",
+              doc_name, elapsed, len(text), task_token or "-")
     log.debug("[IMAGE_OCR_RAW] Doc: '%s' | %s", doc_name, text[:RAW_LOG_LIMIT])
     return text
 
@@ -215,6 +271,34 @@ def _call_sibr_ocr(b64_images: list[str], doc_name: str) -> str:
     log.info("[SIBR_OCR] Doc: '%s' | Elapsed: %.2fs | символов=%d", doc_name, elapsed, len(text))
     log.debug("[SIBR_OCR_RAW] Doc: '%s' | %s", doc_name, text[:RAW_LOG_LIMIT])
     return text
+
+
+def _sibr_ocr_with_voting(b64_images: list[str], doc_name: str) -> list[LabResult]:
+    """СИБР-OCR с voting: повтор вызова при недоборе строк, выбор лучшего по числу строк.
+
+    Один и тот же запрос при temperature=0.0 иногда даёт < _SIBR_MIN_ROWS строк из-за
+    недетерминированности GPU-инференса (см. _SIBR_VOTING_TRIES). Повторные вызовы того
+    же промпта на тех же картинках обычно расходятся с первым и восстанавливают полную
+    таблицу.
+    """
+    sibr_text = _call_sibr_ocr(b64_images, doc_name)
+    rows = parse_sibr_ocr(sibr_text)
+    if len(rows) < _SIBR_MIN_ROWS:
+        for i in range(_SIBR_VOTING_TRIES):
+            try:
+                vote_text = _call_sibr_ocr(b64_images, doc_name)
+                vote_rows = parse_sibr_ocr(vote_text)
+                log.info(
+                    "[SIBR_VOTE] Doc: '%s' | попытка %d/%d | строк=%d",
+                    doc_name, i + 1, _SIBR_VOTING_TRIES, len(vote_rows),
+                )
+                if len(vote_rows) > len(rows):
+                    rows = vote_rows
+                if len(rows) >= _SIBR_MIN_ROWS:
+                    break
+            except Exception as e:  # noqa: BLE001
+                log.warning("[SIBR_VOTE] Doc: '%s' | попытка %d упала: %s", doc_name, i + 1, e)
+    return rows
 
 
 def _raw_text_from_exc(exc: Exception) -> str:
@@ -273,7 +357,10 @@ def _vlm_extract_attempt(
     return rows, (len(tables) or tables_struct)
 
 
-def _ocr_then_structure(b64_images: list[str], doc_name: str) -> tuple[list[LabResult], int]:
+def _ocr_then_structure(
+    b64_images: list[str], doc_name: str,
+    low_res_retry_fn: "Callable[[], list[str]] | None" = None,
+) -> tuple[list[LabResult], int]:
     """OCR-первичный путь: модель читает таблицу как ТЕКСТ (без grammar), затем
     детерминированное структурирование.
 
@@ -282,12 +369,45 @@ def _ocr_then_structure(b64_images: list[str], doc_name: str) -> tuple[list[LabR
     structured output/grammar тем же весом схлопывает вывод в пусто/мусор. Андрофлор с
     Lg-нотацией разбираем доменным parser'ом (без LLM), остальное — общим text-LLM
     структурированием _structure_text (тот же путь, что и для текстового слоя PDF).
+
+    low_res_retry_fn — ленивый рендер той же страницы в меньшем разрешении без
+    upscale/enhance для androflor-retry (см. _ANDROFLOR_RETRY_LONG_SIDE); вызывается
+    только если основной проход не набрал минимум строк, чтобы не делать лишний рендер
+    на документах, где Андрофлор-путь не нужен.
     """
     text = _call_image_ocr(b64_images, doc_name)
     if not text.strip():
         return [], 0
     if is_androflor_text(text):
         rows = parse_androflor_ocr(text)
+        # Мульти-вызов + voting: PaddleOCR-VL стохастичен — один прогон даёт 2 строки,
+        # другой 11. Делаем N дополнительных вызовов с чередованием task-токенов и
+        # разрешений, выбираем результат с максимальным числом распарсенных строк.
+        if len(rows) < _ANDROFLOR_MIN_ROWS:
+            low_res_images = low_res_retry_fn() if low_res_retry_fn else None
+            task_tokens = [_PADDLEOCR_TABLE_TASK_TOKEN, "OCR:"]
+            image_sets = [b64_images] + ([low_res_images] if low_res_images else [])
+            best_rows = rows
+            for i in range(_ANDROFLOR_VOTING_TRIES):
+                token = task_tokens[i % len(task_tokens)]
+                images = image_sets[i % len(image_sets)]
+                try:
+                    vote_text = _call_image_ocr(images, doc_name, task_token=token)
+                    vote_rows = parse_androflor_ocr(vote_text)
+                    log.info(
+                        "[ANDROFLOR_VOTE] Doc: '%s' | попытка %d/%d | token=%s | строк=%d",
+                        doc_name, i + 1, _ANDROFLOR_VOTING_TRIES, token, len(vote_rows),
+                    )
+                    if len(vote_rows) > len(best_rows):
+                        best_rows = vote_rows
+                except Exception as e:  # noqa: BLE001
+                    log.warning("[ANDROFLOR_VOTE] Doc: '%s' | попытка %d упала: %s", doc_name, i + 1, e)
+            if len(best_rows) > len(rows):
+                log.info(
+                    "[ANDROFLOR_VOTING_RESULT] Doc: '%s' | строк было=%d, после voting=%d",
+                    doc_name, len(rows), len(best_rows),
+                )
+                rows = best_rows
         # Минимум строк: настоящая таблица Андрофлор даёт ~20 строк, тогда как страница-описание
         # бланка (тоже содержит маркеры «Андрофлор»/«Lactobacillus») при жадном разборе отдаёт
         # 0–1 мусорную строку из прозы/ссылок. Принимаем доменный разбор только если строк
@@ -299,8 +419,7 @@ def _ocr_then_structure(b64_images: list[str], doc_name: str) -> tuple[list[LabR
         log.info("[ANDROFLOR_OCR_SKIP] Doc: '%s' | не таблица Андрофлор (строк=%d) — пропуск", doc_name, len(rows))
         return [], 0
     if is_sibr_text(text):
-        sibr_text = _call_sibr_ocr(b64_images, doc_name)
-        rows = parse_sibr_ocr(sibr_text)
+        rows = _sibr_ocr_with_voting(b64_images, doc_name)
         if len(rows) >= _SIBR_MIN_ROWS:
             log.info("[SIBR_OCR] Doc: '%s' | строк=%d", doc_name, len(rows))
             return rows, len(rows)
@@ -360,7 +479,10 @@ def _supplement_with_vlm(ocr_rows: list[LabResult], b64_images: list[str], doc_n
     return merged
 
 
-def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult], int]:
+def _extract_once(
+    b64_images: list[str], doc_name: str,
+    low_res_retry_fn: "Callable[[], list[str]] | None" = None,
+) -> tuple[list[LabResult], int]:
     """Один логический проход извлечения по странице(ам) → (строки, число таблиц/исследований).
 
     OCR-первичный путь (OCR-текст → детерминированное структурирование) с фолбэком на
@@ -371,7 +493,7 @@ def _extract_once(b64_images: list[str], doc_name: str) -> tuple[list[LabResult]
     """
     structured_count = 0
     try:
-        rows, structured_count = _ocr_then_structure(b64_images, doc_name)
+        rows, structured_count = _ocr_then_structure(b64_images, doc_name, low_res_retry_fn)
     except Exception as e:  # noqa: BLE001 — OCR-вызов вне instructor-ретраев; падение → фолбэк на VLM
         log.warning("[OCR_PRIMARY_FAILED] Doc: '%s' | OCR-путь упал, фолбэк на VLM: %s", doc_name, e)
         rows = []
@@ -434,6 +556,42 @@ def _call_text(messages: list[dict], doc_name: str, structured: bool | None = No
     return response
 
 
+def _call_text_compact(messages: list[dict], doc_name: str) -> list[LabResult]:
+    """Компактный построчный вызов TEXT_MODEL: «имя|значение|единица|референс».
+
+    Без JSON-схемы и без grammar: ключи JSON на каждой строке таблицы стоят больше
+    токенов, чем данные. Замер на реальных страницах — вызов быстрее в 1.9–2.4 раза
+    при том же наборе строк, а на части страниц ещё и обходит коллапс XGrammar в
+    пустой валидный объект (см. _TEXT_EMPTY_RETRIES).
+    """
+    t0 = time.perf_counter()
+    log.info("[START_TEXT_COMPACT] Doc: '%s' | Model: %s | ctx=%d", doc_name, TEXT_MODEL, TEXT_NUM_CTX)
+    client = get_raw_client()
+    response = client.chat.completions.create(
+        model=TEXT_MODEL,
+        messages=messages,
+        max_tokens=TEXT_MAX_TOKENS,
+        extra_body={"options": {
+            "keep_alive": OLLAMA_KEEP_ALIVE,
+            "num_ctx": TEXT_NUM_CTX,
+            "repeat_penalty": TEXT_REPEAT_PENALTY,
+            "num_predict": TEXT_NUM_PREDICT,
+            "temperature": TEXT_LAYER_TEMPERATURE,
+        }},
+    )
+    content = response.choices[0].message.content
+    text = content if isinstance(content, str) else ""
+    rows = rows_from_raw(parse_compact_rows(text))
+    log.info(
+        "[DONE_TEXT_COMPACT] Doc: '%s' | Rows: %d | Elapsed: %.2fs | символов=%d",
+        doc_name, len(rows), time.perf_counter() - t0, len(text),
+    )
+    if not rows:
+        log.warning("[TEXT_COMPACT_EMPTY] Doc: '%s' | сырой ответ (%d симв.): %s",
+                    doc_name, len(text), text[:RAW_LOG_LIMIT] or "<пусто>")
+    return rows
+
+
 def _structure_text(lines: list[str], doc_name: str) -> list[LabResult]:
     """Координатные строки → LabResult через TEXT_MODEL (temp=0) + маппинг.
 
@@ -444,6 +602,19 @@ def _structure_text(lines: list[str], doc_name: str) -> list[LabResult]:
     случается и без grammar, поэтому unstructured-повтор ограничен _TEXT_EMPTY_RETRIES.
     """
     text = "\n".join(lines)
+
+    # Компактный формат — основной путь (быстрее в ~2 раза). JSON-схема остаётся
+    # страховкой: если компакт вернул 0 строк, идём прежним путём, не теряя страницу.
+    if TEXT_COMPACT_OUTPUT:
+        try:
+            compact_rows = _call_text_compact(
+                _messages_from_text(ANALYSIS_TEXT_COMPACT_SYSTEM, TEXT_INSTRUCTION, text), doc_name)
+            if compact_rows:
+                return compact_rows
+            log.info("[TEXT_COMPACT_FALLBACK] Doc: '%s' | компакт пуст — повтор по JSON-схеме", doc_name)
+        except Exception as e:  # noqa: BLE001 — сетевой/серверный сбой не должен терять страницу
+            log.warning("[TEXT_COMPACT_FAILED] Doc: '%s' | %s — повтор по JSON-схеме", doc_name, e)
+
     messages = _messages_from_text(ANALYSIS_TEXT_SYSTEM, TEXT_INSTRUCTION, text)
     try:
         rows = _rows_or_harvest(_call_text(messages, doc_name))
@@ -523,8 +694,7 @@ def _extract_from_text_layer(source_path: Path) -> list[LabResult] | None:
         )
         for i in sibr_page_indices:
             b64 = to_base64_jpegs([images[i]])
-            sibr_text = _call_sibr_ocr(b64, f"{source_path.name}#стр{i + 1}")
-            sibr_rows = parse_sibr_ocr(sibr_text)
+            sibr_rows = _sibr_ocr_with_voting(b64, f"{source_path.name}#стр{i + 1}")
             if len(sibr_rows) >= _SIBR_MIN_ROWS:
                 log.info("[SIBR_OCR] Doc: '%s' | страница %d | строк=%d", source_path.name, i + 1, len(sibr_rows))
                 rows = merge_dedup(rows, sibr_rows)
@@ -567,10 +737,21 @@ def run_analysis(source_path: Path) -> list[LabResult]:
     b64_images = _prepare_b64(source_path)
     n_pages = len(b64_images)
 
+    def _low_res_retry_fn(page_index: int | None) -> Callable[[], list[str]]:
+        def _render() -> list[str]:
+            images = prepare_images(
+                source_path, long_side=_ANDROFLOR_RETRY_LONG_SIDE,
+                upscale=False, deskew=False, enhance=False,
+            )
+            if page_index is not None:
+                images = [images[page_index]]
+            return to_base64_jpegs(images)
+        return _render
+
     if n_pages <= 1:
         # Одностраничный документ — один вызов.
         try:
-            rows, _ = _extract_once(b64_images, source_path.name)
+            rows, _ = _extract_once(b64_images, source_path.name, _low_res_retry_fn(None))
         except ExtractionError as e:
             log.warning("[EXTRACT_FAILED] Doc: '%s' | извлечение пусто: %s", source_path.name, e)
             rows = []
@@ -586,7 +767,7 @@ def run_analysis(source_path: Path) -> list[LabResult]:
         for i, page in enumerate(b64_images):
             n_calls += 1
             try:
-                page_rows, _ = _extract_once([page], f"{source_path.name}#стр{i + 1}")
+                page_rows, _ = _extract_once([page], f"{source_path.name}#стр{i + 1}", _low_res_retry_fn(i))
             except ExtractionError as e:
                 log.warning(
                     "[MULTIPAGE_PAGE_FAILED] Doc: '%s' стр.%d пропущена: %s",

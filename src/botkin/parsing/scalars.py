@@ -4,12 +4,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-_RANGE_RE = re.compile(r"^(-?\d+(?:[.,]\d+)?)\s*[-–—]\s*(-?\d+(?:[.,]\d+)?)$")
-_LE_RE = re.compile(r"^[<≤]\s*(-?\d+(?:[.,]\d+)?)$")
-_GE_RE = re.compile(r"^[>≥]\s*(-?\d+(?:[.,]\d+)?)$")
-# Любое число, но не ловим дефис-минус между двумя цифрами как знак отрицания
-# (иначе "35-56" даёт токен "-56" и _verbatim_guard отбрасывает строку).
-_NUM_RE = re.compile(r"(?<![\d.,])-?\d+(?:[.,]\d+)?")
+from botkin.parsing.constants import RANGE_RE, LE_RE, GE_RE, NUM_RE
 
 
 def _to_float(s: str) -> float:
@@ -51,20 +46,20 @@ def parse_reference_range(ref) -> tuple[Optional[float], Optional[float], Option
         return None, None, None, None
     # Русские бланки разбивают тысячи пробелом; убираем пробелы между цифрами.
     s = re.sub(r"(?<=\d)\s+(?=\d)", "", s)
-    m = _RANGE_RE.match(s)
+    m = RANGE_RE.match(s)
     if m:
         return _to_float(m.group(1)), _to_float(m.group(2)), None, None
-    m = _LE_RE.match(s)
+    m = LE_RE.match(s)
     if m:
         return None, _to_float(m.group(1)), "<", None
-    m = _GE_RE.match(s)
+    m = GE_RE.match(s)
     if m:
         return _to_float(m.group(1)), None, ">", None
     return None, None, None, s
 
 
 def looks_like_ref(s: str) -> bool:
-    return bool(_RANGE_RE.match(s) or _LE_RE.match(s) or _GE_RE.match(s))
+    return bool(RANGE_RE.match(s) or LE_RE.match(s) or GE_RE.match(s))
 
 
 def looks_like_number(s: str) -> bool:
@@ -77,7 +72,7 @@ def num_tokens(*values) -> list[str]:
     for v in values:
         if v is None:
             continue
-        for m in _NUM_RE.findall(str(v)):
+        for m in NUM_RE.findall(str(v)):
             s = m.replace(",", ".")
             if s.endswith(".0"):
                 s = s[:-2]
