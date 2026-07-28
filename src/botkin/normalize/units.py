@@ -2,18 +2,36 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from botkin.reference.units import UNIT_ALIASES
 
-# Надстрочные Unicode-цифры степени («10⁹/л») сворачиваем в ASCII-нотацию «10^9/л»,
-# чтобы и форма из текстового слоя PDF, и форма из реестра ФСЛИ совпадали по ключу.
-_SUPERSCRIPT = {"⁰": "0", "¹": "1", "²": "2", "³": "3", "⁴": "4",
-                "⁵": "5", "⁶": "6", "⁷": "7", "⁸": "8", "⁹": "9"}
-_SUPER_RE = re.compile("[" + "".join(_SUPERSCRIPT) + "]+")
+# Сворачиваем надстрочные Unicode-цифры («10⁹/л») в ASCII-нотацию «10^9/л».
+# ¹²³ находятся в Latin-1 supplement (U+00B9/B2/B3), остальные — в U+2070-2079.
+_SUPER_RE = re.compile(r"[\u2070\u00b9\u00b2\u00b3\u2074-\u2079]+")
 
 
 def _fold_superscripts(s: str) -> str:
-    return _SUPER_RE.sub(lambda m: "^" + "".join(_SUPERSCRIPT[c] for c in m.group()), s)
+    """Replace Unicode superscript digits with ASCII '^' notation."""
+    def _replace(match: re.Match) -> str:
+        result = []
+        for ch in match.group():
+            name = unicodedata.name(ch, "")
+            if "SUPERSCRIPT" in name:
+                # Extract the digit from the name (e.g., "SUPERSCRIPT ONE" → "1")
+                digit_map = {
+                    "SUPERSCRIPT ZERO": "0", "SUPERSCRIPT ONE": "1",
+                    "SUPERSCRIPT TWO": "2", "SUPERSCRIPT THREE": "3",
+                    "SUPERSCRIPT FOUR": "4", "SUPERSCRIPT FIVE": "5",
+                    "SUPERSCRIPT SIX": "6", "SUPERSCRIPT SEVEN": "7",
+                    "SUPERSCRIPT EIGHT": "8", "SUPERSCRIPT NINE": "9",
+                }
+                result.append(digit_map.get(name, ch))
+            else:
+                result.append(ch)
+        return "^" + "".join(result)
+
+    return _SUPER_RE.sub(_replace, s)
 
 
 def _key(raw: str) -> str:

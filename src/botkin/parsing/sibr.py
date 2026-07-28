@@ -14,6 +14,7 @@ import re
 
 from botkin.domain.models import LabResult
 from botkin.parsing.constants import SIBR_MARKERS, GAS_MARKERS, GAS_NAME, SIBR_ROW_RE
+from botkin.parsing.tokens import to_float
 
 
 def _has_sibr_gases(text: str) -> bool:
@@ -44,12 +45,8 @@ def parse_sibr_ocr(text: str) -> list[LabResult]:
             raw = match.group(key)
             rows.append(LabResult(
                 analyte_name=f"СИБР-тест: {time_label}, {name}",
-                value_num=_to_float(raw),
+                value_num=to_float(raw),
                 value_raw=raw,
                 unit=unit,
             ))
     return rows
-
-
-def _to_float(value: str) -> float:
-    return float(value.replace(",", "."))

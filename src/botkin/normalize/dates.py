@@ -1,19 +1,14 @@
-"""Нормализация дат из разных форматов к единому datetime (ISO)."""
+"""Нормализация дат из разных форматов к единому datetime (ISO).
+
+Использует гибридный подход: datetime.fromisoformat для ISO-форматов
+(dateparser не парсит ISO с временем), dateparser для остальных
+(русские месяцы, числовые форматы, "г." suffix).
+"""
 from __future__ import annotations
 
 from datetime import datetime
 
-_MONTHS_RU = {
-    "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
-    "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
-}
-
-# Числовые форматы в порядке приоритета. %y покрывает двузначный год.
-_NUMERIC_FORMATS = (
-    "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y",
-    "%d.%m.%y", "%d/%m/%y", "%d-%m-%y",
-    "%Y-%m-%d",
-)
+import dateparser
 
 
 def parse_date(value: str | datetime | None) -> tuple[datetime | None, str | None]:
@@ -28,28 +23,14 @@ def parse_date(value: str | datetime | None) -> tuple[datetime | None, str | Non
         return (None, None)
 
     raw_out = value
-    cleaned = value.strip().lower().replace(" г.", "").replace("г.", "").strip()
+    cleaned = value.strip()
 
-    # 1. Русский месяц прописью: "23 марта 2026"
-    parts = cleaned.split()
-    if len(parts) == 3 and parts[1] in _MONTHS_RU:
-        try:
-            day, month_name, year = parts
-            return (datetime(int(year), _MONTHS_RU[month_name], int(day)), raw_out)
-        except (ValueError, KeyError):
-            pass
-
-    # 2. ISO с временем
+    # ISO с временем — fromisoformat обрабатывает нативно (dateparser не может)
     try:
         return (datetime.fromisoformat(cleaned.replace("z", "+00:00")), raw_out)
     except ValueError:
         pass
 
-    # 3. Числовые форматы
-    for fmt in _NUMERIC_FORMATS:
-        try:
-            return (datetime.strptime(cleaned, fmt), raw_out)
-        except ValueError:
-            continue
-
-    return (None, raw_out)
+    # Русские месяцы, числовые форматы, "г." suffix — dateparser handles all
+    dt = dateparser.parse(cleaned, languages=["ru"])
+    return (dt, raw_out) if dt else (None, raw_out)

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from botkin.parsing.constants import RANGE_SEARCH_RE, UPPER_SEARCH_RE, LOWER_SEARCH_RE
+from botkin.parsing.tokens import to_float, as_float
 
 
 @dataclass(frozen=True)
@@ -63,13 +64,13 @@ def parse_reference_range(ref_text: object) -> tuple[float | None, float | None]
         return (None, None)
     match = RANGE_SEARCH_RE.search(text)
     if match:
-        return (_num(match.group(1)), _num(match.group(2)))
+        return (to_float(match.group(1)), to_float(match.group(2)))
     match = UPPER_SEARCH_RE.search(text)
     if match:
-        return (None, _num(match.group(1)))
+        return (None, to_float(match.group(1)))
     match = LOWER_SEARCH_RE.search(text)
     if match:
-        return (_num(match.group(1)), None)
+        return (to_float(match.group(1)), None)
     return (None, None)
 
 
@@ -80,9 +81,9 @@ def build_lab_facts(rows: Iterable[Mapping[str, object]]) -> list[LabFact]:
         name = str(row.get("name") or row.get("analyte_name") or "").strip()
         if not name:
             continue
-        value_num = _as_float(row.get("value_num"))
-        raw_low = _as_float(row.get("ref_low"))
-        raw_high = _as_float(row.get("ref_high"))
+        value_num = as_float(row.get("value_num"))
+        raw_low = as_float(row.get("ref_low"))
+        raw_high = as_float(row.get("ref_high"))
         ref_low, ref_high = raw_low, raw_high
         if ref_low is None and ref_high is None:
             ref_low, ref_high = parse_reference_range(row.get("ref_text"))
@@ -107,19 +108,6 @@ def render_lab_facts(facts: Iterable[LabFact]) -> str:
             f"({fact.reference})"
         )
     return "\n".join(lines)
-
-
-def _as_float(value: object) -> float | None:
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _num(raw: str) -> float:
-    return float(raw.replace(",", "."))
 
 
 def _as_text(value: object) -> str | None:

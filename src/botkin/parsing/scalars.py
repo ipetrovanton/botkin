@@ -5,10 +5,7 @@ import re
 from typing import Optional
 
 from botkin.parsing.constants import RANGE_RE, LE_RE, GE_RE, NUM_RE
-
-
-def _to_float(s: str) -> float:
-    return float(s.replace(",", "."))
+from botkin.parsing.tokens import to_float
 
 
 def parse_lab_value(value) -> tuple[Optional[float], Optional[str]]:
@@ -29,7 +26,7 @@ def parse_lab_value(value) -> tuple[Optional[float], Optional[str]]:
         return None, s
     m = re.match(r"^(-?\d+(?:[.,]\d+)?)", s)  # ведущее число, хвост (флаг/единица) отбрасываем
     if m:
-        return _to_float(m.group(1)), None
+        return to_float(m.group(1)), None
     return None, s
 
 
@@ -48,13 +45,13 @@ def parse_reference_range(ref) -> tuple[Optional[float], Optional[float], Option
     s = re.sub(r"(?<=\d)\s+(?=\d)", "", s)
     m = RANGE_RE.match(s)
     if m:
-        return _to_float(m.group(1)), _to_float(m.group(2)), None, None
+        return to_float(m.group(1)), to_float(m.group(2)), None, None
     m = LE_RE.match(s)
     if m:
-        return None, _to_float(m.group(1)), "<", None
+        return None, to_float(m.group(1)), "<", None
     m = GE_RE.match(s)
     if m:
-        return _to_float(m.group(1)), None, ">", None
+        return to_float(m.group(1)), None, ">", None
     return None, None, None, s
 
 

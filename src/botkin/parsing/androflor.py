@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 
 from botkin.domain.models import LabResult
+from botkin.parsing.fuzzy import FuzzyNameMatcher
+from botkin.parsing.tokens import to_float
 
 # Канонические имена и синонимы загружаются из JSON-файлов.
 _REF_DIR = Path(__file__).parent.parent / "reference" / "androflor"
@@ -15,53 +17,11 @@ _ANDROFLOR_SYNONYMS: dict[str, str] = json.loads(
     (_REF_DIR / "synonyms.json").read_text(encoding="utf-8")
 )
 
+_fuzzy_matcher = FuzzyNameMatcher(_ANDROFLOR_CANONICAL_NAMES, _ANDROFLOR_SYNONYMS)
 
 
 
-def _levenshtein(a: str, b: str) -> int:
-    """Классический Левенштейн без оптимизаций — строки короткие (≤60 символов)."""
-    if len(a) < len(b):
-        a, b = b, a
-    if not b:
-        return len(a)
-    prev = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
-        curr = [i]
-        for j, cb in enumerate(b, 1):
-            curr.append(min(
-                prev[j] + 1,
-                curr[j - 1] + 1,
-                prev[j - 1] + (ca != cb),
-            ))
-        prev = curr
-    return prev[-1]
 
-
-def _fuzzy_match_name(ocr_name: str) -> str | None:
-    """Маппинг OCR-искажённого имени на каноническое из словаря.
-
-    Порог = max(3, len(name) // 4) — допускаем больше ошибок на длинных именах.
-    При case-insensitive совпадении возвращаем каноническое имя (нормализуем регистр).
-    Возвращает каноническое имя или None, если близкого совпадения нет.
-    """
-    low_ocr = ocr_name.lower().strip()
-    # Точный синоним/аббревиатура (справочник ДНК-Технология) — до fuzzy-поиска.
-    if low_ocr in _ANDROFLOR_SYNONYMS:
-        return _ANDROFLOR_SYNONYMS[low_ocr]
-    # Case-insensitive совпадение — нормализуем регистр к каноническому
-    for canonical in _ANDROFLOR_CANONICAL_NAMES:
-        if low_ocr == canonical.lower():
-            return canonical
-    best_name: str | None = None
-    best_dist = 999
-    for canonical in _ANDROFLOR_CANONICAL_NAMES:
-        low_can = canonical.lower()
-        dist = _levenshtein(low_ocr, low_can)
-        threshold = max(3, len(low_can) // 4)
-        if dist < best_dist and dist <= threshold:
-            best_dist = dist
-            best_name = canonical
-    return best_name
 
 _ANDROFLOR_MARKERS = ("андрофлор", "lactobacillus spp", "геномная днк человека")
 # Якорь на логарифмический маркер "10 <число>": qwen3-vl недетерминирован и выдаёт строку то
@@ -147,7 +107,7 @@ def _fix_merged_value(raw_value: str) -> float:
     '10 4.7' → '10 47' или '1047'. Реальные Lg-значения в Андрофлор = 3.0–6.0,
     поэтому если число > _LG_MAX, делим на 10 (сдвиг запятой).
     """
-    val = _to_float(raw_value)
+    val = to_float(raw_value)
     while val > _LG_MAX:
         val /= 10.0
     return val
@@ -155,7 +115,7 @@ def _fix_merged_value(raw_value: str) -> float:
 
 def _apply_fuzzy_name(name: str) -> str:
     """Маппинг OCR-искажённого имени на каноническое через fuzzy matching."""
-    matched = _fuzzy_match_name(name)
+    matched = _fuzzy_matcher.match(name)
     return matched if matched else name
 
 
@@ -178,7 +138,7 @@ def _parse_single_line_format(text: str) -> list[LabResult]:
         if relative is not None:
             rows.append(LabResult(
                 analyte_name=f"{name}, относительный показатель",
-                value_num=_to_float(relative),
+                value_num=to_float(relative),
                 value_raw=relative,
                 unit="Lg(X/СВМО)",
             ))
@@ -208,7 +168,7 @@ def _parse_reading_order_format(text: str) -> list[LabResult]:
             if pending_name and has_value:
                 rows.append(LabResult(
                     analyte_name=f"{pending_name}, относительный показатель",
-                    value_num=_to_float(m.group("value")),
+                    value_num=to_float(m.group("value")),
                     value_raw=m.group("value"),
                     unit="Lg(X/СВМО)",
                 ))
@@ -261,7 +221,3 @@ def parse_androflor_ocr(text: str) -> list[LabResult]:
     single_line = _parse_single_line_format(text)
     reading_order = _parse_reading_order_format(text)
     return reading_order if len(reading_order) > len(single_line) else single_line
-
-
-def _to_float(value: str) -> float:
-    return float(value.replace(",", "."))
