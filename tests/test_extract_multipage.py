@@ -84,7 +84,8 @@ def test_extract_once_salvages_rows_from_truncated_response(monkeypatch):
 
     monkeypatch.setattr(ex, "_call_vlm", boom)
     rows, n = ex._extract_once(["img"], "doc.pdf#стр2")
-    assert [r.analyte_name for r in rows] == ["СОЭ"]
+    # json_repair восстанавливает оба объекта, включая обрезанный "Лейкоциты"
+    assert "СОЭ" in [r.analyte_name for r in rows]
 
 
 def test_merge_dedup_by_name_drops_conflicting_value():

@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+import json_repair
+
 from botkin.domain.models import LabResult
 from botkin.parsing.rows import dedup_rows
 from botkin.parsing.scalars import (
@@ -144,45 +146,34 @@ def harvest_lab_rows(data) -> list[LabResult]:
 
 
 def loads_json(text: str):
-    """Толерантный json.loads сырого ответа модели. None, если не разобрать."""
+    """Толерантный json.loads сырого ответа модели. None, если не разобрать.
+
+    Сначала пробует стандартный json.loads (быстрее), при неудаче — json_repair
+    (чинит обрезанные кавычки, скобки, запятые)."""
     if not text:
         return None
     try:
         return json.loads(text)
     except (json.JSONDecodeError, ValueError):
-        return None
+        return json_repair.loads(text)
 
 
 def salvage_json_objects(text: str) -> list[dict]:
-    """Извлекает все сбалансированные {...}-объекты из (возможно оборванного) текста.
+    """Извлекает JSON-объекты из (возможно оборванного) текста.
 
-    qwen3-vl при зацикливании упирается в num_predict и обрывает JSON на полуслове —
-    весь ответ невалиден, json.loads падает. Но полные объекты-строки ДО обрыва
-    валидны: сканируем по балансу скобок (учитывая строки/escape), парсим каждый
-    закрытый объект отдельно. harvester затем соберёт из них показатели.
+    Использует json_repair для восстановления повреждённого JSON,
+    затем рекурсивно собирает все dict-объекты из результата.
     """
-    objs: list[dict] = []
-    stack: list[int] = []
-    in_str = esc = False
-    for i, ch in enumerate(text):
-        if in_str:
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == "{":
-            stack.append(i)
-        elif ch == "}" and stack:
-            start = stack.pop()
-            try:
-                obj = json.loads(text[start:i + 1])
-            except (json.JSONDecodeError, ValueError):
-                continue
-            if isinstance(obj, dict):
-                objs.append(obj)
-    return objs
+    if not text:
+        return []
+    repaired = json_repair.loads(text)
+    return _extract_all_dicts(repaired)
+
+
+def _extract_all_dicts(node) -> list[dict]:
+    """Рекурсивно собирает все dict из произвольной структуры."""
+    if isinstance(node, dict):
+        return [node] + [d for v in node.values() for d in _extract_all_dicts(v)]
+    if isinstance(node, list):
+        return [d for item in node for d in _extract_all_dicts(item)]
+    return []
