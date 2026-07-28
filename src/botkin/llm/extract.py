@@ -24,6 +24,7 @@ from botkin.domain.models import LabResult, DoctorReport
 from botkin.exceptions import ExtractionError
 from botkin.llm.client import (
     get_client, get_raw_client, build_extra_body, build_retrying, default_options, usage_of,
+    model_name,
 )
 from botkin.llm.prompts import (
     ANALYSIS_INSTRUCTION, ANALYSIS_TEXT_SYSTEM, ANALYSIS_TEXT_COMPACT_SYSTEM, ANALYSIS_VLM_SYSTEM,
@@ -180,7 +181,7 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
         options = {**default_options(), "temperature": VLM_TEMPERATURE}
     try:
         response = client.chat.completions.create(
-            model=VLM_MODEL,
+            model=model_name(VLM_MODEL),
             messages=messages,
             response_model=response_model,
             max_retries=build_retrying(),
@@ -233,9 +234,10 @@ def _call_image_ocr(b64_images: list[str], doc_name: str, task_token: str | None
     for attempt in range(_IMAGE_OCR_TRANSIENT_RETRIES):
         try:
             response = client.chat.completions.create(
-                model=VLM_MODEL,
+                model=model_name(VLM_MODEL),
                 messages=messages,
                 max_tokens=VLM_MAX_TOKENS,
+                temperature=0.0,
                 extra_body={"options": {**default_options(), "temperature": 0.0}},
             )
             break
@@ -260,9 +262,10 @@ def _call_sibr_ocr(b64_images: list[str], doc_name: str) -> str:
     client = get_raw_client()
     t0 = time.perf_counter()
     response = client.chat.completions.create(
-        model=VLM_MODEL,
+        model=model_name(VLM_MODEL),
         messages=messages,
         max_tokens=VLM_MAX_TOKENS,
+        temperature=0.0,
         extra_body={"options": {**default_options(), "temperature": 0.0}},
     )
     elapsed = time.perf_counter() - t0
@@ -537,7 +540,7 @@ def _call_text(messages: list[dict], doc_name: str, structured: bool | None = No
     client = get_client(mode=instructor.Mode.JSON)
     try:
         response = client.chat.completions.create(
-            model=TEXT_MODEL,
+            model=model_name(TEXT_MODEL),
             messages=messages,
             response_model=RawAnalysis,
             max_retries=build_retrying(),
@@ -568,9 +571,10 @@ def _call_text_compact(messages: list[dict], doc_name: str) -> list[LabResult]:
     log.info("[START_TEXT_COMPACT] Doc: '%s' | Model: %s | ctx=%d", doc_name, TEXT_MODEL, TEXT_NUM_CTX)
     client = get_raw_client()
     response = client.chat.completions.create(
-        model=TEXT_MODEL,
+        model=model_name(TEXT_MODEL),
         messages=messages,
         max_tokens=TEXT_MAX_TOKENS,
+        temperature=TEXT_LAYER_TEMPERATURE,
         extra_body={"options": {
             "keep_alive": OLLAMA_KEEP_ALIVE,
             "num_ctx": TEXT_NUM_CTX,

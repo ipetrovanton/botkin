@@ -20,6 +20,7 @@ from botkin.domain.models import ClassifyResult, DocType
 from botkin.exceptions import ClassificationError
 from botkin.llm.client import (
     get_client, build_extra_body, build_retrying, default_options, usage_of,
+    model_name,
 )
 from botkin.llm.constants import (
     LAB_TABLE_MARKERS, UNKNOWN_TITLE_KEYWORDS, DOCTOR_REPORT_TITLE_KEYWORDS,
@@ -138,7 +139,7 @@ def run_vlm(source_path: Path) -> ClassifyResult:
 
     try:
         response = client.chat.completions.create(
-            model=VLM_MODEL,
+            model=model_name(VLM_MODEL),
             messages=messages,
             response_model=ClassifySchema,
             max_retries=build_retrying(),

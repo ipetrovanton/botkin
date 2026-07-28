@@ -1,4 +1,10 @@
-"""Тонкая обёртка над Ollama через OpenAI-compatible интерфейс."""
+"""Обёртка над LLM inference-бэкендами через OpenAI-compatible интерфейс.
+
+Поддерживает три бэкенда (выбор через LLM_BACKEND env):
+- ollama (по умолчанию): XGrammar structured output, keep_alive, warmup
+- vllm: guided_json (outlines), модель всегда в VRAM
+- mlx: instructor-only валидация, модель в unified memory
+"""
 import json
 import logging
 import os
@@ -57,8 +63,34 @@ def build_retrying(
     )
 
 
+def get_backend() -> str:
+    """Текущий inference-бэкенд: ollama | vllm | mlx."""
+    return os.getenv("LLM_BACKEND", "ollama").lower()
+
+
+_MODEL_MAP = {
+    "vllm": {
+        "qwen3-vl:8b-instruct": "Qwen/Qwen3-VL-8B-Instruct",
+        "qwen3:8b": "Qwen/Qwen3-8B",
+    },
+    "mlx": {
+        "qwen3-vl:8b-instruct": "mlx-community/Qwen3-VL-8B-Instruct-4bit",
+        "qwen3:8b": "mlx-community/Qwen3-8B-4bit",
+    },
+}
+
+
+def model_name(model: str) -> str:
+    """Преобразует имя модели в формат, ожидаемый текущим бэкендом."""
+    backend = get_backend()
+    return _MODEL_MAP.get(backend, {}).get(model, model)
+
+
 def default_options() -> dict:
-    """Опции Ollama для VLM-вызовов. keep_alive держит модель в VRAM между вызовами."""
+    """Опции для VLM-вызовов. Для Ollama — keep_alive и параметры контекста.
+    Для vLLM/MLX — пустой словарь (параметры задаются при запуске сервера)."""
+    if get_backend() != "ollama":
+        return {}
     return {
         "keep_alive": OLLAMA_KEEP_ALIVE,
         "num_ctx": VLM_NUM_CTX,
@@ -72,25 +104,25 @@ def build_extra_body(
     options: dict | None = None,
     structured: bool | None = None,
 ) -> dict:
-    """extra_body для OpenAI-SDK → Ollama: опции + (опц.) нативный format=JSON-схема.
+    """extra_body для OpenAI-SDK, зависящий от бэкенда.
 
-    Нативный параметр Ollama `format` принуждает грамматику декодера к схеме (XGrammar).
-    Прокидываем его в обход instructor — instructor.Mode.JSON остаётся для валидации и
-    ретраев, а схему на уровне токенов держит Ollama. OpenAI-стандартный
-    response_format=json_schema на /v1 Ollama игнорирует (ollama/ollama#10001), поэтому
-    именно нативный format. Под флагом VLM_STRUCTURED_OUTPUT — можно отключить.
-
-    structured=None → использовать глобальный VLM_STRUCTURED_OUTPUT; True/False —
-    форсировать включение/выключение (для адаптивного фолбэка: XGrammar на сложных
-    картинках сваливается в пустой, но валидный по схеме объект — тогда повторяем без format).
+    Ollama: нативный format=JSON-схема (XGrammar) + options.
+    vLLM: guided_json (outlines) для structured output.
+    MLX: нет native grammar — instructor handles validation + retry.
     """
+    backend = get_backend()
     use_format = VLM_STRUCTURED_OUTPUT if structured is None else structured
-    body: dict = {"options": options or default_options()}
-    if use_format:
-        body["format"] = response_model.model_json_schema()
-    # Qwen3.5+ имеет thinking mode включённый по умолчанию; для vision/OCR задач
-    # весь вывод уходит в thinking field, content остаётся пустым (ollama/ollama#14502).
-    # Отключаем через chat_template_kwargs, когда env VLM_DISABLE_THINKING=1.
+    body: dict = {}
+
+    if backend == "ollama":
+        body["options"] = options or default_options()
+        if use_format:
+            body["format"] = response_model.model_json_schema()
+    elif backend == "vllm":
+        if use_format:
+            body["guided_json"] = response_model.model_json_schema()
+    # mlx: no native grammar constraint; instructor handles validation + retry
+
     if os.getenv("VLM_DISABLE_THINKING", "").lower() in ("1", "true", "yes", "on"):
         body["chat_template_kwargs"] = {"enable_thinking": False}
     return body
@@ -151,10 +183,20 @@ def _detect_ollama_url() -> str:
 
 
 def get_raw_client(timeout: float | None = None) -> OpenAI:
+    """OpenAI-совместимый клиент для текущего бэкенда."""
+    backend = get_backend()
+    t = VLM_REQUEST_TIMEOUT if timeout is None else timeout
+    if backend == "vllm":
+        url = os.getenv("VLLM_URL", "http://localhost:8001")
+        return OpenAI(base_url=f"{url}/v1", api_key="vllm", timeout=t)
+    if backend == "mlx":
+        url = os.getenv("MLX_URL", "http://localhost:8002")
+        return OpenAI(base_url=f"{url}/v1", api_key="mlx", timeout=t)
+    # default: ollama
     return OpenAI(
         base_url=f"{_detect_ollama_url()}/v1",
         api_key="ollama",
-        timeout=VLM_REQUEST_TIMEOUT if timeout is None else timeout,
+        timeout=t,
     )
 
 
@@ -172,14 +214,14 @@ def _warmup_models() -> list[str]:
 
 
 def warmup(models: list[str] | None = None) -> None:
-    """Загрузить веса модели(ей) в VRAM заранее — чтобы первый документ не платил
-    холодный старт (~100–120s на 6 ГБ). Best-effort: Ollama недоступна → лог, не падаем.
+    """Загрузить веса модели(ей) в VRAM заранее.
 
-    Грузим нативным Ollama `/api/generate` с пустым prompt: он лишь загружает модель
-    (`done_reason: "load"`) и не генерирует. Прокидываем num_ctx=VLM_NUM_CTX и keep_alive,
-    чтобы прогретый ранер совпал по параметрам с боевыми /v1-вызовами (иначе Ollama
-    перезагрузит модель при первом реальном запросе).
+    Для Ollama — нативный /api/generate с пустым prompt.
+    Для vLLM/MLX — no-op: модель уже загружена при старте сервера.
     """
+    if get_backend() != "ollama":
+        log.info("[WARMUP] backend=%s — прогрев не нужен, пропуск", get_backend())
+        return
     url = _detect_ollama_url()
     for model in (models or _warmup_models()):
         payload = json.dumps({
