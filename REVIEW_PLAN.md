@@ -133,6 +133,18 @@ aiogram 3.30.0 (Bot API 10.2), instructor 1.15.4.
 
   2. Затем попытка 3.14.6: `uv python install 3.14 && uv run --python 3.14 pytest -q`. Блокеры вероятны в бинарных колёсах (`opencv-python-headless`, `sqlite-vec`, `kaleido`) — если колёс под 3.14 нет, остаться на 3.13 и записать TODO с датой пересмотра.
 
+- **ВАЖНО (найдено при выполнении):** первая попытка `uv run --python 3.14 pytest` на этой машине упала
+  с `AttributeError: 'sqlite3.Connection' object has no attribute 'enable_load_extension'` в
+  `src/botkin/rag/store.py` (5 тестов `test_rag_store.py`/`test_health_api.py`). Причина — не сам
+  Python 3.14, а конкретная СИСТЕМНАЯ сборка (Homebrew/python.org на macOS), которая линкуется
+  с ограниченным Apple `libsqlite3` без поддержки loadable extensions. uv-managed сборка
+  (`python-build-standalone`, `uv python install 3.14`) собрана с полноценным sqlite3 и работает
+  корректно. **Вывод:** при диагностике подобных блокеров на бинарных колёсах/расширениях —
+  сначала проверить `python -c "import sqlite3; print(hasattr(sqlite3.connect(':memory:'),
+  'enable_load_extension'))"` на РАЗНЫХ сборках интерпретатора той же версии, прежде чем делать
+  вывод «X.Y не готова». `.python-version` фиксировать как generic `3.14` (без платформенного
+  суффикса `-macos-aarch64-none`), чтобы на Windows-хосте uv сам подобрал подходящую сборку.
+
 - **Приёмка:** тесты зелёные на выбранной версии; версия одинакова в `.python-version`, `pyproject.toml`, `Dockerfile`.
 
 ### Шаг 2.4 — Замены на более сильные библиотеки
