@@ -165,39 +165,34 @@ aiogram 3.30.0 (Bot API 10.2), instructor 1.15.4.
 
 ---
 
-## Фаза 3. Единая конфигурация (устранить двойную систему)
+## Фаза 3. Единая конфигурация
 
-**Проблема:** сосуществуют `src/botkin/config.py` (678 строк, самописный merge env/json/defaults)
-и недоделанный пакет `src/botkin/settings/` (7 файлов), который **никто не импортирует**
-кроме самого себя. При этом `pydantic-settings` объявлен в зависимостях и не используется.
-Плюс баг: в `settings/loader.py` `_project_root = Path(__file__).parent.parent.parent`
-указывает на `src/`, а не на корень — `config.json` оттуда не читается.
+**ВАЖНО (пересмотрено при выполнении):** первоначальный диагноз этой фазы был неверным.
+`src/botkin/config.py` — НЕ «самописный merge без валидации»: он уже строит типизированный
+`Settings(BaseModel)` с вложенными `*Config`-моделями (pydantic), с единой функцией приоритета
+`setting(key_path, env_name, cast)` (env → config.json → `_DEFAULTS`) и одним источником
+дефолтов. Модульные константы (`VLM_MODEL`, `PDF_RENDER_DPI` и т.п.) — просто плоский
+реэкспорт `settings.*` для обратной совместимости импортов по всему проекту.
 
-### Шаг 3.1 — Достроить settings/ на pydantic-settings
+Реальная проблема была не в `config.py`, а в параллельном пакете `src/botkin/settings/`
+(7 файлов) — он ни разу не импортировался вне себя самого, дублировал ту же идею хуже
+(инлайн `__import__("os")`, без pydantic-валидации) и содержал баг пути к корню проекта.
+**Пакет `settings/` удалён целиком** (см. коммит `a450458`), `pydantic-settings` убран из
+зависимостей как ненужный.
 
-- **Файлы:** `src/botkin/settings/*.py`.
+Также проверено: расхождение значений `config.json` (`num_ctx: 8192`, `extract_long_side: 2200`)
+и `_DEFAULTS` (`16384`, `1280`) в `config.py` — НЕ баг, а осознанная ручная настройка оператора
+после бенчмарков (см. `TEST_RESULTS.md`, `HANDOFF.md`: снижение `num_ctx`/`num_predict` для
+скорости, повышение `extract_long_side` для качества распознавания). `config.json` по дизайну
+переопределяет дефолты — это и есть его назначение. Действий не требуется.
 
-- **Действия:**
-
-  1. Переписать модели настроек на `pydantic_settings.BaseSettings` с `SettingsConfigDict(env_file=".env")` и кастомным JSON-источником для `config.json` (`settings_customise_sources` + `JsonConfigSettingsSource`). Приоритет: env > config.json > дефолты — как сейчас.
-
-  2. Исправить путь к корню проекта (4 `.parent` от `settings/loader.py` или поиск `pyproject.toml` вверх по дереву).
-
-  3. Секции: `vlm`, `text_model`, `ollama`, `pdf_to_image`, `image`, `database`, `bot`, `storage`, `upload`, `drugs`, `analytes`, `rag` — один-в-один с `_DEFAULTS` из `config.py`.
-
-- **Приёмка:** `get_settings()` возвращает те же значения, что константы `config.py` (написать паритет-тест `tests/test_settings_parity.py` ДО миграции).
-
-### Шаг 3.2 — Мигрировать импортёров и удалить config.py
-
-- **Действия:**
-
-  1. `grep -rn "from botkin.config import" src tests scripts` — список потребителей.
-
-  2. Мигрировать модулями (llm → preprocess → db → api → bot → rag), после каждого — тесты.
-
-  3. На переходный период `config.py` реэкспортирует значения из `settings` (фасад), затем удалить.
-
-- **Приёмка:** `config.py` удалён либо ≤ 30 строк фасада; паритет-тест удалён вместе с фасадом; тесты зелёные.
+**Вывод:** Фаза 3 закрыта удалением `settings/` — дополнительных действий над `config.py`
+не требуется. Он уже использует обычный `import os` (не инлайн), pydantic-валидацию и
+единую точку приоритета. Замена `BaseModel` на `pydantic_settings.BaseSettings` не даст
+реального упрощения (ручная функция `setting()` компактна, ≈50 строк, и завязана на
+нестандартный источник `config.json`, который `BaseSettings` не читает «из коробки» без
+кастомного `PydanticBaseSettingsSource`) — не делать ради самого факта использования
+библиотеки без измеримой выгоды.
 
 ---
 
