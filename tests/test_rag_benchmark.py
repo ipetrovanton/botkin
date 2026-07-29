@@ -29,6 +29,12 @@ def _hdr() -> dict:
 
 def test_research_update_starts(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
+    import botkin.rag.research as research
+    monkeypatch.setattr(research, "index_research", lambda *_, **__: {
+        "indexed": 0,
+        "topics": {},
+        "updated_at": "2026-01-01T00:00:00",
+    })
     r = client.post("/api/rag/research/update", headers=_hdr())
     assert r.status_code == 200
     assert r.json()["status"] == "started"
