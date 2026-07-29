@@ -10,7 +10,6 @@ qwen3-vl в OCR-режиме устойчиво читает таблицу СИ
 """
 from __future__ import annotations
 
-import re
 
 from botkin.domain.models import LabResult
 from botkin.parsing.constants import SIBR_MARKERS, GAS_MARKERS, GAS_NAME, SIBR_ROW_RE

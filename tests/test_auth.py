@@ -3,7 +3,6 @@ import importlib
 
 import botkin.config
 import botkin.db.connection
-from botkin.db.repos import AuthRepo, UserRepo
 
 
 def _client(monkeypatch, tmp_path):

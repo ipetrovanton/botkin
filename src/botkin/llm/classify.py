@@ -5,7 +5,6 @@ Fast-path: цифровые PDF с годным текстовым слоем к
 недоступен (скан, фото) или ключевые слова не дают однозначного ответа.
 """
 import logging
-import re
 import time
 from pathlib import Path
 

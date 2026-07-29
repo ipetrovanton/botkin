@@ -4,7 +4,6 @@ import sqlite3
 import pytest
 
 from botkin.pipeline.progress_model import (
-    ProgressEstimate,
     StageDurationStore,
     estimate_progress,
 )

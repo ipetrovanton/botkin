@@ -38,8 +38,10 @@ ollama serve  # port 11434
 **Установка:**
 ```bash
 pip install mlx-vlm
-huggingface-cli download mlx-community/Qwen3-VL-8B-Instruct-4bit
+hf download mlx-community/Qwen3-VL-8B-Instruct-4bit
 ```
+
+**Важно:** для VLM (vision-language models) нужен именно `mlx-vlm`, а не `mlx-lm`. `mlx-lm.server` не поддерживает image content type — возвращает 404 на запросы с изображениями. `mlx_vlm.server` поддерживает.
 
 **Server:**
 ```bash
@@ -48,13 +50,15 @@ python -m mlx_vlm.server \
     --host 0.0.0.0 --port 8002
 ```
 
-**Модель:** 4-bit квантизация (~5GB) — влезает в 32GB unified memory с запасом.
+**Модель:** 4-bit квантизация (~5.4GB) — влезает в 32GB unified memory с запасом.
 
 **Structured output:** нет native grammar constraint. `instructor.Mode.JSON` валидация + retry — модель может выдать невалидный JSON, instructor переспрашивает.
 
-**Плюсы:** нативный Metal backend для Apple Silicon, unified memory, 4-bit квантизация.
+**Throughput:** ~49 tok/s decode, ~500 tok/s prefill (Apple Silicon, continuous batching).
 
-**Минусы:** нет structured output (grammar constraint), Mac only, нет batching.
+**Плюсы:** нативный Metal backend для Apple Silicon, unified memory, 4-bit квантизация, continuous batching.
+
+**Минусы:** нет structured output (grammar constraint), Mac only, classify медленнее Ollama (12.5s vs 6.5s на JPG).
 
 ## Backend 3: vLLM (GPU)
 
@@ -171,18 +175,49 @@ _MODEL_MAP = {
 
 | Backend | Quantization | Structured output | Accuracy |
 |---|---|---|---|
-| Ollama | Q4_K_M (~6GB) | XGrammar (`format`) | TBD |
-| MLX | 4-bit (~5GB) | instructor-only | TBD |
-| vLLM | bf16 (~16GB) | guided_json (outlines) | TBD |
+| Ollama | Q4_K_M (~6GB) | XGrammar (`format`) | **35/35 (100%)** |
+| MLX | 4-bit (~5.4GB) | instructor-only | **34/35 (97.1%)** |
+| vLLM | bf16 (~16GB) | guided_json (outlines) | TBD (Windows) |
+
+MLX не распознал 1 значение из 325 (sample_001.pdf: «Риск рака яичников ROMA» — вычисляемый показатель, модель его пропустила). Вероятная причина — 4-bit квантизация ухудшает качество на сложных вычисляемых полях.
 
 ### Скорость (Mac, 32GB Apple Silicon)
 
-| Backend | Wall time | Median/doc | tok/s | Cold start |
-|---|---|---|---|---|
-| Ollama | TBD | TBD | TBD | TBD |
-| MLX | TBD | TBD | TBD | TBD |
+35 документов (20 PDF + 14 JPG + 1 синтетический), 325 эталонных значений.
+
+| Backend | Wall time | Avg/doc | Classify total | Extract total | tok/s |
+|---|---|---|---|---|---|
+| Ollama | 912с (15:11) | 26.4с | 123.5с | 772.9с | ~30 |
+| MLX | 938с (15:38) | 27.4с | 238.6с | 691.6с | ~49 |
+
+**Классификация JPG (только image, без extract):**
+
+| Backend | Avg classify JPG | 
+|---|---|
+| Ollama | 6.5с |
+| MLX | 12.5с |
+
+**Extract PDF с текстовым слоем (без VLM OCR):**
+
+| Backend | Avg extract (text PDF) |
+|---|---|
+| Ollama | 22.0с |
+| MLX | 18.5с |
+
+**Extract PDF с VLM OCR (сканы, image-only):**
+
+| Backend | sample_006 (20 values) | sample_007 |
+|---|---|---|
+| Ollama | 212с | 114с |
+| MLX | 278с | 2.7с |
 
 > vLLM на Mac не запущен: `torch==2.6.0` не доступен для macOS arm64. Metal backend экспериментальный.
+
+**Выводы по скорости:**
+- Ollama быстрее на классификации (6.5с vs 12.5с) — меньше overhead на image processing
+- MLX быстрее на extract текстовых PDF (18.5с vs 22.0с) — выше decode rate (49 vs 30 tok/s)
+- На сложных сканах (sample_006) Ollama быстрее (212с vs 278с) — XGrammar не даёт модели «расползаться»
+- На простых сканах (sample_007) MLX резко быстрее (2.7с vs 114с) — модель быстрее понимает, что документ пустой
 
 ### Скорость (Windows, RTX 3080 16GB)
 
@@ -196,9 +231,9 @@ _MODEL_MAP = {
 
 | Backend | Peak memory | Model size |
 |---|---|---|
-| Ollama | TBD | ~6GB (Q4_K_M) |
-| MLX | TBD | ~5GB (4bit) |
-| vLLM | TBD | ~16GB (bf16) |
+| Ollama | ~8GB (model + KV cache) | ~6GB (Q4_K_M) |
+| MLX | ~7GB (model + KV cache) | ~5.4GB (4bit) |
+| vLLM | ~14GB (model + PagedAttention) | ~16GB (bf16) |
 
 ## Анализ
 
@@ -233,9 +268,10 @@ _MODEL_MAP = {
 
 ## Заключение
 
-- **Точность:** все три бэкенда дают одинаковый результат (одинаковые веса)
-- **Скорость:** MLX > Ollama на Mac; vLLM > Ollama на NVIDIA
-- **Удобство:** Ollama > vLLM > MLX
-- **Production:** vLLM для нагрузки, MLX для Mac, Ollama для dev
+- **Точность:** Ollama 35/35 (100%), MLX 34/35 (97.1%) — разница из-за 4-bit квантизации MLX
+- **Скорость:** сопоставимо на Mac (912с vs 938с); MLX быстрее decode (49 vs 30 tok/s), Ollama быстрее classify
+- **Удобство:** Ollama > vLLM > MLX (одна команда `ollama pull` vs `pip + hf download + server`)
+- **VLM поддержка:** критично использовать `mlx-vlm`, а не `mlx-lm` — последний не принимает изображения
+- **Production:** vLLM для нагрузки (NVIDIA), MLX для Mac (нативный Metal), Ollama для dev и CPU fallback
 
 Конфигурируемость через одну переменную `LLM_BACKEND` позволяет переключаться между бэкендами без изменения кода — удобно для бенчмарка и для адаптации под доступное железо.

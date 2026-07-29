@@ -1,8 +1,6 @@
 """Tests for configurable LLM backend switching (Ollama / vLLM / MLX)."""
 
-import os
 
-import pytest
 from pydantic import BaseModel
 
 from botkin.llm.client import (

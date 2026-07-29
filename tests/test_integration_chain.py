@@ -95,7 +95,7 @@ def test_full_chain_upload_verify_recommend(monkeypatch, tmp_path):
     assert "labs" in doc_data or "lab_results" in doc_data
     labs = doc_data.get("labs") or doc_data.get("lab_results") or []
     assert len(labs) >= 2
-    hemoglobin = next((l for l in labs if "гемоглоб" in l.get("analyte_name", "").lower()), None)
+    hemoglobin = next((row for row in labs if "гемоглоб" in row.get("analyte_name", "").lower()), None)
     assert hemoglobin is not None
     assert float(hemoglobin["value_num"]) == 142.0
 

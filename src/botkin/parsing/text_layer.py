@@ -5,7 +5,7 @@ import re
 from typing import Optional
 
 from botkin.domain.models import LabResult
-from botkin.parsing.constants import RANGE_RE, LE_RE, GE_RE, NUM_RE
+from botkin.parsing.constants import RANGE_RE, LE_RE, GE_RE
 from botkin.parsing.scalars import (
     num_tokens, parse_lab_value, parse_reference_range,
 )

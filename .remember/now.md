@@ -30,3 +30,4 @@ qwen2.5vl:7b исключена из покрытия (76.3%, слишком с�
 Обновлено: docs/ocr-models-research-2026-07.md (Часть 4), habr/lab-results-journal.md (итерация 34).
 Добавлено: VLM_DISABLE_THINKING env в client.py (для оптимизационных прогонов).
 367 passed, ruff clean. Следующий шаг: коммит.
+- 2026-07-28 20:19 | feat/email-auth | Валидация expected vs sample: найдено ~12 серьёзных рассинхронов (023,024,025,028,029,030,031 и др.)
