@@ -178,13 +178,28 @@ few-shot из верифицированной истории той же кли
   не связанная с версией Python. Диагностировать через прямую проверку `hasattr` на
   РАЗНЫХ сборках одной версии, прежде чем списывать блокер на саму версию языка.
 
+### Шаг 8: Фаза 2 завершена (5 коммитов)
+
+- **2.4:** email-валидация → `pydantic.EmailStr` + `email-validator`, PBKDF2 200k→600k
+  итераций (актуальная рекомендация OWASP Password Storage Cheat Sheet для SHA-256; формат
+  хеша хранит число итераций внутри строки — старые хеши верифицируются без миграции),
+  общий `httpx.AsyncClient` на процесс бота в `bot/handlers/upload.py` вместо пересоздания
+  на каждый аплоад, с явным `close_http_client()` в `bot/main.py` при остановке polling.
+- Все проверки после каждого шага: 557 passed, `ruff check` чист.
+
 ## Итог
 
-- `REVIEW_PLAN.md` написан: 8 фаз, ~25 шагов с критериями приёмки. Критерий успеха выполнен.
-- Правки кода не выполнялись (по постановке — только план).
+- `REVIEW_PLAN.md` написан: 8 фаз, ~25 шагов с критериями приёмки.
+- Фазы 0-2 выполнены (11 коммитов): базовая линия, чистка репозитория, зависимости и Python.
+  Все 557 тестов зелёные после каждого шага. Фазы 3-8 (единая конфигурация, промты в ресурсы,
+  академическая структура, e2e-метрики, оптимизация моделей) — в очереди на следующие сессии.
 - Уроки: (1) grep импортов с `^`-якорем пропускает отступные импорты;
   (2) главный техдолг проекта — не отсутствие структуры, а незавершённые миграции
-  (settings/, repos-фасад) и накопленные bench-дампы в git.
+  (settings/, repos-фасад) и накопленные bench-дампы в git;
+  (3) файлы, похожие на «результаты бенчей», нужно проверять на предмет активного
+  использования (RESULTS_FILE) перед переносом/удалением;
+  (4) блокеры на новой версии интерпретатора могут быть багом конкретной сборки
+  (Homebrew/python.org sqlite3), а не самого языка — проверять на uv-managed сборке.
 
 ## Материалы
 
@@ -195,3 +210,6 @@ few-shot из верифицированной истории той же кли
 - [instructor CHANGELOG](https://github.com/567-labs/instructor/blob/v1.15.4/CHANGELOG.md) — обращение 2026-07-29. Актуальная 1.15.4.
 - [Local Vision-Language OCR Benchmark, nullmirror](https://nullmirror.com/en/blog/2026-05-24-local-vision-language-ocr-benchmark/) — обращение 2026-07-29. «`qwen2.5vl:7b` at 150 DPI is the best speed/accuracy balance» — сравнение qwen2.5vl/qwen3-vl/glm-ocr/minicpm-v по скорости и точности.
 - [Best Local Vision Models for Private OCR (2026), MyLocalAI](https://mylocalai.org/blog/best-local-vision-model-ocr) — обращение 2026-07-29. Обзор VLM по VRAM-ярусам, Qwen3-VL как accuracy frontier.
+- [Kaleido v1.0.0 release notes](https://github.com/plotly/Kaleido/releases/tag/v1.0.0) — обращение 2026-07-29. «Chrome is no longer included with Kaleido» — v1 требует системный Chrome.
+- [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html) — обращение 2026-07-29. «PBKDF2-HMAC-SHA256: 600,000 iterations (recommended)».
+- [ruff 0.16.0 release notes](https://github.com/astral-sh/ruff/releases/tag/0.16.0) — обращение 2026-07-29. «Ruff now enables a much larger set of rules by default (413, up from 59)».
