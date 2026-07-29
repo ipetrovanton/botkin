@@ -62,9 +62,9 @@ _DEFAULTS: dict = {
         "max_pages": 50,
     },
     "image": {
-        "extract_long_side": 2200,
+        "extract_long_side": 1280,
         "jpeg_quality": 90,
-        "classify_long_side": 1000,
+        "classify_long_side": 768,
         "clahe_clip": 2.0,
         "clahe_tile": 8,
         "unsharp_amount": 1.5,

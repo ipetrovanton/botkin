@@ -32,7 +32,7 @@ import pytest
 from botkin.config import VLM_MODEL
 from botkin.llm import classify
 from botkin.llm import extract as ex
-from botkin.llm.client import _detect_ollama_url, _is_url_reachable
+from botkin.llm.client import _detect_ollama_url, _is_url_reachable, get_backend
 from botkin.normalize.units import canonical_unit
 
 # Отчёт печатает единицы с надстрочными символами (10⁹/л, 10¹²/л). При запуске через
@@ -51,22 +51,38 @@ _EXTRACT_BUDGET_S = 900.0
 _DOC_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"}
 
 
-def _ollama_skip_reason() -> str | None:
-    """None если Ollama доступна и нужная модель загружена; иначе причина для skip."""
-    url = _detect_ollama_url()
-    if not _is_url_reachable(url):
-        return f"Ollama недоступна по {url} — пропускаю e2e (нужен запущенный Ollama в WSL2)"
+def _backend_skip_reason() -> str | None:
+    """None если текущий backend доступен; иначе причина для skip."""
+    backend = get_backend()
+    if backend == "ollama":
+        url = _detect_ollama_url()
+        if not _is_url_reachable(url):
+            return f"Ollama недоступна по {url} — пропускаю e2e"
+        try:
+            with urllib.request.urlopen(f"{url}/api/tags", timeout=5) as resp:
+                tags = json.load(resp)
+        except (OSError, ValueError) as e:
+            return f"не удалось прочитать список моделей Ollama: {e}"
+        names = {m.get("name", "") for m in tags.get("models", [])}
+        base = VLM_MODEL.split(":", 1)[0]
+        has_model = any(n == VLM_MODEL or n.split(":", 1)[0] == base for n in names)
+        if not has_model:
+            return f"модель {VLM_MODEL} не загружена в Ollama"
+        return None
+    # vllm / mlx: проверяем /v1/models
+    if backend == "vllm":
+        url = os.getenv("VLLM_URL", "http://localhost:8001")
+    else:
+        url = os.getenv("MLX_URL", "http://localhost:8002")
     try:
-        with urllib.request.urlopen(f"{url}/api/tags", timeout=5) as resp:
-            tags = json.load(resp)
+        with urllib.request.urlopen(f"{url}/v1/models", timeout=10) as resp:
+            data = json.load(resp)
+        model_ids = [m.get("id", "") for m in data.get("data", [])]
+        if not model_ids:
+            return f"{backend}: список моделей пуст"
+        print(f"[{backend}] доступные модели: {model_ids}")
     except (OSError, ValueError) as e:
-        return f"не удалось прочитать список моделей Ollama ({url}/api/tags): {e}"
-
-    names = {m.get("name", "") for m in tags.get("models", [])}
-    base = VLM_MODEL.split(":", 1)[0]
-    has_model = any(n == VLM_MODEL or n.split(":", 1)[0] == base for n in names)
-    if not has_model:
-        return f"модель {VLM_MODEL} не загружена в Ollama (есть: {sorted(names)}); выполните `ollama pull {VLM_MODEL}`"
+        return f"{backend} server недоступен по {url}: {e} — пропускаю e2e"
     return None
 
 
@@ -246,8 +262,8 @@ pytestmark = pytest.mark.llm
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _require_ollama():
-    reason = _ollama_skip_reason()
+def _require_backend():
+    reason = _backend_skip_reason()
     if reason:
         pytest.skip(reason, allow_module_level=True)
 

@@ -690,7 +690,11 @@ def _extract_from_text_layer(source_path: Path) -> list[LabResult] | None:
         rows = kept
 
     # СИБР-страницы: растровая таблица, извлекаем специализированным VLM-запросом.
-    if sibr_page_indices:
+    # Пустые страницы (нет текстового слоя) — тоже растровые, обрабатываем VLM-OCR.
+    raster_page_indices = sibr_page_indices + [
+        i for i, lines in enumerate(pages) if not lines and i not in sibr_page_indices
+    ]
+    if raster_page_indices:
         images = prepare_images(
             source_path,
             long_side=IMAGE_EXTRACT_LONG_SIDE,
@@ -704,6 +708,27 @@ def _extract_from_text_layer(source_path: Path) -> list[LabResult] | None:
                 rows = merge_dedup(rows, sibr_rows)
             else:
                 log.info("[SIBR_OCR_SKIP] Doc: '%s' | страница %d | строк=%d", source_path.name, i + 1, len(sibr_rows))
+        # Пустые страницы (не СИБР): VLM-OCR + доменный парсер (Андрофлор и др.)
+        empty_pages = [i for i, lines in enumerate(pages) if not lines and i not in sibr_page_indices]
+        for i in empty_pages:
+            b64 = to_base64_jpegs([images[i]])
+
+            def _low_res_fn(_page_index=i):
+                low = prepare_images(
+                    source_path, long_side=_ANDROFLOR_RETRY_LONG_SIDE,
+                    upscale=False, deskew=False, enhance=False,
+                )
+                return to_base64_jpegs([low[_page_index]])
+
+            try:
+                page_rows, _ = _extract_once(b64, f"{source_path.name}#стр{i + 1}", _low_res_fn)
+                if page_rows:
+                    log.info("[RASTER_OCR] Doc: '%s' | страница %d | строк=%d", source_path.name, i + 1, len(page_rows))
+                    rows = merge_dedup(rows, page_rows)
+                else:
+                    log.info("[RASTER_OCR_SKIP] Doc: '%s' | страница %d | строк=0", source_path.name, i + 1)
+            except ExtractionError as e:
+                log.warning("[RASTER_OCR_FAILED] Doc: '%s' | страница %d: %s", source_path.name, i + 1, e)
 
     if not rows:
         return None
