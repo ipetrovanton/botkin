@@ -8,7 +8,12 @@ import sqlite3
 from .connection import transaction
 
 
-_PBKDF2_ITERATIONS = 200_000
+# OWASP Password Storage Cheat Sheet (2026): PBKDF2-HMAC-SHA256 — минимум 600 000 итераций.
+# https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#pbkdf2
+# Число итераций хранится в самом хеше (формат pbkdf2$iterations$salt$hash), поэтому
+# повышение константы не требует миграции старых записей — они верифицируются по своему
+# сохранённому значению.
+_PBKDF2_ITERATIONS = 600_000
 _SESSION_TTL_DAYS = 30
 
 

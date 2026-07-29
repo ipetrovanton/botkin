@@ -50,7 +50,10 @@ async def main() -> None:
     asyncio.create_task(asyncio.to_thread(warmup))
 
     log.info("Бот запущен, polling...")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await upload.close_http_client()
 
 
 def run():

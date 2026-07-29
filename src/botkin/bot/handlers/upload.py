@@ -17,6 +17,10 @@ from botkin.db.repos import DocumentRepo, UserRepo
 router = Router(name="upload")
 log = logging.getLogger("botkin.bot.upload")
 
+# Один httpx-клиент на процесс бота: пул соединений переиспользуется между аплоадами
+# вместо пересоздания TCP/TLS-хендшейка на каждый вызов _upload_to_api.
+_http_client = httpx.AsyncClient(timeout=60.0)
+
 # Telegram сжимает «фото» (~1280px). Файлом сохраняется полное разрешение камеры.
 _FILE_HINT = (
     "📎 Совет: для лучшего распознавания пришлите документ файлом "
@@ -40,15 +44,19 @@ def photo_followup_text(image_long_side: int) -> str:
     return _FILE_HINT
 
 
+async def close_http_client() -> None:
+    """Закрыть общий httpx-клиент при остановке бота (вызывается из bot/main.py)."""
+    await _http_client.aclose()
+
+
 async def _upload_to_api(tg_user_id: int, filename: str, file_bytes: bytes) -> dict:
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            f"{BOT_API_URL}/upload",
-            files={"file": (filename, file_bytes)},
-            headers={"X-Telegram-User-Id": str(tg_user_id)},
-        )
-        resp.raise_for_status()
-        return resp.json()
+    resp = await _http_client.post(
+        f"{BOT_API_URL}/upload",
+        files={"file": (filename, file_bytes)},
+        headers={"X-Telegram-User-Id": str(tg_user_id)},
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 def _resolve_user_id(tg_user_id: int) -> int | None:
