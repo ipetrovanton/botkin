@@ -60,6 +60,8 @@ class DocResult:
     total_s: float = 0.0
     matched: int = 0
     expected: int = 0
+    precision: float = 0.0
+    recall: float = 0.0
 
 
 @dataclass
@@ -100,14 +102,17 @@ class ModelResult:
 
     @property
     def precision(self) -> float:
-        """Precision = matched / extracted_rows (по совпавшим + extra)."""
-        # В сводке сейчас нет extra; аппроксимируем точность = accuracy.
-        return self.accuracy
+        """Средняя precision по документам (matched / extracted)."""
+        if not self.docs:
+            return 0.0
+        return sum(d.precision for d in self.docs) / self.num_docs
 
     @property
     def recall(self) -> float:
-        """Recall = matched / expected."""
-        return self.accuracy
+        """Средняя recall по документам (matched / expected)."""
+        if not self.docs:
+            return 0.0
+        return sum(d.recall for d in self.docs) / self.num_docs
 
     @property
     def median_time_per_doc(self) -> float:
@@ -117,13 +122,13 @@ class ModelResult:
 
     @property
     def score(self) -> float:
-        """Средневзвешенный score: точность × pass_rate / среднее время.
+        """Средневзвешенный score: precision × pass_rate / среднее время.
 
         Выше = лучше. Модель, которая точнее, стабильнее и быстрее — лидирует.
         """
         if self.avg_time_per_doc <= 0:
             return 0.0
-        return (self.accuracy * self.pass_rate) / self.avg_time_per_doc
+        return (self.precision * self.pass_rate) / self.avg_time_per_doc
 
 
 def _vram_gb_for_model(model: str) -> float:
@@ -147,13 +152,24 @@ def _vram_gb_for_model(model: str) -> float:
     return 0.0
 
 
+def _to_float(raw: str) -> float:
+    """Парсинг ячейки precision/recall (— → 0.0)."""
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.0
+
+
 def parse_pytest_summary(output: str) -> list[DocResult]:
-    """Извлекает строки документов из секции «ИТОГОВАЯ СВОДКА E2E»."""
+    """Извлекает строки документов из секции «ИТОГОВАЯ СВОДКА E2E».
+
+    Формат сводки:
+    sample_001.pdf  PASS   10.5s   38.0s  48.5s      1.00     1.00        0
+    """
     docs: list[DocResult] = []
     in_summary = False
-    # Строка: sample_001.pdf  PASS   10.5s   38.0s  48.5s    3/3
     row_re = re.compile(
-        r"^(\S+\.\S+)\s+(PASS|FAIL|SKIP)\s+([\d.]+)s\s+([\d.]+)s\s+([\d.]+)s\s+(\S+)"
+        r"^(\S+\.\S+)\s+(PASS|FAIL|SKIP)\s+([\d.]+)s\s+([\d.]+)s\s+([\d.]+)s\s+(\S+)\s+(\S+)\s+(\S+)"
     )
     for line in output.splitlines():
         if "ИТОГОВАЯ СВОДКА E2E" in line:
@@ -170,20 +186,14 @@ def parse_pytest_summary(output: str) -> list[DocResult]:
                 break
             m = row_re.match(line.strip())
             if m:
-                name, status, cls_s, ext_s, tot_s, vals = m.groups()
-                matched, expected = 0, 0
-                if "/" in vals and vals != "—":
-                    parts = vals.split("/")
-                    try:
-                        matched = int(parts[0])
-                        expected = int(parts[1])
-                    except ValueError:
-                        pass
+                name, status, cls_s, ext_s, tot_s, precision_s, recall_s, _ = m.groups()
                 docs.append(DocResult(
                     name=name, status=status,
                     classify_s=float(cls_s), extract_s=float(ext_s),
                     total_s=float(tot_s),
-                    matched=matched, expected=expected,
+                    matched=0, expected=0,
+                    precision=_to_float(precision_s),
+                    recall=_to_float(recall_s),
                 ))
     return docs
 
@@ -314,19 +324,20 @@ def print_comparison(results: list[ModelResult]) -> None:
     print("#" * 90)
     header = (
         f"{'Модель':<26}{'PASS':>6}{'FAIL':>6}{'SKIP':>6}"
-        f"{'точность':>10}{'pass%':>7}{'ср.время':>10}{'score':>10}{'wall':>8}"
+        f"{'precision':>10}{'recall':>8}{'pass%':>7}{'ср.время':>10}{'score':>10}{'wall':>8}"
     )
     print(header)
     print("-" * 90)
     for r in sorted(results, key=lambda x: x.score, reverse=True):
-        acc = f"{r.total_matched}/{r.total_expected}" if r.total_expected else "—"
+        precision = f"{r.precision:.2%}" if r.num_docs else "—"
+        recall = f"{r.recall:.2%}" if r.num_docs else "—"
         print(
             f"{r.model:<26}{r.passed:>6}{r.failed:>6}{r.skipped:>6}"
-            f"{acc:>10}{r.pass_rate:>6.0%}{r.avg_time_per_doc:>9.1f}s"
+            f"{precision:>10}{recall:>8}{r.pass_rate:>6.0%}{r.avg_time_per_doc:>9.1f}s"
             f"{r.score:>10.4f}{r.wall_s:>7.0f}s"
         )
     print("-" * 90)
-    print("score = (точность × pass_rate) / среднее_время_на_документ — выше = лучше")
+    print("score = (precision × pass_rate) / среднее_время_на_документ — выше = лучше")
     print("#" * 90)
 
 
@@ -358,6 +369,95 @@ def save_markdown(results: list[ModelResult]) -> Path:
     return path
 
 
+def _reparse_logs() -> None:
+    """Пересобирает JSON/MD-отчёт из bench_*.log, оставляя из JSON vram/wall."""
+    results: list[ModelResult] = []
+    legacy: dict[str, dict] = {}
+    if RESULTS_FILE.exists():
+        with RESULTS_FILE.open(encoding="utf-8") as f:
+            legacy = {m["model"]: m for m in json.load(f).get("results", [])}
+
+    for log_file in sorted(PROJECT_ROOT.glob("bench_*.log")):
+        # Имя файла: bench_<model>.log; двоеточие и слэш заменялись на _.
+        stem = log_file.stem[6:]  # без "bench_"
+        # Восстанавливаем : и / невозможно однозначно, берём model из legacy по имени файла.
+        model = None
+        for m in legacy:
+            if m.replace(":", "_").replace("/", "_") == stem:
+                model = m
+                break
+        if model is None:
+            # Если в JSON нет — попробуем угадать по наличию в DEFAULT_MODELS.
+            for m in ALL_KNOWN_MODELS:
+                if m.replace(":", "_").replace("/", "_") == stem:
+                    model = m
+                    break
+        if model is None:
+            continue
+
+        output = log_file.read_text(encoding="utf-8", errors="replace")
+        docs = parse_pytest_summary(output)
+        if not docs:
+            continue
+
+        mr = ModelResult(model=model)
+        mr.docs = docs
+        mr.total_classify_s = sum(d.classify_s for d in docs)
+        mr.total_extract_s = sum(d.extract_s for d in docs)
+        mr.total_s = sum(d.total_s for d in docs)
+        mr.passed = sum(1 for d in docs if d.status == "PASS")
+        mr.failed = sum(1 for d in docs if d.status == "FAIL")
+        mr.skipped = sum(1 for d in docs if d.status == "SKIP")
+        # wall/vram/error сохраняем из старого JSON, если он есть.
+        legacy_entry = legacy.get(model, {})
+        mr.wall_s = legacy_entry.get("wall_s", 0.0)
+        mr.vram_gb = legacy_entry.get("vram_gb", 0.0)
+        mr.error = legacy_entry.get("error")
+        mr.raw_output = output
+        results.append(mr)
+        print(f"[BENCH] Переспарсили: {model} | docs={len(docs)} | PASS={mr.passed}")
+
+    if not results:
+        print("[BENCH] Нет подходящих bench_*.log для пересборки.")
+        return
+
+    _save_results(results)
+    print_comparison(results)
+    save_markdown(results)
+
+
+def _save_results(results: list[ModelResult]) -> None:
+    """Сохраняет результаты в JSON."""
+    save_data = {"results": []}
+    for mr in results:
+        save_data["results"].append({
+            "model": mr.model,
+            "passed": mr.passed,
+            "failed": mr.failed,
+            "skipped": mr.skipped,
+            "total_matched": mr.total_matched,
+            "total_expected": mr.total_expected,
+            "total_s": mr.total_s,
+            "wall_s": mr.wall_s,
+            "vram_gb": mr.vram_gb,
+            "accuracy": mr.accuracy,
+            "pass_rate": mr.pass_rate,
+            "avg_time_per_doc": mr.avg_time_per_doc,
+            "score": mr.score,
+            "error": mr.error,
+            "docs": [
+                {"name": d.name, "status": d.status,
+                 "classify_s": d.classify_s, "extract_s": d.extract_s,
+                 "total_s": d.total_s, "matched": d.matched, "expected": d.expected,
+                 "precision": d.precision, "recall": d.recall}
+                for d in mr.docs
+            ],
+        })
+    with RESULTS_FILE.open("w", encoding="utf-8") as f:
+        json.dump(save_data, f, ensure_ascii=False, indent=2)
+    print(f"[BENCH] Результаты сохранены в {RESULTS_FILE}", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Сравнительный бенчмарк VLM-моделей")
     parser.add_argument("--models", nargs="+", default=DEFAULT_MODELS,
@@ -368,7 +468,13 @@ def main():
                         help="Таймаут на одну модель (секунды)")
     parser.add_argument("--resume", action="store_true",
                         help="Дозагрузить только недостающие модели из результатов")
+    parser.add_argument("--reparse", action="store_true",
+                        help="Пересобрать отчёт из сохранённых bench_*.log без повторного запуска pytest")
     args = parser.parse_args()
+
+    if args.reparse:
+        _reparse_logs()
+        return
 
     results: list[ModelResult] = []
     existing: dict[str, ModelResult] = {}
@@ -397,32 +503,7 @@ def main():
         results.append(r)
 
         # Сохраняем после каждой модели — чтобы не потерять при сбое.
-        save_data = {"results": []}
-        for mr in results:
-            save_data["results"].append({
-                "model": mr.model,
-                "passed": mr.passed,
-                "failed": mr.failed,
-                "skipped": mr.skipped,
-                "total_matched": mr.total_matched,
-                "total_expected": mr.total_expected,
-                "total_s": mr.total_s,
-                "wall_s": mr.wall_s,
-                "accuracy": mr.accuracy,
-                "pass_rate": mr.pass_rate,
-                "avg_time_per_doc": mr.avg_time_per_doc,
-                "score": mr.score,
-                "error": mr.error,
-                "docs": [
-                    {"name": d.name, "status": d.status,
-                     "classify_s": d.classify_s, "extract_s": d.extract_s,
-                     "total_s": d.total_s, "matched": d.matched, "expected": d.expected}
-                    for d in mr.docs
-                ],
-            })
-        with RESULTS_FILE.open("w", encoding="utf-8") as f:
-            json.dump(save_data, f, ensure_ascii=False, indent=2)
-        print(f"[BENCH] Результаты сохранены в {RESULTS_FILE}", flush=True)
+        _save_results(results)
 
     print_comparison(results)
     save_markdown(results)
