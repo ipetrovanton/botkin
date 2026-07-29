@@ -185,7 +185,9 @@ uv run python -m scripts.build_analyte_reference \
 |------------------|-----------------------------|---------------------------|
 | `TG_BOT_TOKEN`   | Токен Telegram-бота         | *обязательно*             |
 | `OLLAMA_URL`     | URL Ollama API              | `http://localhost:11434`  |
-| `VLM_MODEL`      | Название vision-модели      | `qwen3-vl:8b-instruct`    |
+| `VLM_MODEL`      | Основная vision-модель (классификация, VLM-фолбэк) | `qwen3-vl:8b-instruct`    |
+| `OCR_MODEL`      | OCR-модель первой ступени (опционально, по умолчанию = VLM_MODEL) | `<VLM_MODEL>`             |
+| `TEXT_MODEL`     | Текстовая модель для структурирования | `qwen3-vl:8b-instruct`    |
 | `SQLITE_PATH`    | Путь к файлу БД             | `./data/botkin.db`        |
 | `API_URL`        | URL бэкенда (для бота)      | `http://localhost:8000`   |
 | `STORAGE_BACKEND`| Хранилище оригиналов        | `local` (`minio` для S3)  |
@@ -246,6 +248,17 @@ botkin/
 | `/help`                        | Справка по командам                    |
 | `/show` или `/last`            | Последний загруженный документ         |
 | `/dynamics <показатель>`       | График динамики показателя             |
+
+## Бенчмарк моделей
+
+```bash
+uv run python scripts/bench/bench_models.py --models qwen3-vl:8b-instruct glm-ocr:latest gemma4:latest
+```
+
+- Сравнивает VLM/OCR-модели на E2E-тестах (`tests/test_e2e_llm.py`).
+- `TEXT_MODEL` остаётся по умолчанию — так сравнивается именно первая ступень.
+- Результаты: `scripts/bench/bench_models_results.json` и `benchmarks/models_comparison_YYYY-MM-DD.md`.
+- Если нужно пересобрать отчёт из сохранённых логов: `uv run python scripts/bench/bench_models.py --reparse`.
 
 ## Разработка
 
