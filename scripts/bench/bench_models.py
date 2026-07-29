@@ -26,16 +26,13 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Модели по умолчанию для сравнения.
+# Модели по умолчанию для сравнения — актуальные в локальном Ollama.
 DEFAULT_MODELS = [
     "qwen3-vl:8b-instruct",
     "gemma4:latest",
     "minicpm-v:8b",
-    "qwen3-vl:30b-a3b",
     "qwen2.5vl:7b",
     "glm-ocr:latest",
-    "qwen3.5:9b",
-    "haervwe/GLM-4.6V-Flash-9B",
 ]
 
 # Все модели, которые нужно выгружать перед запуском очередной —
@@ -208,7 +205,9 @@ def run_model(model: str, skip_synthetic: bool = False, timeout: int = 7200) -> 
 
     env = os.environ.copy()
     env["VLM_MODEL"] = model
-    env["TEXT_MODEL"] = model
+    # TEXT_MODEL оставляем по умолчанию: так сравнивается именно VLM/OCR-первая
+    # ступень, а второй этап (структурирование) идёт на штатной текстовой модели.
+    # env["TEXT_MODEL"] = model
     # Принудительно localhost — нативная Windows Ollama (модуль читает OLLAMA_URL).
     env["OLLAMA_URL"] = "http://localhost:11434"
     # pytest на Windows пишет stdout в cp1251; форсируем UTF-8 для корректного
