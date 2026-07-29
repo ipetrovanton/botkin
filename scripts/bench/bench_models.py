@@ -62,6 +62,7 @@ class DocResult:
     expected: int = 0
     precision: float = 0.0
     recall: float = 0.0
+    tps: float = 0.0
 
 
 @dataclass
@@ -115,6 +116,12 @@ class ModelResult:
         return sum(d.recall for d in self.docs) / self.num_docs
 
     @property
+    def avg_tps(self) -> float:
+        """Средний tps (tokens/second) по документам с ненулевым tps."""
+        values = [d.tps for d in self.docs if d.tps > 0]
+        return sum(values) / len(values) if values else 0.0
+
+    @property
     def median_time_per_doc(self) -> float:
         if not self.docs:
             return 0.0
@@ -160,12 +167,33 @@ def _to_float(raw: str) -> float:
         return 0.0
 
 
+def _parse_tps_per_doc(output: str) -> dict[str, float]:
+    """Извлекает tps=... из E2E-блоков по каждому документу."""
+    tps_by_doc: dict[str, float] = {}
+    current_doc: str | None = None
+    tps_re = re.compile(r"tps\s*=\s*([\d.]+)")
+    for line in output.splitlines():
+        if "[E2E]" in line:
+            # Формат: [E2E] sample_020.pdf — PASS
+            parts = line.split()
+            for part in parts:
+                if "." in part:
+                    current_doc = part
+                    break
+            continue
+        if current_doc and tps_re.search(line):
+            tps_by_doc[current_doc] = float(tps_re.search(line).group(1))
+            current_doc = None
+    return tps_by_doc
+
+
 def parse_pytest_summary(output: str) -> list[DocResult]:
     """Извлекает строки документов из секции «ИТОГОВАЯ СВОДКА E2E».
 
     Формат сводки:
     sample_001.pdf  PASS   10.5s   38.0s  48.5s      1.00     1.00        0
     """
+    tps_by_doc = _parse_tps_per_doc(output)
     docs: list[DocResult] = []
     in_summary = False
     row_re = re.compile(
@@ -194,6 +222,7 @@ def parse_pytest_summary(output: str) -> list[DocResult]:
                     matched=0, expected=0,
                     precision=_to_float(precision_s),
                     recall=_to_float(recall_s),
+                    tps=tps_by_doc.get(name, 0.0),
                 ))
     return docs
 
@@ -319,26 +348,27 @@ def run_model(model: str, skip_synthetic: bool = False, timeout: int = 7200) -> 
 
 def print_comparison(results: list[ModelResult]) -> None:
     """Выводит сравнительную таблицу всех моделей."""
-    print(f"\n\n{'#' * 90}")
+    print(f"\n\n{'#' * 100}")
     print("СРАВНИТЕЛЬНАЯ ТАБЛИЦА МОДЕЛЕЙ")
-    print("#" * 90)
+    print("#" * 100)
     header = (
         f"{'Модель':<26}{'PASS':>6}{'FAIL':>6}{'SKIP':>6}"
-        f"{'precision':>10}{'recall':>8}{'pass%':>7}{'ср.время':>10}{'score':>10}{'wall':>8}"
+        f"{'precision':>10}{'recall':>8}{'pass%':>7}{'tps':>8}{'ср.время':>10}{'score':>10}{'wall':>8}"
     )
     print(header)
-    print("-" * 90)
+    print("-" * 100)
     for r in sorted(results, key=lambda x: x.score, reverse=True):
         precision = f"{r.precision:.2%}" if r.num_docs else "—"
         recall = f"{r.recall:.2%}" if r.num_docs else "—"
+        tps = f"{r.avg_tps:.1f}" if r.avg_tps > 0 else "—"
         print(
             f"{r.model:<26}{r.passed:>6}{r.failed:>6}{r.skipped:>6}"
-            f"{precision:>10}{recall:>8}{r.pass_rate:>6.0%}{r.avg_time_per_doc:>9.1f}s"
-            f"{r.score:>10.4f}{r.wall_s:>7.0f}s"
+            f"{precision:>10}{recall:>8}{r.pass_rate:>6.0%}{tps:>8}"
+            f"{r.avg_time_per_doc:>9.1f}s{r.score:>10.4f}{r.wall_s:>7.0f}s"
         )
-    print("-" * 90)
+    print("-" * 100)
     print("score = (precision × pass_rate) / среднее_время_на_документ — выше = лучше")
-    print("#" * 90)
+    print("#" * 100)
 
 
 def save_markdown(results: list[ModelResult]) -> Path:
@@ -357,7 +387,7 @@ def save_markdown(results: list[ModelResult]) -> Path:
     for r in sorted(results, key=lambda x: x.score, reverse=True):
         precision = f"{r.precision:.2%}" if r.num_docs else "—"
         recall = f"{r.recall:.2%}" if r.num_docs else "—"
-        tps = "—"  # усреднённый tps по всем документам — пока не считаем
+        tps = f"{r.avg_tps:.1f}" if r.avg_tps > 0 else "—"
         lines.append(
             f"| {r.model} | {r.passed} | {r.failed} | {r.skipped} | "
             f"{precision} | {recall} | {r.median_time_per_doc:.1f} | "
@@ -452,6 +482,9 @@ def _save_results(results: list[ModelResult]) -> None:
                  "precision": d.precision, "recall": d.recall}
                 for d in mr.docs
             ],
+            "precision": mr.precision,
+            "recall": mr.recall,
+            "avg_tps": mr.avg_tps,
         })
     with RESULTS_FILE.open("w", encoding="utf-8") as f:
         json.dump(save_data, f, ensure_ascii=False, indent=2)
