@@ -426,7 +426,7 @@ SSO-логин Garmin агрессивно лимитируется (429 → б�
 
 ### Первичная настройка и проверка
 
-`powershell
+```powershell
 # Эмбеддер (однократно, в WSL2)
 wsl -d Ubuntu -- ollama pull bge-m3
 
@@ -435,7 +435,7 @@ uv run python scripts/live_check_rag_health.py index    # индексация �
 uv run python scripts/live_check_rag_health.py sync     # Garmin за 30 дней (~2 мин, ~21k метрик)
 uv run python scripts/live_check_rag_health.py search   # смоук семантического поиска
 uv run python scripts/live_check_rag_health.py ask      # рекомендация LLM
-`
+```
 
 Через кабинет: экран «Здоровье» — подключение Garmin (email/пароль), синк с прогрессом,
 импорт Apple export.zip, графики метрик, тренировки и ассистент. API: `/api/health/*`,
@@ -451,3 +451,37 @@ uv run python scripts/live_check_rag_health.py ask      # рекомендаци
 
 Подробная инструкция по Garmin (авторизация, токены, rate limits, troubleshooting,
 оценка безопасности библиотек garminconnect/curl_cffi) — `docs/garmin-integration-guide.md`.
+
+---
+
+## 10. Двухступенчатый OCR и выбор модели
+
+### Переменные окружения
+
+- `VLM_MODEL` — основная vision-модель (классификация + VLM-фолбэк при извлечении).
+- `TEXT_MODEL` — текстовая модель для структурирования OCR-текста / текстового слоя PDF.
+- `OCR_MODEL` — OCR-специализированная модель первой ступени (`glm-ocr:latest`, `deepseek-ocr`).
+  Если не задана, используется `VLM_MODEL`, чтобы старый одноступенчатый режим работал без
+  изменений `.env`.
+- `OCR_MAX_TOKENS`, `OCR_NUM_CTX`, `OCR_NUM_PREDICT`, `OCR_REPEAT_PENALTY`, `OCR_TEMPERATURE` —
+  параметры для OCR-модели (по умолчанию берутся от `VLM_*`).
+
+Пример `.env` для двухступенчатого пайплайна:
+
+```bash
+VLM_MODEL=qwen3-vl:8b-instruct
+TEXT_MODEL=qwen3:8b
+OCR_MODEL=glm-ocr:latest
+```
+
+### Бенчмарк моделей
+
+```bash
+uv run python scripts/bench/bench_models.py --models qwen3-vl:8b-instruct glm-ocr:latest gemma4:latest
+```
+
+- Сравнивает VLM/OCR-модели на 35 E2E-документах (`tests/test_e2e_llm.py`).
+- Пишет JSON-результаты в `scripts/bench/bench_models_results.json` и сводную таблицу в
+  `benchmarks/models_comparison_YYYY-MM-DD.md`.
+- `TEXT_MODEL` оставлен по умолчанию: так сравнивается именно качество/скорость первой
+  ступени (VLM/OCR), а структурирование идёт на `TEXT_MODEL`.
