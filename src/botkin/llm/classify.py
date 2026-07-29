@@ -12,7 +12,7 @@ import instructor
 from pydantic import BaseModel
 
 from botkin.config import (
-    VLM_MODEL, CLASSIFY_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_CLASSIFY_LONG_SIDE,
+    VLM_MODEL, CLASSIFY_TEMPERATURE, VLM_MAX_TOKENS, VLM_NUM_CTX, IMAGE_CLASSIFY_LONG_SIDE,
     VLM_STRUCTURED_OUTPUT,
 )
 from botkin.domain.models import ClassifyResult, DocType
@@ -21,6 +21,8 @@ from botkin.llm.client import (
     get_client, build_extra_body, build_retrying, default_options, usage_of,
     model_name,
 )
+from botkin.llm.metrics import metrics_of
+from botkin.llm.timing import timed
 from botkin.llm.constants import (
     LAB_TABLE_MARKERS, UNKNOWN_TITLE_KEYWORDS, DOCTOR_REPORT_TITLE_KEYWORDS,
     ANALYSIS_TITLE_KEYWORDS, QUOTED_ORG_RE, has_keyword,
@@ -136,21 +138,27 @@ def run_vlm(source_path: Path) -> ClassifyResult:
         {"role": "user", "content": content},
     ]
 
+    t0_outer = time.perf_counter()
     try:
-        response = client.chat.completions.create(
-            model=model_name(VLM_MODEL),
-            messages=messages,
-            response_model=ClassifySchema,
-            max_retries=build_retrying(),
-            max_tokens=VLM_MAX_TOKENS,
-            # CLASSIFY_TEMPERATURE (≈0.1): на дефолтной температуре Ollama растровые
-            # бланки (Тонус, sample_011) флуктуируют между analysis/doctor_report.
-            extra_body=build_extra_body(
-                ClassifySchema,
-                options={**default_options(), "temperature": CLASSIFY_TEMPERATURE},
-            ),
-        )
-        elapsed = time.perf_counter() - t0
+        with timed("CLASSIFY", source_path.name) as t:
+            t0_call = time.perf_counter()
+            response = client.chat.completions.create(
+                model=model_name(VLM_MODEL),
+                messages=messages,
+                response_model=ClassifySchema,
+                max_retries=build_retrying(),
+                max_tokens=VLM_MAX_TOKENS,
+                # CLASSIFY_TEMPERATURE (≈0.1): на дефолтной температуре Ollama растровые
+                # бланки (Тонус, sample_011) флуктуируют между analysis/doctor_report.
+                extra_body=build_extra_body(
+                    ClassifySchema,
+                    options={**default_options(), "temperature": CLASSIFY_TEMPERATURE},
+                ),
+            )
+            elapsed_call = time.perf_counter() - t0_call
+            t["metrics"] = metrics_of(response, model_name(VLM_MODEL), elapsed_call, num_ctx=VLM_NUM_CTX)
+
+        elapsed = t["elapsed"]
         prompt_tokens, completion_tokens = usage_of(response)
         log.info(
             "[SUCCESS_CLASSIFY] Doc: '%s' | Result: '%s' (conf=%.2f) | Промпты: %s | Схема: %s | "
@@ -165,6 +173,6 @@ def run_vlm(source_path: Path) -> ClassifyResult:
             title=response.title, clinic=response.clinic,
         )
     except Exception as e:
-        elapsed = time.perf_counter() - t0
+        elapsed = time.perf_counter() - t0_outer
         log.error("[FAILED_CLASSIFY] Doc: '%s' | Elapsed: %.2fs | Error: %s", source_path.name, elapsed, e)
         raise ClassificationError(f"Сбой классификации: {e}") from e

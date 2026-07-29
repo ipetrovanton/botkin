@@ -5,6 +5,8 @@ import time
 from contextlib import contextmanager
 from typing import Generator
 
+from botkin.llm.metrics import InferenceMetrics, log_metrics
+
 log = logging.getLogger(__name__)
 
 
@@ -14,13 +16,13 @@ def timed(label: str, doc_name: str = "") -> Generator[dict, None, None]:
 
     Usage:
         with timed("EXTRACT", doc_name) as t:
-            result = do_work()
+            t["metrics"] = metrics_of(...)
         # t["elapsed"] contains the duration
 
-    The yielded dict is populated with "elapsed" (float seconds) on exit.
+    The yielded dict contains "elapsed" (float seconds) and optional "metrics".
     """
     t0 = time.perf_counter()
-    ctx: dict = {"elapsed": 0.0}
+    ctx: dict = {"elapsed": 0.0, "metrics": None}
     try:
         yield ctx
     finally:
@@ -28,4 +30,9 @@ def timed(label: str, doc_name: str = "") -> Generator[dict, None, None]:
         prefix = f"[{label}]"
         if doc_name:
             prefix = f"[{label}] Doc: '{doc_name}'"
-        log.info("%s | Elapsed: %.2fs", prefix, ctx["elapsed"])
+
+        metrics: InferenceMetrics | None = ctx.get("metrics")
+        if metrics is not None:
+            log_metrics(metrics, doc_name=doc_name)
+        else:
+            log.info("%s | Elapsed: %.2fs", prefix, ctx["elapsed"])

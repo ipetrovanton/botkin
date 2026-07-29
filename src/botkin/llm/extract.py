@@ -14,7 +14,7 @@ import instructor
 from pydantic import BaseModel
 
 from botkin.config import (
-    VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, IMAGE_EXTRACT_LONG_SIDE,
+    VLM_MODEL, VLM_TEMPERATURE, VLM_MAX_TOKENS, VLM_NUM_CTX, IMAGE_EXTRACT_LONG_SIDE,
     VERBATIM_MAX_REJECT_RATIO, VLM_STRUCTURED_OUTPUT, RAW_LOG_LIMIT, TEXT_LAYER_TEMPERATURE,
     OLLAMA_KEEP_ALIVE,
     TEXT_MODEL, TEXT_MAX_TOKENS, TEXT_NUM_CTX, TEXT_NUM_PREDICT,
@@ -26,6 +26,7 @@ from botkin.llm.client import (
     get_client, get_raw_client, build_extra_body, build_retrying, default_options, usage_of,
     model_name,
 )
+from botkin.llm.metrics import metrics_of
 from botkin.llm.prompts import (
     ANALYSIS_INSTRUCTION, ANALYSIS_TEXT_SYSTEM, ANALYSIS_TEXT_COMPACT_SYSTEM, ANALYSIS_VLM_SYSTEM,
     DOCTOR_REPORT_INSTRUCTION, DOCTOR_REPORT_VLM_SYSTEM, PROMPTS_VERSION, TEXT_INSTRUCTION,
@@ -48,6 +49,7 @@ from botkin.llm.image_ocr import (
     messages_from_images as _messages_from_images,
     call_image_ocr as _call_image_ocr,
 )
+from botkin.llm.timing import timed
 from botkin.llm.sibr_ocr import (
     sibr_ocr_with_voting as _sibr_ocr_with_voting,
     _SIBR_MIN_ROWS,
@@ -126,22 +128,27 @@ def _raw_content(response: BaseModel) -> str:
 def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: str,
               doc_type: str, options: dict | None = None,
               structured: bool | None = None) -> BaseModel:
-    t0 = time.perf_counter()
     log.info("[START_EXTRACT] Doc: '%s' | Type: '%s' | Model: %s", doc_name, doc_type, VLM_MODEL)
     client = get_client(mode=instructor.Mode.JSON)
     # Температура из конфига: без неё Ollama берёт свой дефолт, и извлечение флуктуирует.
     if options is None:
         options = {**default_options(), "temperature": VLM_TEMPERATURE}
+    t0_outer = time.perf_counter()
     try:
-        response = client.chat.completions.create(
-            model=model_name(VLM_MODEL),
-            messages=messages,
-            response_model=response_model,
-            max_retries=build_retrying(),
-            max_tokens=VLM_MAX_TOKENS,
-            extra_body=build_extra_body(response_model, options, structured),
-        )
-        elapsed = time.perf_counter() - t0
+        with timed("EXTRACT", doc_name) as t:
+            t0_call = time.perf_counter()
+            response = client.chat.completions.create(
+                model=model_name(VLM_MODEL),
+                messages=messages,
+                response_model=response_model,
+                max_retries=build_retrying(),
+                max_tokens=VLM_MAX_TOKENS,
+                extra_body=build_extra_body(response_model, options, structured),
+            )
+            elapsed_call = time.perf_counter() - t0_call
+            t["metrics"] = metrics_of(response, model_name(VLM_MODEL), elapsed_call, num_ctx=VLM_NUM_CTX)
+
+        elapsed = t["elapsed"]
         prompt_tokens, completion_tokens = usage_of(response)
         n_parsed = _count_rows(response)
         tok_s = completion_tokens / elapsed if elapsed > 0 else 0.0
@@ -152,7 +159,7 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
             elapsed, prompt_tokens, completion_tokens, tok_s, n_parsed,
         )
         # Сырой ответ модели — на DEBUG (может быть объёмным). При n_parsed==0 поднимаем до WARNING:
-        # это и есть «извлечение вернуло пусто» — самое нужное для диагностики место.
+        # это и есть "извлечение вернуло пусто" — самое нужное для диагностики место.
         raw = _raw_content(response)
         if n_parsed == 0:
             log.warning(
@@ -163,7 +170,7 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
             log.debug("[RAW_EXTRACT] Doc: '%s' | сырой ответ (%d симв.): %s", doc_name, len(raw), raw[:RAW_LOG_LIMIT])
         return response
     except Exception as e:
-        elapsed = time.perf_counter() - t0
+        elapsed = time.perf_counter() - t0_outer
         log.error("[FAILED_EXTRACT] Doc: '%s' | Type: '%s' | Elapsed: %.2fs | Error: %s", doc_name, doc_type, elapsed, e)
         err = ExtractionError(f"Сбой извлечения ({doc_type}): {e}")
         err.raw_text = _raw_text_from_exc(e)  # сырой ответ для возможного salvage обрезанного JSON
@@ -366,7 +373,6 @@ def _call_text(messages: list[dict], doc_name: str, structured: bool | None = No
     пустой валидный объект, а без грамматики та же модель отдаёт нормальный JSON.
     """
     use_structured = TEXT_STRUCTURED_OUTPUT if structured is None else structured
-    t0 = time.perf_counter()
     log.info(
         "[START_TEXT_EXTRACT] Doc: '%s' | Model: %s | ctx=%d | grammar=%s",
         doc_name, TEXT_MODEL, TEXT_NUM_CTX, "on" if use_structured else "off",
@@ -380,22 +386,25 @@ def _call_text(messages: list[dict], doc_name: str, structured: bool | None = No
     }
     client = get_client(mode=instructor.Mode.JSON)
     try:
-        response = client.chat.completions.create(
-            model=model_name(TEXT_MODEL),
-            messages=messages,
-            response_model=RawAnalysis,
-            max_retries=build_retrying(),
-            max_tokens=TEXT_MAX_TOKENS,
-            extra_body=build_extra_body(RawAnalysis, options, structured=use_structured),
-        )
+        with timed("TEXT_EXTRACT", doc_name) as t:
+            t0_call = time.perf_counter()
+            response = client.chat.completions.create(
+                model=model_name(TEXT_MODEL),
+                messages=messages,
+                response_model=RawAnalysis,
+                max_retries=build_retrying(),
+                max_tokens=TEXT_MAX_TOKENS,
+                extra_body=build_extra_body(RawAnalysis, options, structured=use_structured),
+            )
+            elapsed_call = time.perf_counter() - t0_call
+            t["metrics"] = metrics_of(response, model_name(TEXT_MODEL), elapsed_call, num_ctx=TEXT_NUM_CTX)
     except ExtractionError:
         raise
     except Exception as e:
         raise ExtractionError(f"Text extraction failed for {doc_name}: {e}") from e
-    elapsed = time.perf_counter() - t0
     log.info(
         "[DONE_TEXT_EXTRACT] Doc: '%s' | Rows: %d | Elapsed: %.2fs",
-        doc_name, _count_rows(response), elapsed,
+        doc_name, _count_rows(response), t["elapsed"],
     )
     return response
 
@@ -408,28 +417,31 @@ def _call_text_compact(messages: list[dict], doc_name: str) -> list[LabResult]:
     при том же наборе строк, а на части страниц ещё и обходит коллапс XGrammar в
     пустой валидный объект (см. _TEXT_EMPTY_RETRIES).
     """
-    t0 = time.perf_counter()
     log.info("[START_TEXT_COMPACT] Doc: '%s' | Model: %s | ctx=%d", doc_name, TEXT_MODEL, TEXT_NUM_CTX)
     client = get_raw_client()
-    response = client.chat.completions.create(
-        model=model_name(TEXT_MODEL),
-        messages=messages,
-        max_tokens=TEXT_MAX_TOKENS,
-        temperature=TEXT_LAYER_TEMPERATURE,
-        extra_body={"options": {
-            "keep_alive": OLLAMA_KEEP_ALIVE,
-            "num_ctx": TEXT_NUM_CTX,
-            "repeat_penalty": TEXT_REPEAT_PENALTY,
-            "num_predict": TEXT_NUM_PREDICT,
-            "temperature": TEXT_LAYER_TEMPERATURE,
-        }},
-    )
+    with timed("TEXT_COMPACT", doc_name) as t:
+        t0_call = time.perf_counter()
+        response = client.chat.completions.create(
+            model=model_name(TEXT_MODEL),
+            messages=messages,
+            max_tokens=TEXT_MAX_TOKENS,
+            temperature=TEXT_LAYER_TEMPERATURE,
+            extra_body={"options": {
+                "keep_alive": OLLAMA_KEEP_ALIVE,
+                "num_ctx": TEXT_NUM_CTX,
+                "repeat_penalty": TEXT_REPEAT_PENALTY,
+                "num_predict": TEXT_NUM_PREDICT,
+                "temperature": TEXT_LAYER_TEMPERATURE,
+            }},
+        )
+        elapsed_call = time.perf_counter() - t0_call
+        t["metrics"] = metrics_of(response, model_name(TEXT_MODEL), elapsed_call, num_ctx=TEXT_NUM_CTX)
     content = response.choices[0].message.content
     text = content if isinstance(content, str) else ""
     rows = rows_from_raw(parse_compact_rows(text))
     log.info(
         "[DONE_TEXT_COMPACT] Doc: '%s' | Rows: %d | Elapsed: %.2fs | символов=%d",
-        doc_name, len(rows), time.perf_counter() - t0, len(text),
+        doc_name, len(rows), t["elapsed"], len(text),
     )
     if not rows:
         log.warning("[TEXT_COMPACT_EMPTY] Doc: '%s' | сырой ответ (%d симв.): %s",
