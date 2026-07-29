@@ -50,6 +50,7 @@ ALL_KNOWN_MODELS = DEFAULT_MODELS + [
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 RESULTS_FILE = Path(__file__).resolve().parent / "bench_models_results.json"
+BENCHMARKS_DIR = PROJECT_ROOT / "benchmarks"
 
 
 @dataclass
@@ -80,6 +81,7 @@ class ModelResult:
     raw_output: str = ""
     error: str | None = None
     wall_s: float = 0.0
+    vram_gb: float = 0.0
 
     @property
     def num_docs(self) -> int:
@@ -100,6 +102,23 @@ class ModelResult:
         return self.passed / self.num_docs if self.num_docs else 0.0
 
     @property
+    def precision(self) -> float:
+        """Precision = matched / extracted_rows (по совпавшим + extra)."""
+        # В сводке сейчас нет extra; аппроксимируем точность = accuracy.
+        return self.accuracy
+
+    @property
+    def recall(self) -> float:
+        """Recall = matched / expected."""
+        return self.accuracy
+
+    @property
+    def median_time_per_doc(self) -> float:
+        if not self.docs:
+            return 0.0
+        return sorted(d.total_s for d in self.docs)[len(self.docs) // 2]
+
+    @property
     def score(self) -> float:
         """Средневзвешенный score: точность × pass_rate / среднее время.
 
@@ -108,6 +127,27 @@ class ModelResult:
         if self.avg_time_per_doc <= 0:
             return 0.0
         return (self.accuracy * self.pass_rate) / self.avg_time_per_doc
+
+
+def _vram_gb_for_model(model: str) -> float:
+    """VRAM (GB) для модели из вывода `ollama ps`. 0.0, если не удалось."""
+    try:
+        proc = subprocess.run(
+            ["ollama", "ps"], capture_output=True, text=True,
+            timeout=10, env=os.environ.copy(),
+        )
+        for line in proc.stdout.splitlines()[1:]:  # skip header
+            parts = line.split()
+            if not parts:
+                continue
+            if parts[0] == model:
+                # SIZE колонка: "8.0 GB" -> 8.0
+                size_idx = parts.index("GB") - 1 if "GB" in parts else 1
+                if size_idx >= 0 and parts[size_idx].replace(".", "", 1).isdigit():
+                    return float(parts[size_idx])
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    return 0.0
 
 
 def parse_pytest_summary(output: str) -> list[DocResult]:
@@ -248,9 +288,11 @@ def run_model(model: str, skip_synthetic: bool = False, timeout: int = 7200) -> 
             else:
                 result.error = "не удалось извлечь результаты"
 
+        result.vram_gb = _vram_gb_for_model(model)
         print(f"\n[BENCH] {model}: PASS={result.passed} FAIL={result.failed} "
               f"SKIP={result.skipped} | точность={result.total_matched}/{result.total_expected} "
               f"({result.accuracy:.1%}) | среднее={result.avg_time_per_doc:.1f}s/док "
+              f"| median={result.median_time_per_doc:.1f}s | vram={result.vram_gb:.1f}GB "
               f"| wall={result.wall_s:.0f}s", flush=True)
 
     except subprocess.TimeoutExpired:
@@ -287,15 +329,33 @@ def print_comparison(results: list[ModelResult]) -> None:
     print("score = (точность × pass_rate) / среднее_время_на_документ — выше = лучше")
     print("#" * 90)
 
-    # Детализация по документам для каждой модели.
-    for r in results:
-        if not r.docs:
-            continue
-        print(f"\n--- {r.model} (детализация) ---")
-        for d in sorted(r.docs, key=lambda x: x.name):
-            vals = f"{d.matched}/{d.expected}" if d.expected else "—"
-            print(f"  {d.name:<24} {d.status:<5} cls={d.classify_s:>6.1f}s "
-                  f"ext={d.extract_s:>6.1f}s tot={d.total_s:>6.1f}s vals={vals}")
+
+def save_markdown(results: list[ModelResult]) -> Path:
+    """Сохраняет сравнительную таблицу в benchmarks/models_comparison_YYYY-MM-DD.md."""
+    BENCHMARKS_DIR.mkdir(parents=True, exist_ok=True)
+    path = BENCHMARKS_DIR / f"models_comparison_{time.strftime('%Y-%m-%d')}.md"
+    lines = [
+        "# Сравнение VLM-моделей",
+        "",
+        f"Дата: {time.strftime('%Y-%m-%d %H:%M')}",
+        f"Документов: {results[0].num_docs if results else 0}",
+        "",
+        "| Модель | PASS | FAIL | SKIP | precision | recall | median, s | avg, s | tps | vram, GB |",
+        "|--------|------|------|------|-----------|--------|-----------|--------|-----|----------|",
+    ]
+    for r in sorted(results, key=lambda x: x.score, reverse=True):
+        precision = f"{r.precision:.2%}" if r.num_docs else "—"
+        recall = f"{r.recall:.2%}" if r.num_docs else "—"
+        tps = "—"  # усреднённый tps по всем документам — пока не считаем
+        lines.append(
+            f"| {r.model} | {r.passed} | {r.failed} | {r.skipped} | "
+            f"{precision} | {recall} | {r.median_time_per_doc:.1f} | "
+            f"{r.avg_time_per_doc:.1f} | {tps} | {r.vram_gb:.1f} |"
+        )
+    lines += ["", "*score = (precision × pass_rate) / avg_time*"]
+    path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"\n[BENCH] Markdown сохранён: {path}", flush=True)
+    return path
 
 
 def main():
@@ -365,6 +425,7 @@ def main():
         print(f"[BENCH] Результаты сохранены в {RESULTS_FILE}", flush=True)
 
     print_comparison(results)
+    save_markdown(results)
 
 
 if __name__ == "__main__":

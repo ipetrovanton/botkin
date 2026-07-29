@@ -183,13 +183,16 @@ class MetricsCapture:
         self.logger = logging.getLogger(logger_name)
         self.records: list[InferenceMetrics] = []
         self._handler = _MetricsLogHandler(self.records)
+        self._original_level = self.logger.level
 
     def __enter__(self) -> MetricsCapture:
+        self.logger.setLevel(logging.INFO)
         self.logger.addHandler(self._handler)
         return self
 
     def __exit__(self, *exc: object) -> None:
         self.logger.removeHandler(self._handler)
+        self.logger.setLevel(self._original_level)
 
 
 def _units_equal(expected: str | None, got: str | None) -> bool:
