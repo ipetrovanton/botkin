@@ -8,17 +8,11 @@ from botkin.config import VLM_MODEL, VLM_MAX_TOKENS, RAW_LOG_LIMIT
 from botkin.domain.models import LabResult
 from botkin.llm.client import get_raw_client, default_options, model_name
 from botkin.llm.image_ocr import messages_from_images
+from botkin.llm.prompts import SIBR_OCR_PROMPT, SIBR_OCR_SYSTEM
 from botkin.parsing.sibr import parse_sibr_ocr
 
 log = logging.getLogger(__name__)
 
-_SIBR_OCR_PROMPT = (
-    "На изображении — таблица водородно-метанового дыхательного теста с лактулозой (СИБР). "
-    "Время в минутах идёт по строкам, газовые показатели по колонкам. "
-    "Верни таблицу строго в формате: одна строка на каждое время, "
-    'формат: "<время> мин: H2=<ppm>, CH4=<ppm>, H2+2CH4=<ppm>, O2=<%>". '
-    "Ничего не придумывай и не пропускай."
-)
 # Минимум строк: полная таблица СИБР даёт 8 временных точек × 4 газа = 32 показателя.
 _SIBR_MIN_ROWS = 16
 
@@ -31,7 +25,7 @@ _SIBR_VOTING_TRIES = 3
 
 def call_sibr_ocr(b64_images: list[str], doc_name: str) -> str:
     """Специализированный OCR-запрос для таблицы СИБР (возвращает построчный формат)."""
-    messages = messages_from_images("Ты — точный OCR медицинских таблиц.", _SIBR_OCR_PROMPT, b64_images)
+    messages = messages_from_images(SIBR_OCR_SYSTEM, SIBR_OCR_PROMPT, b64_images)
     client = get_raw_client()
     t0 = time.perf_counter()
     response = client.chat.completions.create(

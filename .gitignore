@@ -29,6 +29,10 @@ __pycache__/
 *.db-wal
 *.db-shm
 
+# Build artifacts
+build/
+dist/
+
 # Uploaded files
 sources/
 

@@ -47,6 +47,21 @@ botkin-bot = "botkin.bot.main:run"
 [tool.uv]
 package = true
 
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = [
+  "*.md",
+  "*.jsonl",
+  "*.json",
+  "*.html",
+  "*.css",
+  "*.js",
+  "*.woff2",
+  "*.sql",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]

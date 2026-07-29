@@ -6,19 +6,13 @@ import time
 
 from botkin.config import VLM_MODEL, VLM_MAX_TOKENS, RAW_LOG_LIMIT
 from botkin.llm.client import get_raw_client, default_options, model_name
+from botkin.llm.prompts import IMAGE_OCR_PROMPT, IMAGE_OCR_SYSTEM
 
 log = logging.getLogger(__name__)
 
-_IMAGE_TABLE_OCR_PROMPT = (
-    "Прочитай таблицу лабораторных результатов на изображении дословно, строка за строкой. "
-    "Для каждой строки верни: название показателя, все числа результата, единицы и проценты. "
-    "Сохраняй логарифмические значения как есть (например 'название: 10 5.7 -0.1 (68-91%)'). "
-    "Не структурируй в JSON. Ничего не придумывай и не пропускай."
-)
-
 # Task-токен PaddleOCR-VL для повторного OCR-запроса на плотных Lg-таблицах (АндроФлор).
 # Модель специально обучена отвечать на короткие task-токены ("OCR:"/"Table Recognition:"),
-# а не на диалоговые инструкции — конверсационный _IMAGE_TABLE_OCR_PROMPT на плотной
+# а не на диалоговые инструкции — конверсационный IMAGE_OCR_PROMPT (llm/prompts/image_ocr.md) на плотной
 # Lg-нотации уводит её off-distribution (галлюцинация псевдо-арифметической прогрессии
 # "10 5.7, 10 4.8, 10 3.6, ..." вместо реальных значений; проверено вручную на sample_006).
 # См. HF card PaddlePaddle/PaddleOCR-VL-1.6, раздел PROMPTS (2026-05-28).
@@ -48,7 +42,7 @@ def call_image_ocr(b64_images: list[str], doc_name: str, task_token: str | None 
     if task_token is not None:
         messages = messages_from_images("", task_token, b64_images)
     else:
-        messages = messages_from_images("Ты — точный OCR медицинских таблиц.", _IMAGE_TABLE_OCR_PROMPT, b64_images)
+        messages = messages_from_images(IMAGE_OCR_SYSTEM, IMAGE_OCR_PROMPT, b64_images)
     client = get_raw_client()
     t0 = time.perf_counter()
     last_exc: Exception | None = None
