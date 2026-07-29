@@ -229,7 +229,8 @@ def run_model(model: str, skip_synthetic: bool = False, timeout: int = 7200) -> 
     print(f"\n{'=' * 70}")
     print(f"[BENCH] Модель: {model}")
     print(f"[BENCH] Команда: {' '.join(cmd)}")
-    print(f"[BENCH] VLM_MODEL={model} TEXT_MODEL={model}")
+    text_model = os.environ.get("TEXT_MODEL", "<default>")
+    print(f"[BENCH] VLM_MODEL={model} TEXT_MODEL={text_model}")
     print(f"{'=' * 70}", flush=True)
 
     # Вывод pytest перенаправляем в файл — capture_output на Windows падает
