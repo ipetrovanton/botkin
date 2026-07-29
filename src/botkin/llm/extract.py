@@ -31,7 +31,7 @@ from botkin.llm.prompts import (
     DOCTOR_REPORT_INSTRUCTION, DOCTOR_REPORT_VLM_SYSTEM, PROMPTS_VERSION, TEXT_INSTRUCTION,
 )
 from botkin.parsing.androflor import is_androflor_text, parse_androflor_ocr
-from botkin.parsing.sibr import is_sibr_text, parse_sibr_ocr
+from botkin.parsing.sibr import is_sibr_text
 from botkin.parsing.harvester import (
     _collect_tables, harvest_lab_rows, loads_json, salvage_json_objects,
 )
@@ -43,55 +43,22 @@ from botkin.parsing.text_layer import _parse_text_line, _verbatim_guard, complet
 from botkin.preprocess.images import prepare_images, to_base64_jpegs
 from botkin.preprocess.pdf_text import has_usable_text_layer, open_pdf
 
+# OCR-инфраструктура и доменные OCR-модули (вынесены из extract.py для декомпозиции).
+from botkin.llm.image_ocr import (
+    messages_from_images as _messages_from_images,
+    call_image_ocr as _call_image_ocr,
+)
+from botkin.llm.sibr_ocr import (
+    sibr_ocr_with_voting as _sibr_ocr_with_voting,
+    _SIBR_MIN_ROWS,
+)
+from botkin.llm.androflor_ocr import (
+    androflor_voting as _androflor_voting,
+    _ANDROFLOR_MIN_ROWS,
+    _ANDROFLOR_RETRY_LONG_SIDE,
+)
+
 log = logging.getLogger(__name__)
-
-_IMAGE_TABLE_OCR_PROMPT = (
-    "Прочитай таблицу лабораторных результатов на изображении дословно, строка за строкой. "
-    "Для каждой строки верни: название показателя, все числа результата, единицы и проценты. "
-    "Сохраняй логарифмические значения как есть (например 'название: 10 5.7 -0.1 (68-91%)'). "
-    "Не структурируй в JSON. Ничего не придумывай и не пропускай."
-)
-# Порог строк, ниже которого «андрофлор-страница» считается описанием бланка, а не таблицей.
-_ANDROFLOR_MIN_ROWS = 4
-
-# Task-токен PaddleOCR-VL для повторного OCR-запроса на плотных Lg-таблицах (АндроФлор).
-# Модель специально обучена отвечать на короткие task-токены ("OCR:"/"Table Recognition:"),
-# а не на диалоговые инструкции — конверсационный _IMAGE_TABLE_OCR_PROMPT на плотной
-# Lg-нотации уводит её off-distribution (галлюцинация псевдо-арифметической прогрессии
-# "10 5.7, 10 4.8, 10 3.6, ..." вместо реальных значений; проверено вручную на sample_006).
-# См. HF card PaddlePaddle/PaddleOCR-VL-1.6, раздел PROMPTS (2026-05-28).
-_PADDLEOCR_TABLE_TASK_TOKEN = "Table Recognition:"
-
-# Разрешение для task-токен retry на плотных таблицах. PaddleOCR-VL официально работает как
-# ВТОРОЙ этап двухэтапного пайплайна: отдельная модель PP-DocLayout-V3 сначала режет страницу
-# на простые под-изображения (одна ячейка/абзац), и только потом 0.9B VLM читает каждый crop.
-# Мы подаём модели целую сложную страницу разом (у нас нет layout-детектора) — на дефолтном
-# IMAGE_EXTRACT_LONG_SIDE=2200 с upscale/enhance (тюнинг под qwen3-vl) модель хаотично
-# галлюцинирует. Эмпирически подобранное меньшее разрешение без enhance/upscale снижает частоту
-# срыва (проверено вручную на sample_006), хотя полностью не устраняет нестабильность модели —
-# см. github.com/ggml-org/llama.cpp/pull/18825 (генеративная часть всего 0.3B, "error-prone").
-_ANDROFLOR_RETRY_LONG_SIDE = 1264
-
-# Число OCR-попыток с разными task-токенами для voting на Андрофлор.
-# PaddleOCR-VL стохастичен: один прогон даёт 2 строки, другой — 11. Делаем N вызовов
-# с чередованием task-токенов ("Table Recognition:" / "OCR:") и разрешений (основное / low-res),
-# выбираем результат с максимальным числом распарсенных строк.
-_ANDROFLOR_VOTING_TRIES = 3
-# СИБР-таблица тоже читается одним VLM-вызовом при temperature=0.0, но GPU-инференс
-# не гарантирует побитовую детерминированность — редкий сбой формата/цифры роняет
-# результат ниже _SIBR_MIN_ROWS и весь блок из 32 показателей отбрасывается. Voting
-# по аналогии с Андрофлор устраняет эти стохастические провалы.
-_SIBR_VOTING_TRIES = 3
-
-_SIBR_OCR_PROMPT = (
-    "На изображении — таблица водородно-метанового дыхательного теста с лактулозой (СИБР). "
-    "Время в минутах идёт по строкам, газовые показатели по колонкам. "
-    "Верни таблицу строго в формате: одна строка на каждое время, "
-    'формат: "<время> мин: H2=<ppm>, CH4=<ppm>, H2+2CH4=<ppm>, O2=<%>". '
-    "Ничего не придумывай и не пропускай."
-)
-# Минимум строк: полная таблица СИБР даёт 8 временных точек × 4 газа = 32 показателя.
-_SIBR_MIN_ROWS = 16
 
 # Сколько раз повторить text-структурирование без grammar при пустом ответе.
 # XGrammar на части входов схлопывает вывод в пустой объект; пустой ответ бывает
@@ -132,20 +99,6 @@ def _prepare_b64(source_path: Path) -> list[str]:
     if not b64_images:
         log.warning("[EXTRACT_INPUT] Doc: '%s' | НЕТ изображений после препроцессинга — VLM нечего анализировать", source_path.name)
     return b64_images
-
-
-def _messages_from_images(system_prompt: str, instruction: str, b64_images: list[str]) -> list[dict]:
-    """system_prompt='' пропускает системное сообщение — нужно для task-токенов PaddleOCR-VL,
-    которая обучена на голый user-текст ("OCR:"/"Table Recognition:") без диалоговой обвязки.
-    """
-    content: list[dict] = [{"type": "text", "text": instruction}]
-    for b64 in b64_images:
-        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-    messages: list[dict] = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": content})
-    return messages
 
 
 def _build_messages(system_prompt: str, instruction: str, source_path: Path) -> list[dict]:
@@ -215,93 +168,6 @@ def _call_vlm(messages: list[dict], response_model: type[BaseModel], doc_name: s
         err = ExtractionError(f"Сбой извлечения ({doc_type}): {e}")
         err.raw_text = _raw_text_from_exc(e)  # сырой ответ для возможного salvage обрезанного JSON
         raise err from e
-
-
-# Число попыток на транзиентную 500-ошибку llama-server ("peg-native format" — известная
-# нестабильность GGUF-порта PaddleOCR-VL, см. github.com/ggml-org/llama.cpp/pull/18825).
-# SDK-ретраи openai-клиента по умолчанию (max_retries=2) не всегда достаточны на практике.
-_IMAGE_OCR_TRANSIENT_RETRIES = 5
-
-
-def _call_image_ocr(b64_images: list[str], doc_name: str, task_token: str | None = None) -> str:
-    if task_token is not None:
-        messages = _messages_from_images("", task_token, b64_images)
-    else:
-        messages = _messages_from_images("Ты — точный OCR медицинских таблиц.", _IMAGE_TABLE_OCR_PROMPT, b64_images)
-    client = get_raw_client()
-    t0 = time.perf_counter()
-    last_exc: Exception | None = None
-    for attempt in range(_IMAGE_OCR_TRANSIENT_RETRIES):
-        try:
-            response = client.chat.completions.create(
-                model=model_name(VLM_MODEL),
-                messages=messages,
-                max_tokens=VLM_MAX_TOKENS,
-                temperature=0.0,
-                extra_body={"options": {**default_options(), "temperature": 0.0}},
-            )
-            break
-        except Exception as e:  # noqa: BLE001 — транзиентная 500 от llama-server, не наша ошибка схемы
-            last_exc = e
-            log.warning("[IMAGE_OCR_RETRY] Doc: '%s' | попытка %d/%d упала: %s",
-                        doc_name, attempt + 1, _IMAGE_OCR_TRANSIENT_RETRIES, e)
-    else:
-        raise last_exc  # все попытки исчерпаны
-    elapsed = time.perf_counter() - t0
-    content = response.choices[0].message.content
-    text = content if isinstance(content, str) else ""
-    log.info("[IMAGE_OCR] Doc: '%s' | Elapsed: %.2fs | символов=%d | task_token=%s",
-              doc_name, elapsed, len(text), task_token or "-")
-    log.debug("[IMAGE_OCR_RAW] Doc: '%s' | %s", doc_name, text[:RAW_LOG_LIMIT])
-    return text
-
-
-def _call_sibr_ocr(b64_images: list[str], doc_name: str) -> str:
-    """Специализированный OCR-запрос для таблицы СИБР (возвращает построчный формат)."""
-    messages = _messages_from_images("Ты — точный OCR медицинских таблиц.", _SIBR_OCR_PROMPT, b64_images)
-    client = get_raw_client()
-    t0 = time.perf_counter()
-    response = client.chat.completions.create(
-        model=model_name(VLM_MODEL),
-        messages=messages,
-        max_tokens=VLM_MAX_TOKENS,
-        temperature=0.0,
-        extra_body={"options": {**default_options(), "temperature": 0.0}},
-    )
-    elapsed = time.perf_counter() - t0
-    content = response.choices[0].message.content
-    text = content if isinstance(content, str) else ""
-    log.info("[SIBR_OCR] Doc: '%s' | Elapsed: %.2fs | символов=%d", doc_name, elapsed, len(text))
-    log.debug("[SIBR_OCR_RAW] Doc: '%s' | %s", doc_name, text[:RAW_LOG_LIMIT])
-    return text
-
-
-def _sibr_ocr_with_voting(b64_images: list[str], doc_name: str) -> list[LabResult]:
-    """СИБР-OCR с voting: повтор вызова при недоборе строк, выбор лучшего по числу строк.
-
-    Один и тот же запрос при temperature=0.0 иногда даёт < _SIBR_MIN_ROWS строк из-за
-    недетерминированности GPU-инференса (см. _SIBR_VOTING_TRIES). Повторные вызовы того
-    же промпта на тех же картинках обычно расходятся с первым и восстанавливают полную
-    таблицу.
-    """
-    sibr_text = _call_sibr_ocr(b64_images, doc_name)
-    rows = parse_sibr_ocr(sibr_text)
-    if len(rows) < _SIBR_MIN_ROWS:
-        for i in range(_SIBR_VOTING_TRIES):
-            try:
-                vote_text = _call_sibr_ocr(b64_images, doc_name)
-                vote_rows = parse_sibr_ocr(vote_text)
-                log.info(
-                    "[SIBR_VOTE] Doc: '%s' | попытка %d/%d | строк=%d",
-                    doc_name, i + 1, _SIBR_VOTING_TRIES, len(vote_rows),
-                )
-                if len(vote_rows) > len(rows):
-                    rows = vote_rows
-                if len(rows) >= _SIBR_MIN_ROWS:
-                    break
-            except Exception as e:  # noqa: BLE001
-                log.warning("[SIBR_VOTE] Doc: '%s' | попытка %d упала: %s", doc_name, i + 1, e)
-    return rows
 
 
 def _raw_text_from_exc(exc: Exception) -> str:
@@ -384,33 +250,8 @@ def _ocr_then_structure(
     if is_androflor_text(text):
         rows = parse_androflor_ocr(text)
         # Мульти-вызов + voting: PaddleOCR-VL стохастичен — один прогон даёт 2 строки,
-        # другой 11. Делаем N дополнительных вызовов с чередованием task-токенов и
-        # разрешений, выбираем результат с максимальным числом распарсенных строк.
-        if len(rows) < _ANDROFLOR_MIN_ROWS:
-            low_res_images = low_res_retry_fn() if low_res_retry_fn else None
-            task_tokens = [_PADDLEOCR_TABLE_TASK_TOKEN, "OCR:"]
-            image_sets = [b64_images] + ([low_res_images] if low_res_images else [])
-            best_rows = rows
-            for i in range(_ANDROFLOR_VOTING_TRIES):
-                token = task_tokens[i % len(task_tokens)]
-                images = image_sets[i % len(image_sets)]
-                try:
-                    vote_text = _call_image_ocr(images, doc_name, task_token=token)
-                    vote_rows = parse_androflor_ocr(vote_text)
-                    log.info(
-                        "[ANDROFLOR_VOTE] Doc: '%s' | попытка %d/%d | token=%s | строк=%d",
-                        doc_name, i + 1, _ANDROFLOR_VOTING_TRIES, token, len(vote_rows),
-                    )
-                    if len(vote_rows) > len(best_rows):
-                        best_rows = vote_rows
-                except Exception as e:  # noqa: BLE001
-                    log.warning("[ANDROFLOR_VOTE] Doc: '%s' | попытка %d упала: %s", doc_name, i + 1, e)
-            if len(best_rows) > len(rows):
-                log.info(
-                    "[ANDROFLOR_VOTING_RESULT] Doc: '%s' | строк было=%d, после voting=%d",
-                    doc_name, len(rows), len(best_rows),
-                )
-                rows = best_rows
+        # другой 11. Voting вынесен в androflor_ocr.androflor_voting.
+        rows = _androflor_voting(b64_images, doc_name, rows, low_res_retry_fn)
         # Минимум строк: настоящая таблица Андрофлор даёт ~20 строк, тогда как страница-описание
         # бланка (тоже содержит маркеры «Андрофлор»/«Lactobacillus») при жадном разборе отдаёт
         # 0–1 мусорную строку из прозы/ссылок. Принимаем доменный разбор только если строк
