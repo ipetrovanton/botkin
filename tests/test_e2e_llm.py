@@ -18,10 +18,8 @@
      Рядом с документом можно положить sidecar <имя>.expected.json с разметкой — тогда
      сверка строгая (см. tests/fixtures/documents/README.md). Без sidecar — мягкая проверка.
 """
-import dataclasses
 import json
 import os
-import re
 import sys
 import time
 import urllib.request
@@ -29,11 +27,11 @@ from pathlib import Path
 
 import pytest
 
+import e2e_report as er
 from botkin.config import VLM_MODEL
 from botkin.llm import classify
 from botkin.llm import extract as ex
 from botkin.llm.client import _detect_ollama_url, _is_url_reachable, get_backend
-from botkin.normalize.units import canonical_unit
 
 # Отчёт печатает единицы с надстрочными символами (10⁹/л, 10¹²/л). При запуске через
 # WSL python.exe с выводом в cp1251-консоль PowerShell такой символ роняет print
@@ -49,6 +47,9 @@ _CLASSIFY_BUDGET_S = 180.0
 _EXTRACT_BUDGET_S = 900.0
 
 _DOC_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"}
+
+# Все отчёты по документам — для сводки и сохранения в benchmarks/.
+reports: list[er.DocReport] = []
 
 
 def _backend_skip_reason() -> str | None:
@@ -125,137 +126,20 @@ def _load_expected(doc_path: Path) -> dict | None:
         return json.load(f)
 
 
-@dataclasses.dataclass
-class _Mismatch:
-    """Одно несовпадение по полю сопоставленного показателя (unit/ref_low/ref_high)."""
-    analyte: str
-    field: str
-    expected: object
-    got: object
+def _expected_analytes_from_ground_truth() -> list[dict]:
+    """Превращает _CBC_GROUND_TRUTH в формат, понятный er.compare_analytes."""
+    return [
+        {"name": name, "value": _to_number(value), "unit": unit}
+        for name, value, unit, _ in _CBC_GROUND_TRUTH
+    ]
 
 
-@dataclasses.dataclass
-class _DocReport:
-    """Полный отчёт по одному документу: тайминги, тип, сверка значений и полей."""
-    name: str
-    status: str = "PASS"                       # PASS | FAIL | SKIP
-    fail_reasons: list[str] = dataclasses.field(default_factory=list)
-    classify_s: float = 0.0
-    extract_s: float = 0.0
-    doc_type_expected: str | None = None
-    doc_type_got: str | None = None
-    expected_values: int = 0
-    extracted_rows: int = 0
-    matched_values: int = 0
-    missing: list[dict] = dataclasses.field(default_factory=list)   # эталонные analytes без пары
-    field_mismatches: list[_Mismatch] = dataclasses.field(default_factory=list)
-
-    @property
-    def total_s(self) -> float:
-        return self.classify_s + self.extract_s
-
-
-# Собираем отчёты всех параметризованных запусков для итоговой сводки в конце модуля.
-_REPORTS: list[_DocReport] = []
-
-
-def _units_equal(expected: str | None, got: str | None) -> bool:
-    """Единицы равны после канонизации (млн/мкл vs 10^6/мкл — формат, не суть)."""
-    if not expected or not got:
-        return True   # нечего сравнивать — не считаем расхождением
-    return canonical_unit(expected)[0] == canonical_unit(got)[0] or expected.strip() == got.strip()
-
-
-def _compare_analytes(rows, expected_analytes):
-    """Сопоставляет эталонные analytes с извлечёнными строками по значению (1:1, мультимножество).
-
-    Сверяем числа, а не имена: VLM варьирует формулировки ("MCV" / "MCV (ср. объём эритр.)"),
-    но значение объективно. Для каждой найденной пары дополнительно сверяем unit/ref_low/ref_high
-    — это информативные расхождения, не валящие тест (форматирование/округление эталона варьирует).
-
-    Возвращает (matched_pairs, missing, field_mismatches).
-    """
-    remaining = list(rows)
-    matched_pairs: list[tuple[dict, object]] = []
-    missing: list[dict] = []
-    for analyte in expected_analytes:
-        value = analyte.get("value")
-        if value is None:
-            continue                          # качественный результат — не сверяем по числу
-        key = round(value, 2)
-        candidates = [i for i, r in enumerate(remaining)
-                      if r.value_num is not None and round(r.value_num, 2) == key]
-        if not candidates:
-            missing.append(analyte)
-        else:
-            # Если кандидатов несколько (СИБР — повторяющиеся значения O2/CH4),
-            # выбираем по наибольшей близости имени, а не первого попавшегося.
-            idx = max(candidates, key=lambda i: _name_score(analyte.get("name", ""), remaining[i].analyte_name))
-            matched_pairs.append((analyte, remaining.pop(idx)))
-
-    field_mismatches: list[_Mismatch] = []
-    for analyte, row in matched_pairs:
-        name = analyte.get("name", "?")
-        if not _units_equal(analyte.get("unit"), row.unit):
-            field_mismatches.append(_Mismatch(name, "unit", analyte.get("unit"), row.unit))
-        for ref_field in ("ref_low", "ref_high"):
-            exp_ref = analyte.get(ref_field)
-            got_ref = getattr(row, ref_field)
-            if exp_ref is not None and got_ref is not None and abs(exp_ref - got_ref) > 0.01:
-                field_mismatches.append(_Mismatch(name, ref_field, exp_ref, got_ref))
-    return matched_pairs, missing, field_mismatches
-
-
-def _name_score(expected_name: str, got_name: str) -> float:
-    """Близость имён: точное совпадение токенов + специальная обработка СИБР."""
-    expected_lower = expected_name.lower().replace("ё", "е")
-    got_lower = got_name.lower().replace("ё", "е")
-
-    # СИБР: ключевые токены — время (число + "минут") и газ (H2/CH4/H2+2CH4/O2).
-    if "сибр" in expected_lower:
-        time_match = re.search(r"(\d+)\s*минут", expected_lower)
-        gas = next((g for g in ("h2+2ch4", "ch4", "h2", "o2") if g in expected_lower), None)
-        if time_match and gas:
-            time_ok = time_match.group(1) in got_lower
-            gas_ok = gas in got_lower
-            if time_ok and gas_ok:
-                return 1.0
-            if time_ok or gas_ok:
-                return 0.5
-
-    # Общий случай: доля пересечения токенов.
-    expected_tokens = set(expected_lower.split())
-    got_tokens = set(got_lower.split())
-    if not expected_tokens:
-        return 0.0
-    return len(expected_tokens & got_tokens) / len(expected_tokens)
-
-
-def _print_report(report: _DocReport, rows) -> None:
-    """Печатает подробный отчёт по документу: тайминги, тип, сверка значений и полей."""
-    print(f"\n{'=' * 70}")
-    print(f"[E2E] {report.name} — {report.status}")
-    print(f"  Время:    classify {report.classify_s:.1f}s | "
-          f"extract {report.extract_s:.1f}s | всего {report.total_s:.1f}s")
-    type_mark = "OK" if report.doc_type_got == report.doc_type_expected else "MISMATCH"
-    print(f"  Тип:      получ '{report.doc_type_got}' / эталон '{report.doc_type_expected}' [{type_mark}]")
-    if report.expected_values:
-        print(f"  Значения: совпало {report.matched_values}/{report.expected_values} "
-              f"(извлечено строк: {report.extracted_rows})")
-    if report.missing:
-        print(f"  НЕ НАЙДЕНЫ эталонные значения ({len(report.missing)}):")
-        for analyte in report.missing:
-            unit = f" {analyte['unit']}" if analyte.get("unit") else ""
-            print(f"    - {analyte.get('name', '?')}: {analyte.get('value')}{unit}")
-        print("  Извлечено моделью:")
-        for row in rows:
-            unit = f" {row.unit}" if row.unit else ""
-            print(f"    · {row.analyte_name}: {row.value_num}{unit}")
-    if report.field_mismatches:
-        print(f"  Расхождения по unit/ref ({len(report.field_mismatches)}):")
-        for mismatch in report.field_mismatches:
-            print(f"    ~ {mismatch.analyte} [{mismatch.field}]: "
-                  f"эталон {mismatch.expected} / получ {mismatch.got}")
+def _to_number(value: str) -> float | None:
+    """Безопасный parse float; '< 1.0' и т.п. не сверяем по числу."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 pytestmark = pytest.mark.llm
@@ -270,123 +154,111 @@ def _require_backend():
 
 @pytest.fixture(scope="module", autouse=True)
 def _print_summary():
-    """После всех документов печатает сводную таблицу: статус, тайминги, точность значений."""
+    """После всех документов печатает сводную таблицу и сохраняет JSON-отчёт."""
     yield
-    if not _REPORTS:
+    if not reports:
         return
-    print(f"\n\n{'#' * 78}")
-    print("ИТОГОВАЯ СВОДКА E2E (по всем документам)")
-    print("#" * 78)
-    header = f"{'Документ':<22}{'Статус':<7}{'classify':>9}{'extract':>9}{'всего':>8}{'значения':>11}"
-    print(header)
-    print("-" * 78)
-    total_classify = total_extract = 0.0
-    passed = failed = 0
-    for r in sorted(_REPORTS, key=lambda x: x.name):
-        total_classify += r.classify_s
-        total_extract += r.extract_s
-        passed += r.status == "PASS"
-        failed += r.status == "FAIL"
-        values = f"{r.matched_values}/{r.expected_values}" if r.expected_values else "—"
-        print(f"{r.name:<22}{r.status:<7}{r.classify_s:>8.1f}s{r.extract_s:>8.1f}s"
-              f"{r.total_s:>7.1f}s{values:>11}")
-    print("-" * 78)
-    total_s = total_classify + total_extract
-    print(f"Документов: {len(_REPORTS)} | PASS: {passed} | FAIL: {failed}")
-    print(f"Время: classify {total_classify:.1f}s | extract {total_extract:.1f}s | "
-          f"всего {total_s:.1f}s ({total_s / 60:.1f} мин)")
-    if _REPORTS:
-        print(f"Среднее на документ: {total_s / len(_REPORTS):.1f}s")
-    fails = [r for r in _REPORTS if r.status == "FAIL"]
-    if fails:
-        print("\nПРОВАЛЫ:")
-        for r in fails:
-            print(f"  {r.name}: {'; '.join(r.fail_reasons)}")
-    print("#" * 78)
+
+    er.print_summary(reports)
+
+    benchmark_path = Path("benchmarks") / f"e2e_llm_{time.strftime('%Y%m%d_%H%M%S')}.json"
+    er.save_benchmark(reports, benchmark_path)
 
 
 def test_e2e_synthetic_cbc_classified_and_extracted(make_lab_pdf, tmp_path):
-    """Синтетический бланк ОАК: реальный classify+extract, сверка с ground-truth + замер."""
+    """Синтетический бланк ОАК: реальный classify+extract, структурный diff + метрики."""
     pdf = tmp_path / "e2e_cbc.pdf"
     make_lab_pdf(pdf, _CBC_GROUND_TRUTH, lab="ИНВИТРО",
                  title="Общий анализ крови", rows_per_page=20)
 
-    t = -time.perf_counter()
-    classified = classify.run_vlm(pdf)
-    t += time.perf_counter()
-    print(f"\n[SPEED] classify (синтетика): {t:.1f}s -> {classified.doc_type} (conf={classified.confidence:.2f})")
-    assert t < _CLASSIFY_BUDGET_S, f"classify завис: {t:.1f}s"
-    assert classified.doc_type == "analysis", f"бланк ОАК классифицирован как {classified.doc_type}"
+    report = er.DocReport(name=pdf.name, doc_type_expected="analysis")
 
-    t = -time.perf_counter()
-    rows = ex.run_analysis(pdf)
-    t += time.perf_counter()
-    print(f"[SPEED] extract (синтетика): {t:.1f}s -> {len(rows)} строк")
-    assert t < _EXTRACT_BUDGET_S, f"extract завис: {t:.1f}s"
+    with er.MetricsCapture() as capture:
+        t0 = time.perf_counter()
+        classified = classify.run_vlm(pdf)
+        report.classify_s = time.perf_counter() - t0
+        report.classify_metrics = list(capture.records)
 
-    # Полнота: большинство эталонных показателей должно найтись (допускаем расхождения
-    # в написании имени от модели, поэтому сверяем по нормализованному вхождению).
-    found = " ".join(r.analyte_name.lower() for r in rows)
-    expected_names = [name for name, *_ in _CBC_GROUND_TRUTH]
-    hits = [name for name in expected_names if name.lower()[:5] in found]
-    print(f"[E2E] распознано {len(hits)}/{len(expected_names)} эталонных показателей")
-    assert len(hits) >= len(expected_names) * 0.7, (
-        f"распознано лишь {len(hits)}/{len(expected_names)}: {[r.analyte_name for r in rows]}")
+    print(f"\n[SPEED] classify (синтетика): {report.classify_s:.1f}s -> "
+          f"{classified.doc_type} (conf={classified.confidence:.2f})")
+    assert report.classify_s < _CLASSIFY_BUDGET_S, f"classify завис: {report.classify_s:.1f}s"
+    report.doc_type_got = classified.doc_type
+    assert report.doc_type_got == "analysis", f"бланк ОАК классифицирован как {report.doc_type_got}"
+
+    with er.MetricsCapture() as capture:
+        t0 = time.perf_counter()
+        rows = ex.run_analysis(pdf)
+        report.extract_s = time.perf_counter() - t0
+        report.extract_metrics = list(capture.records)
+
+    print(f"[SPEED] extract (синтетика): {report.extract_s:.1f}s -> {len(rows)} строк")
+    assert report.extract_s < _EXTRACT_BUDGET_S, f"extract завис: {report.extract_s:.1f}s"
+
+    report.diff = er.compare_analytes(_expected_analytes_from_ground_truth(), rows)
+    print(f"[E2E] распознано {report.matched_values}/{report.expected_values} "
+          f"(precision={report.diff.precision:.2f}, recall={report.diff.recall:.2f})")
+
+    if report.diff.recall < 0.7:
+        report.fail_reasons.append(
+            f"распознано лишь {report.matched_values}/{report.expected_values}: "
+            f"{[r.analyte_name for r in rows]}"
+        )
+    if report.fail_reasons:
+        report.status = "FAIL"
+
+    reports.append(report)
+    er.print_report(report)
+    assert not report.fail_reasons, "; ".join(report.fail_reasons)
 
 
 @pytest.mark.parametrize("doc_path", _discover_documents() or [None],
                          ids=lambda p: p.name if p else "no-documents")
 def test_e2e_real_document_pipeline(doc_path):
-    """Реальный документ из BOTKIN_E2E_DOCS_DIR: classify+extract с замером по этапам и
-    детальной сверкой против sidecar-эталона (doc_type, значения, unit/ref)."""
+    """Реальный документ: classify+extract с метриками и структурным diff."""
     if doc_path is None:
         pytest.skip(
             f"нет реальных документов в {_docs_dir()}; задайте BOTKIN_E2E_DOCS_DIR "
             "или положите PDF/фото в tests/fixtures/documents")
 
     expected = _load_expected(doc_path) or {}
-    report = _DocReport(name=doc_path.name, doc_type_expected=expected.get("doc_type"))
-    _REPORTS.append(report)
+    report = er.DocReport(name=doc_path.name, doc_type_expected=expected.get("doc_type"))
+    reports.append(report)
     rows = []
 
-    # Этап 1: классификация (с fast-path по текстовому слою — см. classify.run_vlm).
-    t = -time.perf_counter()
-    classified = classify.run_vlm(doc_path)
-    report.classify_s = t + time.perf_counter()
+    with er.MetricsCapture() as capture:
+        t0 = time.perf_counter()
+        classified = classify.run_vlm(doc_path)
+        report.classify_s = time.perf_counter() - t0
+        report.classify_metrics = list(capture.records)
+
     report.doc_type_got = classified.doc_type
 
     if classified.doc_type == "analysis":
-        # Этап 2: извлечение показателей (препроцессинг + VLM/текстовый слой внутри).
-        t = -time.perf_counter()
-        rows = ex.run_analysis(doc_path)
-        report.extract_s = t + time.perf_counter()
-        report.extracted_rows = len(rows)
+        with er.MetricsCapture() as capture:
+            t0 = time.perf_counter()
+            rows = ex.run_analysis(doc_path)
+            report.extract_s = time.perf_counter() - t0
+            report.extract_metrics = list(capture.records)
 
-    # Сверка типа документа.
     if report.doc_type_expected and report.doc_type_got != report.doc_type_expected:
         report.fail_reasons.append(
             f"doc_type: получено '{report.doc_type_got}', ожидался '{report.doc_type_expected}'")
 
-    # Сверка значений показателей (только для анализов с sidecar-разметкой).
     analytes = expected.get("analytes") or []
     if classified.doc_type == "analysis" and analytes:
-        matched, missing, field_mismatches = _compare_analytes(rows, analytes)
-        report.expected_values = sum(1 for a in analytes if a.get("value") is not None)
-        report.matched_values = len(matched)
-        report.missing = missing
-        report.field_mismatches = field_mismatches
-        if missing:
+        report.diff = er.compare_analytes(analytes, rows)
+        if report.missing:
             report.fail_reasons.append(
-                f"не найдено {len(missing)}/{report.expected_values} эталонных значений")
+                f"не найдено {len(report.missing)}/{report.expected_values} эталонных значений")
 
     if report.fail_reasons:
         report.status = "FAIL"
 
-    _print_report(report, rows)
+    er.print_report(report)
 
-    # Ассерты-потолки скорости — ловят зависшую/деградировавшую модель.
-    assert report.classify_s < _CLASSIFY_BUDGET_S, f"classify завис на {doc_path.name}: {report.classify_s:.1f}s"
-    assert report.extract_s < _EXTRACT_BUDGET_S, f"extract завис на {doc_path.name}: {report.extract_s:.1f}s"
+    assert report.classify_s < _CLASSIFY_BUDGET_S, (
+        f"classify завис на {doc_path.name}: {report.classify_s:.1f}s")
+    assert report.extract_s < _EXTRACT_BUDGET_S, (
+        f"extract завис на {doc_path.name}: {report.extract_s:.1f}s")
     assert 0.0 <= classified.confidence <= 1.0
-    # Жёсткие ассерты на корректность — после печати отчёта, чтобы причина была видна.
     assert not report.fail_reasons, f"{doc_path.name}: " + "; ".join(report.fail_reasons)
