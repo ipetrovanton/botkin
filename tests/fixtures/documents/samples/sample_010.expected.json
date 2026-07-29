@@ -1,17 +1,32 @@
 {
-  "_comment": "Ручная разметка по визуальному чтению двух страниц PDF. Гемохелп: общий анализ мочи; вторая страница только подпись/печать. Строгая e2e-сверка использует analytes[].value. Глюкоза/Уробилиноген/Эритроциты в моче — качественный результат '< X' (ниже предела): value=null, строка в value_text.",
+  "_comment": "Ручная разметка по текстовому слою PDF. Гемохелп: общий анализ мочи + осадок; стр.2 — подпись. Качественные «не обнаружено»/«< X»: value=null, строка в value_text. Строгая e2e-сверка — analytes[].value.",
   "doc_type": "analysis",
   "clinic": "Гемохелп",
   "title": "Общий анализ мочи",
   "patient_name": "Саулина Инна Игоревна",
   "patient_birth_date": "25.11.1991",
   "analytes": [
+    {"name": "Цвет мочи", "value": null, "value_text": "янтарный"},
     {"name": "pH мочи", "value": 5.00, "ref_low": 4.8, "ref_high": 7.5},
     {"name": "Уд. вес мочи", "value": 1020.00, "ref_low": 1010.0, "ref_high": 1023.0},
+    {"name": "Белок в моче", "value": null, "value_text": "не обнаружено", "unit": "г/л", "ref_op": "<", "ref_high": 0.1},
     {"name": "Глюкоза в моче", "value": null, "value_text": "<1.7", "unit": "ммоль/л", "ref_op": "<", "ref_high": 1.7},
+    {"name": "Кетоновые тела в моче", "value": null, "value_text": "не обнаружено", "unit": "ммоль/л", "ref_op": "<", "ref_high": 0.5},
     {"name": "Билирубин в моче", "value": 17.00, "unit": "мкмоль/л", "ref_op": "<", "ref_high": 3.4},
     {"name": "Уробилиноген в моче", "value": null, "value_text": "<17", "unit": "мкмоль/л", "ref_op": "<", "ref_high": 17.0},
+    {"name": "Лейкоцитарная эстераза в моче", "value": null, "value_text": "не обнаружено", "unit": "ЛК/мкл", "ref_op": "<", "ref_high": 10.0},
+    {"name": "Гемоглобин в моче", "value": null, "value_text": "не обнаружено", "unit": "Эр/мкл", "ref_op": "<", "ref_high": 5.0},
+    {"name": "Нитриты в моче", "value": null, "value_text": "не обнаружено"},
+    {"name": "Прозрачность", "value": null, "value_text": "прозрачная"},
     {"name": "Эритроциты в осадке мочи", "value": null, "value_text": "<0.23", "unit": "п/з", "ref_op": "<", "ref_high": 2.0},
-    {"name": "Лейкоциты в осадке мочи", "value": 0.30, "unit": "п/з", "ref_op": "<", "ref_high": 5.0}
+    {"name": "Лейкоциты в осадке мочи", "value": 0.30, "unit": "п/з", "ref_op": "<", "ref_high": 5.0},
+    {"name": "Клетки плоского эпителия", "value": null, "value_text": "0-3", "unit": "п/з", "ref_op": "<", "ref_high": 5.0},
+    {"name": "Гиалиновые цилиндры", "value": null, "value_text": "не обнаружено", "unit": "п/з"},
+    {"name": "Бактерии", "value": null, "value_text": "+", "unit": "п/з"},
+    {"name": "Кристаллы", "value": null, "value_text": "оксалаты +", "unit": "п/з"},
+    {"name": "Грибы", "value": null, "value_text": "не обнаружено", "unit": "п/з"},
+    {"name": "Клетки переходного эпителия", "value": null, "value_text": "не обнаружено", "unit": "п/з", "ref_op": "<", "ref_high": 3.0},
+    {"name": "Патологические цилиндры", "value": null, "value_text": "не обнаружено", "unit": "п/з"},
+    {"name": "Слизь", "value": null, "value_text": "+++", "unit": "п/з"}
   ]
 }
