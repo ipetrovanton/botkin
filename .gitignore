@@ -2,6 +2,11 @@
 .env
 .env.local
 
+# Одноразовые дампы бенчмарков (не результаты — сырые логи/выводы отладки)
+scripts/bench/*.txt
+scripts/bench/*.log
+*.bak
+
 # IDE
 .idea/
 .windsurf/
