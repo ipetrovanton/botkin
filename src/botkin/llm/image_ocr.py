@@ -4,8 +4,8 @@ from __future__ import annotations
 import logging
 import time
 
-from botkin.config import VLM_MODEL, VLM_MAX_TOKENS, RAW_LOG_LIMIT
-from botkin.llm.client import get_raw_client, default_options, model_name
+from botkin.config import OCR_MODEL, OCR_MAX_TOKENS, RAW_LOG_LIMIT
+from botkin.llm.client import get_raw_client, ocr_options, model_name
 from botkin.llm.prompts import IMAGE_OCR_PROMPT, IMAGE_OCR_SYSTEM
 
 log = logging.getLogger(__name__)
@@ -49,11 +49,11 @@ def call_image_ocr(b64_images: list[str], doc_name: str, task_token: str | None 
     for attempt in range(_IMAGE_OCR_TRANSIENT_RETRIES):
         try:
             response = client.chat.completions.create(
-                model=model_name(VLM_MODEL),
+                model=model_name(OCR_MODEL),
                 messages=messages,
-                max_tokens=VLM_MAX_TOKENS,
+                max_tokens=OCR_MAX_TOKENS,
                 temperature=0.0,
-                extra_body={"options": {**default_options(), "temperature": 0.0}},
+                extra_body={"options": {**ocr_options(), "temperature": 0.0}},
             )
             break
         except Exception as e:  # noqa: BLE001 — транзиентная 500 от llama-server, не наша ошибка схемы

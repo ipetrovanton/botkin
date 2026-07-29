@@ -99,6 +99,21 @@ def default_options() -> dict:
     }
 
 
+def ocr_options() -> dict:
+    """Опции для OCR-модели первой ступени."""
+    from botkin.config import (
+        OCR_NUM_CTX, OCR_NUM_PREDICT, OCR_REPEAT_PENALTY, OLLAMA_KEEP_ALIVE,
+    )
+    if get_backend() != "ollama":
+        return {}
+    return {
+        "keep_alive": OLLAMA_KEEP_ALIVE,
+        "num_ctx": OCR_NUM_CTX,
+        "repeat_penalty": OCR_REPEAT_PENALTY,
+        "num_predict": OCR_NUM_PREDICT,
+    }
+
+
 def build_extra_body(
     response_model: type[BaseModel],
     options: dict | None = None,

@@ -531,6 +531,16 @@ VLM_REQUEST_TIMEOUT = settings.vlm.request_timeout
 # Флаг — страховка: конкретная версия Ollama может повести себя иначе на /v1 (см. #10001).
 VLM_STRUCTURED_OUTPUT = settings.vlm.structured_output
 
+# OCR-специализированная модель первой ступени двухступенчатого пайплайна.
+# Если не задана — используется тот же VLM, чтобы старый одноступенчатый путь
+# продолжал работать без доработки конфига.
+OCR_MODEL = os.getenv("OCR_MODEL") or VLM_MODEL
+OCR_TEMPERATURE = float(os.getenv("OCR_TEMPERATURE", str(VLM_TEMPERATURE)))
+OCR_NUM_CTX = int(os.getenv("OCR_NUM_CTX", str(VLM_NUM_CTX)))
+OCR_MAX_TOKENS = int(os.getenv("OCR_MAX_TOKENS", str(VLM_MAX_TOKENS)))
+OCR_NUM_PREDICT = int(os.getenv("OCR_NUM_PREDICT", str(VLM_NUM_PREDICT)))
+OCR_REPEAT_PENALTY = float(os.getenv("OCR_REPEAT_PENALTY", str(VLM_REPEAT_PENALTY)))
+
 # Text-only модель для обработки текстового слоя PDF.
 # По умолчанию равна VLM, но может быть лёгкой text-only моделью (qwen3:1.7b, qwen3:8b).
 TEXT_MODEL = settings.text_model.model

@@ -4,9 +4,9 @@ from __future__ import annotations
 import logging
 import time
 
-from botkin.config import VLM_MODEL, VLM_MAX_TOKENS, RAW_LOG_LIMIT
+from botkin.config import OCR_MODEL, OCR_MAX_TOKENS, RAW_LOG_LIMIT
 from botkin.domain.models import LabResult
-from botkin.llm.client import get_raw_client, default_options, model_name
+from botkin.llm.client import get_raw_client, ocr_options, model_name
 from botkin.llm.image_ocr import messages_from_images
 from botkin.llm.prompts import SIBR_OCR_PROMPT, SIBR_OCR_SYSTEM
 from botkin.parsing.sibr import parse_sibr_ocr
@@ -29,11 +29,11 @@ def call_sibr_ocr(b64_images: list[str], doc_name: str) -> str:
     client = get_raw_client()
     t0 = time.perf_counter()
     response = client.chat.completions.create(
-        model=model_name(VLM_MODEL),
+        model=model_name(OCR_MODEL),
         messages=messages,
-        max_tokens=VLM_MAX_TOKENS,
+        max_tokens=OCR_MAX_TOKENS,
         temperature=0.0,
-        extra_body={"options": {**default_options(), "temperature": 0.0}},
+        extra_body={"options": {**ocr_options(), "temperature": 0.0}},
     )
     elapsed = time.perf_counter() - t0
     content = response.choices[0].message.content
