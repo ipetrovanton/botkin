@@ -25,6 +25,14 @@
     {"name": "Eubacterium spp.", "value": 4.1, "unit": "Lg"},
     {"name": "Eubacterium spp., относительный показатель", "value": -0.7, "unit": "Lg(X/СВМО)"},
     {"name": "Сумма: УПМ анаэробы", "value": 4.4, "unit": "Lg"},
-    {"name": "Сумма: УПМ анаэробы, относительный показатель", "value": -0.4, "unit": "Lg(X/СВМО)"}
+    {"name": "Сумма: УПМ анаэробы, относительный показатель", "value": -0.4, "unit": "Lg(X/СВМО)"},
+    {"name": "Candida albicans", "value": null, "value_text": "не обнар.", "unit": "Lg", "ref_op": "<", "ref_high": 3.0},
+    {"name": "Candida albicans, относительный показатель", "value": null, "value_text": "не обнар.", "unit": "Lg(X/СВМО)", "ref_op": "<", "ref_high": -1.0},
+    {"name": "Neisseria gonorrhoeae", "value": null, "value_text": "не обнар.", "unit": "Lg", "ref_op": "<", "ref_high": 3.0},
+    {"name": "Chlamydia trachomatis", "value": null, "value_text": "не обнар.", "unit": "Lg", "ref_op": "<", "ref_high": 3.0},
+    {"name": "Mycoplasma genitalium", "value": null, "value_text": "не обнар.", "unit": "Lg", "ref_op": "<", "ref_high": 3.0},
+    {"name": "Trichomonas vaginalis", "value": null, "value_text": "не обнар.", "unit": "Lg", "ref_op": "<", "ref_high": 3.0},
+    {"name": "Mycoplasma hominis", "value": null, "value_text": "не обнар.", "unit": "Lg", "ref_op": "<", "ref_high": 3.0},
+    {"name": "Ureaplasma urealyticum + Ureaplasma parvum", "value": null, "value_text": "не обнар.", "unit": "Lg", "ref_op": "<", "ref_high": 3.0}
   ]
 }

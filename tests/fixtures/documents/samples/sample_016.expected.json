@@ -49,6 +49,7 @@
     {"name": "СОЭ", "value": 5.0, "unit": "мм/ч", "ref_op": "<", "ref_high": 20.0},
     {"name": "Ферритин", "value": 49.0, "unit": "мкг/л", "ref_low": 15.0, "ref_high": 204.0},
     {"name": "anti-Helicobacter pylori IgG", "value": null, "value_text": "< 0.4", "unit": "Ед/мл", "ref_op": "<", "ref_high": 0.9},
+    {"name": "АТ к париетальным клеткам желудка, IgG", "value": null, "value_text": "<1:40", "unit": "титр"},
     {"name": "СИБР-тест: базовая проба, водород H2", "value": 7.0, "unit": "ppm"},
     {"name": "СИБР-тест: базовая проба, метан CH4", "value": 13.0, "unit": "ppm"},
     {"name": "СИБР-тест: базовая проба, H2 + 2CH4", "value": 33.0, "unit": "ppm"},
