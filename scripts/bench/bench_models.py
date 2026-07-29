@@ -28,11 +28,9 @@ from pathlib import Path
 
 # Модели по умолчанию для сравнения — актуальные в локальном Ollama.
 DEFAULT_MODELS = [
-    "qwen3-vl:8b-instruct",
-    "gemma4:latest",
-    "minicpm-v:8b",
-    "qwen2.5vl:7b",
-    "glm-ocr:latest",
+    "huihui_ai/Qwen3.6-abliterated:27b",
+    "huihui_ai/Qwen3.6-abliterated:35b",
+    "dhiltgen/qwen3-vl:30b-a3b-thinking",
 ]
 
 # Все модели, которые нужно выгружать перед запуском очередной —
