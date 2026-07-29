@@ -168,22 +168,35 @@ def _to_float(raw: str) -> float:
 
 
 def _parse_tps_per_doc(output: str) -> dict[str, float]:
-    """Извлекает tps=... из E2E-блоков по каждому документу."""
+    """Извлекает tps=... из E2E-блоков по каждому документу (среднее по всем вызовам)."""
     tps_by_doc: dict[str, float] = {}
     current_doc: str | None = None
+    current_values: list[float] = []
     tps_re = re.compile(r"tps\s*=\s*([\d.]+)")
+
+    def _flush() -> None:
+        nonlocal current_doc
+        if current_doc and current_values:
+            tps_by_doc[current_doc] = sum(current_values) / len(current_values)
+        current_doc = None
+        current_values.clear()
+
     for line in output.splitlines():
         if "[E2E]" in line:
-            # Формат: [E2E] sample_020.pdf — PASS
+            _flush()
             parts = line.split()
             for part in parts:
-                if "." in part:
+                if "." in part and not part.endswith(":"):
                     current_doc = part
                     break
             continue
-        if current_doc and tps_re.search(line):
-            tps_by_doc[current_doc] = float(tps_re.search(line).group(1))
-            current_doc = None
+        if line.startswith("=") or line.startswith("#"):
+            _flush()
+            continue
+        m = tps_re.search(line)
+        if m and current_doc is not None:
+            current_values.append(float(m.group(1)))
+    _flush()
     return tps_by_doc
 
 
