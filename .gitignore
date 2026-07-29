@@ -6,6 +6,8 @@
 scripts/bench/*.txt
 scripts/bench/*.log
 *.bak
+tests/_dump*
+tests/_last_run*
 
 # IDE
 .idea/
