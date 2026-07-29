@@ -1,7 +1,7 @@
 # Dockerfile для Botkin API + Telegram-бот.
 # Многоэтапная сборка: установка зависимостей → runtime-образ без dev-инструментов.
 
-FROM python:3.12-slim AS base
+FROM python:3.14-slim AS base
 
 WORKDIR /app
 
