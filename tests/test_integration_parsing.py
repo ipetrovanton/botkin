@@ -43,6 +43,7 @@ def test_full_lab_pdf_parsed_end_to_end(make_lab_pdf, tmp_path, monkeypatch):
     make_lab_pdf(pdf, [_CRP_ROW, *_CBC_ROWS], title="Общий анализ крови", rows_per_page=5)
 
     monkeypatch.setattr(ex, "_structure_text", _structure_via_parser)
+    monkeypatch.setattr(ex, "_correct_units", lambda rows: rows)
 
     elapsed = -time.perf_counter()
     rows = ex.run_analysis(pdf)
@@ -72,6 +73,7 @@ def test_parsing_speed_scales_linearly(make_lab_pdf, tmp_path, monkeypatch, n_ro
     make_lab_pdf(pdf, rows_spec, rows_per_page=20)
 
     monkeypatch.setattr(ex, "_structure_text", _structure_via_parser)
+    monkeypatch.setattr(ex, "_correct_units", lambda rows: rows)
 
     elapsed = -time.perf_counter()
     rows = ex.run_analysis(pdf)

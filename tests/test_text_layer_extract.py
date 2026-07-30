@@ -2,6 +2,7 @@
 from pathlib import Path
 
 import botkin.llm.extract as ex
+from botkin.llm import text_extract as te
 from botkin.llm.extract import RawAnalysis
 from botkin.domain.models import LabResult
 from botkin.preprocess.pdf_text import PdfTextData
@@ -15,9 +16,9 @@ def test_structure_text_maps_raw_to_rows(monkeypatch):
         {"parameter": "Эритроциты", "value": "4.64", "unit": "млн/мкл",
          "reference_range": "3.8 - 5.1"},
     ]})
-    monkeypatch.setattr(ex, "TEXT_COMPACT_OUTPUT", False)  # тест про JSON-путь, не про компакт
-    monkeypatch.setattr(ex, "_call_text", lambda messages, name, structured=None: raw)
-    rows = ex._structure_text(["Гемоглобин 13.7 г/дл 11.7 - 15.5",
+    monkeypatch.setattr(te, "TEXT_COMPACT_OUTPUT", False)  # тест про JSON-путь, не про компакт
+    monkeypatch.setattr(te, "call_text", lambda messages, name, structured=None: raw)
+    rows = te.structure_text(["Гемоглобин 13.7 г/дл 11.7 - 15.5",
                                "Эритроциты 4.64 млн/мкл 3.8 - 5.1"], "doc.pdf")
     names = [r.analyte_name for r in rows]
     assert names == ["Гемоглобин", "Эритроциты"]
@@ -41,9 +42,9 @@ def test_structure_text_retries_without_grammar_on_empty(monkeypatch):
         # Первый (structured) вызов пуст, повтор без grammar — с данными.
         return empty if structured is None else filled
 
-    monkeypatch.setattr(ex, "TEXT_COMPACT_OUTPUT", False)  # тест про JSON-путь, не про компакт
-    monkeypatch.setattr(ex, "_call_text", fake_call_text)
-    rows = ex._structure_text(["Гемоглобин 13.7 г/дл 11.7 - 15.5"], "doc.pdf")
+    monkeypatch.setattr(te, "TEXT_COMPACT_OUTPUT", False)  # тест про JSON-путь, не про компакт
+    monkeypatch.setattr(te, "call_text", fake_call_text)
+    rows = te.structure_text(["Гемоглобин 13.7 г/дл 11.7 - 15.5"], "doc.pdf")
 
     assert calls == [None, False]  # structured, затем unstructured-повтор
     assert [r.analyte_name for r in rows] == ["Гемоглобин"]
@@ -58,36 +59,36 @@ def test_structure_text_stops_retrying_after_limit(monkeypatch):
         calls.append(structured)
         return empty
 
-    monkeypatch.setattr(ex, "TEXT_COMPACT_OUTPUT", False)  # тест про JSON-путь, не про компакт
-    monkeypatch.setattr(ex, "_call_text", fake_call_text)
-    rows = ex._structure_text(["мусор без показателей"], "doc.pdf")
+    monkeypatch.setattr(te, "TEXT_COMPACT_OUTPUT", False)  # тест про JSON-путь, не про компакт
+    monkeypatch.setattr(te, "call_text", fake_call_text)
+    rows = te.structure_text(["мусор без показателей"], "doc.pdf")
 
     assert rows == []
     # 1 structured + _TEXT_EMPTY_RETRIES unstructured-попыток.
-    assert calls == [None] + [False] * ex._TEXT_EMPTY_RETRIES
+    assert calls == [None] + [False] * te._TEXT_EMPTY_RETRIES
 
 
 def test_structure_text_uses_compact_and_skips_json_call(monkeypatch):
     """Компактный путь основной: при непустом разборе JSON-схему не дёргаем вовсе."""
-    monkeypatch.setattr(ex, "TEXT_COMPACT_OUTPUT", True)
-    monkeypatch.setattr(ex, "_call_text_compact",
+    monkeypatch.setattr(te, "TEXT_COMPACT_OUTPUT", True)
+    monkeypatch.setattr(te, "call_text_compact",
                         lambda messages, name: [LabResult(analyte_name="Гемоглобин", value_num=13.7)])
 
     def must_not_be_called(*a, **kw):
         raise AssertionError("JSON-схема не должна вызываться, если компакт дал строки")
 
-    monkeypatch.setattr(ex, "_call_text", must_not_be_called)
-    rows = ex._structure_text(["Гемоглобин 13.7 г/дл"], "doc.pdf")
+    monkeypatch.setattr(te, "call_text", must_not_be_called)
+    rows = te.structure_text(["Гемоглобин 13.7 г/дл"], "doc.pdf")
     assert [r.analyte_name for r in rows] == ["Гемоглобин"]
 
 
 def test_structure_text_falls_back_to_json_when_compact_empty(monkeypatch):
     """Пустой компакт не должен терять страницу — откат на прежний JSON-путь."""
     filled = RawAnalysis.model_validate({"results": [{"parameter": "СРБ", "value": "1.0"}]})
-    monkeypatch.setattr(ex, "TEXT_COMPACT_OUTPUT", True)
-    monkeypatch.setattr(ex, "_call_text_compact", lambda messages, name: [])
-    monkeypatch.setattr(ex, "_call_text", lambda messages, name, structured=None: filled)
-    rows = ex._structure_text(["СРБ 1.0"], "doc.pdf")
+    monkeypatch.setattr(te, "TEXT_COMPACT_OUTPUT", True)
+    monkeypatch.setattr(te, "call_text_compact", lambda messages, name: [])
+    monkeypatch.setattr(te, "call_text", lambda messages, name, structured=None: filled)
+    rows = te.structure_text(["СРБ 1.0"], "doc.pdf")
     assert [r.analyte_name for r in rows] == ["СРБ"]
 
 
@@ -98,10 +99,10 @@ def test_structure_text_falls_back_to_json_when_compact_raises(monkeypatch):
     def boom(messages, name):
         raise RuntimeError("500 server error")
 
-    monkeypatch.setattr(ex, "TEXT_COMPACT_OUTPUT", True)
-    monkeypatch.setattr(ex, "_call_text_compact", boom)
-    monkeypatch.setattr(ex, "_call_text", lambda messages, name, structured=None: filled)
-    rows = ex._structure_text(["СРБ 1.0"], "doc.pdf")
+    monkeypatch.setattr(te, "TEXT_COMPACT_OUTPUT", True)
+    monkeypatch.setattr(te, "call_text_compact", boom)
+    monkeypatch.setattr(te, "call_text", lambda messages, name, structured=None: filled)
+    rows = te.structure_text(["СРБ 1.0"], "doc.pdf")
     assert [r.analyte_name for r in rows] == ["СРБ"]
 
 
@@ -115,8 +116,7 @@ def test_text_layer_extracts_each_page_so_lone_result_survives(monkeypatch):
     # едином вызове по всем страницам. Постранично — модель видит каждую страницу.
     pages = [["С-реактивный белок 1.8 мг/л <5.0"],
              ["Гемоглобин 13.7 г/дл 11.7 - 15.5"]]
-    # Патчим имя в пространстве имён extract (from ... import open_pdf создаёт локальную ссылку).
-    monkeypatch.setattr(ex, "open_pdf", lambda p, **kw: _make_pdf_data(pages))
+    monkeypatch.setattr(te, "open_pdf", lambda p, **kw: _make_pdf_data(pages))
 
     def fake_structure(lines, name):
         # Имитация фокуса модели: видит ТОЛЬКО строки переданной страницы.
@@ -126,8 +126,8 @@ def test_text_layer_extracts_each_page_so_lone_result_survives(monkeypatch):
         return [LabResult(analyte_name="Гемоглобин", value_num=13.7, value_raw="13.7",
                           ref_low=11.7, ref_high=15.5)]
 
-    monkeypatch.setattr(ex, "_structure_text", fake_structure)
-    rows = ex._extract_from_text_layer(Path("doc.pdf"))
+    monkeypatch.setattr(te, "structure_text", fake_structure)
+    rows = te.extract_from_text_layer(Path("doc.pdf"))
     names = [r.analyte_name for r in rows]
     assert "С-реактивный белок" in names
     assert "Гемоглобин" in names
@@ -137,12 +137,12 @@ def test_text_layer_completeness_recovers_dropped_line(monkeypatch):
     # Вторая защита: даже на одной странице, если LLM пропустил строку-результат,
     # completeness_guard добирает её из текста слоя.
     pages = [["С-реактивный белок 1.8 мг/л <5.0", "Гемоглобин 13.7 г/дл 11.7 - 15.5"]]
-    monkeypatch.setattr(ex, "open_pdf", lambda p, **kw: _make_pdf_data(pages))
+    monkeypatch.setattr(te, "open_pdf", lambda p, **kw: _make_pdf_data(pages))
     # Модель вернула только гемоглобин — СРБ пропущен.
-    monkeypatch.setattr(ex, "_structure_text", lambda lines, name: [
+    monkeypatch.setattr(te, "structure_text", lambda lines, name: [
         LabResult(analyte_name="Гемоглобин", value_num=13.7, value_raw="13.7",
                   ref_low=11.7, ref_high=15.5)])
-    rows = ex._extract_from_text_layer(Path("doc.pdf"))
+    rows = te.extract_from_text_layer(Path("doc.pdf"))
     names = [r.analyte_name for r in rows]
     assert "С-реактивный белок" in names  # добран стражем
     assert "Гемоглобин" in names
@@ -152,10 +152,11 @@ def test_text_layer_completeness_recovers_dropped_line(monkeypatch):
 def test_run_analysis_uses_text_layer_when_strong(monkeypatch):
     monkeypatch.setattr(ex, "_should_use_text_layer", lambda p: True)
     pages = [["Гемоглобин 13.7 г/дл 11.7 - 15.5"]]
-    monkeypatch.setattr(ex, "open_pdf", lambda p, **kw: _make_pdf_data(pages))
+    monkeypatch.setattr(te, "open_pdf", lambda p, **kw: _make_pdf_data(pages))
     monkeypatch.setattr(ex, "_structure_text", lambda lines, name: [
         LabResult(analyte_name="Гемоглобин", value_num=13.7, value_raw="13.7",
                   ref_low=11.7, ref_high=15.5)])
+    monkeypatch.setattr(ex, "_correct_units", lambda rows: rows)
     # VLM-путь не должен вызываться
     monkeypatch.setattr(ex, "_prepare_b64",
                         lambda p: (_ for _ in ()).throw(AssertionError("VLM не должен вызываться")))
@@ -165,8 +166,9 @@ def test_run_analysis_uses_text_layer_when_strong(monkeypatch):
 
 def test_run_analysis_falls_back_when_text_layer_weak(monkeypatch):
     monkeypatch.setattr(ex, "_should_use_text_layer", lambda p: True)
-    monkeypatch.setattr(ex, "open_pdf", lambda p, **kw: _make_pdf_data([["мусор"]]))
+    monkeypatch.setattr(te, "open_pdf", lambda p, **kw: _make_pdf_data([["мусор"]]))
     monkeypatch.setattr(ex, "_structure_text", lambda lines, name: [])  # слабо → 0 строк
+    monkeypatch.setattr(ex, "_correct_units", lambda rows: rows)
     monkeypatch.setattr(ex, "_prepare_b64", lambda p: ["img1"])
     called = {"vlm": False}
 
@@ -182,11 +184,12 @@ def test_run_analysis_falls_back_when_text_layer_weak(monkeypatch):
 
 def test_run_analysis_falls_back_when_guard_rejects_majority(monkeypatch):
     monkeypatch.setattr(ex, "_should_use_text_layer", lambda p: True)
-    monkeypatch.setattr(ex, "open_pdf", lambda p, **kw: _make_pdf_data([["x"]]))
+    monkeypatch.setattr(te, "open_pdf", lambda p, **kw: _make_pdf_data([["x"]]))
     # Обе строки с числами, которых нет в источнике → >50% выбраковки.
     monkeypatch.setattr(ex, "_structure_text", lambda lines, name: [
         LabResult(analyte_name="A", value_num=137.0, value_raw="137"),
         LabResult(analyte_name="B", value_num=999.0, value_raw="999")])
+    monkeypatch.setattr(ex, "_correct_units", lambda rows: rows)
     monkeypatch.setattr(ex, "_prepare_b64", lambda p: ["img1"])
     monkeypatch.setattr(ex, "_extract_once",
                         lambda images, name, low_res_retry_fn=None: ([LabResult(analyte_name="Глюкоза", value_num=5.0)], 1))
