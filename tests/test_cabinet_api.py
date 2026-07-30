@@ -305,12 +305,12 @@ def test_api_reparse_clears_data_and_requeues(monkeypatch, tmp_path):
         }])
 
     calls = []
-    import botkin.api.routes.documents as docs_route
+    import botkin.api.services.documents as docs_service
 
     async def fake_process(doc_id, tg_id):
         calls.append((doc_id, tg_id))
 
-    monkeypatch.setattr(docs_route, "process_document", fake_process)
+    monkeypatch.setattr(docs_service, "process_document", fake_process)
     r = client.post(f"/api/documents/{did}/reparse", headers={"X-Telegram-User-Id": TG})
     assert r.status_code == 200
     assert r.json()["status"] == "received"

@@ -1,6 +1,9 @@
 """API веб-кабинета: пользователь, лента документов, детальная карточка, статус,
-исходники, удаление и повторное распознавание."""
-import hashlib
+исходники, удаление и повторное распознавание.
+
+Тонкие роуты — HTTP-слой (параметры → вызов сервиса → ответ).
+Бизнес-логика в api/services/documents.py.
+"""
 import json
 import mimetypes
 
@@ -11,35 +14,29 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..deps import get_user_id
-from botkin.config import UPLOAD_ALLOWED_EXTENSIONS, UPLOAD_MAX_BYTES
 from botkin.db.connection import get_conn
-from botkin.db.repos import DocumentRepo, LabRepo, ReportRepo, UserRepo
-from botkin.pipeline.orchestrator import process_document
+from botkin.db.repos import DocumentRepo, LabRepo, ReportRepo
 from botkin.pipeline.progress_model import StageDurationStore, estimate_progress
-from botkin.preprocess.formats import resolve_extension
-from botkin.storage import delete_quietly, is_stored_file, open_local, storage_for
+from botkin.storage import is_stored_file, open_local, storage_for
+
+from botkin.api.services.documents import (
+    add_lab,
+    delete_batch,
+    delete_document,
+    delete_lab,
+    edit_lab,
+    edit_report,
+    loads_list,
+    process_document,  # noqa: F401 — re-export для тестов, патчащих botkin.api.routes.documents
+    reparse_document,
+    replace_source,
+    require_own_document,
+    verify_document,
+)
 
 router = APIRouter(prefix="/api", tags=["cabinet"])
 
-# iPhone-фото: стандартный mimetypes может не знать HEIC/HEIF.
 _EXTRA_MEDIA_TYPES = {".heic": "image/heic", ".heif": "image/heif"}
-
-
-def _get_telegram_id(conn, user_id: int) -> int:
-    """telegram_user_id пользователя для уведомлений; 0 если нет Telegram-аккаунта."""
-    row = UserRepo(conn).get(user_id)
-    return row.get("telegram_user_id") or 0 if row else 0
-
-
-def _loads_list(raw: str | None) -> list[str]:
-    """JSON-колонка из БД → список; пусто/мусор → пустой список."""
-    if not raw:
-        return []
-    try:
-        value = json.loads(raw)
-        return value if isinstance(value, list) else []
-    except (json.JSONDecodeError, TypeError):
-        return []
 
 
 @router.get("/me")
@@ -98,9 +95,9 @@ def document_detail(document_id: int, user_id: int = Depends(get_user_id)) -> di
                     "doctor_name": r["doctor_name"],
                     "department": r["department"],
                     "visit_date": r["visit_date"],
-                    "recommendations": _loads_list(r["recommendations_json"]),
-                    "complaints": _loads_list(r["complaints_json"]),
-                    "medications": _loads_list(r["medications_json"]),
+                    "recommendations": loads_list(r["recommendations_json"]),
+                    "complaints": loads_list(r["complaints_json"]),
+                    "medications": loads_list(r["medications_json"]),
                 }
                 for r in rows
             ]
@@ -151,22 +148,9 @@ def document_source(document_id: int, user_id: int = Depends(get_user_id)) -> Fi
 
 
 @router.delete("/documents/{document_id}")
-def delete_document(document_id: int, user_id: int = Depends(get_user_id)) -> dict:
-    """Полное удаление: документ, показатели, заключения, файл-исходник.
-
-    Данные исчезают из статистики и динамики сразу — других ссылок на них нет.
-    """
-    with get_conn() as conn:
-        source_path = DocumentRepo(conn, user_id).delete(document_id)
-    if source_path is None:
-        raise HTTPException(status_code=404, detail="Документ не найден")
-    delete_quietly(source_path)
-    return {"deleted": 1}
-
-
-# ===== Верификация распознанного (этап 2) =====
-# Пользователь проверяет и правит извлечённые данные своего документа.
-# Любая правка сбрасывает verified_at: подтверждение относилось к старой версии данных.
+def delete_document_route(document_id: int, user_id: int = Depends(get_user_id)) -> dict:
+    """Полное удаление: документ, показатели, заключения, файл-исходник."""
+    return delete_document(document_id, user_id)
 
 
 class LabEditRequest(BaseModel):
@@ -206,27 +190,12 @@ class ReportEditRequest(BaseModel):
         return fields
 
 
-def _require_own_document(conn, user_id: int, document_id: int) -> dict:
-    doc = DocumentRepo(conn, user_id).get(document_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Документ не найден")
-    return doc
-
-
 @router.post("/documents/{document_id}/labs", status_code=201)
 def add_document_lab(
     document_id: int, req: LabEditRequest, user_id: int = Depends(get_user_id),
 ) -> dict:
     """Ручное добавление показателя, пропущенного распознаванием."""
-    fields = req.set_fields()
-    if not fields.get("analyte_name"):
-        raise HTTPException(status_code=422, detail="analyte_name обязателен")
-    with get_conn() as conn:
-        _require_own_document(conn, user_id, document_id)
-        repo = LabRepo(conn, user_id)
-        lab_id = repo.insert_manual(document_id, fields)
-        DocumentRepo(conn, user_id).clear_verified(document_id)
-        return repo.get_row(lab_id)
+    return add_lab(document_id, req.set_fields(), user_id)
 
 
 @router.patch("/documents/{document_id}/labs/{lab_id}")
@@ -234,30 +203,14 @@ def edit_document_lab(
     document_id: int, lab_id: int, req: LabEditRequest,
     user_id: int = Depends(get_user_id),
 ) -> dict:
-    with get_conn() as conn:
-        _require_own_document(conn, user_id, document_id)
-        repo = LabRepo(conn, user_id)
-        row = repo.get_row(lab_id)
-        if not row or row["document_id"] != document_id:
-            raise HTTPException(status_code=404, detail="Показатель не найден")
-        repo.update_row(lab_id, req.set_fields())
-        DocumentRepo(conn, user_id).clear_verified(document_id)
-        return repo.get_row(lab_id)
+    return edit_lab(document_id, lab_id, req.set_fields(), user_id)
 
 
 @router.delete("/documents/{document_id}/labs/{lab_id}")
 def delete_document_lab(
     document_id: int, lab_id: int, user_id: int = Depends(get_user_id),
 ) -> dict:
-    with get_conn() as conn:
-        _require_own_document(conn, user_id, document_id)
-        repo = LabRepo(conn, user_id)
-        row = repo.get_row(lab_id)
-        if not row or row["document_id"] != document_id:
-            raise HTTPException(status_code=404, detail="Показатель не найден")
-        repo.delete_row(lab_id)
-        DocumentRepo(conn, user_id).clear_verified(document_id)
-    return {"deleted": 1}
+    return delete_lab(document_id, lab_id, user_id)
 
 
 @router.patch("/documents/{document_id}/reports/{report_id}")
@@ -265,21 +218,14 @@ def edit_document_report(
     document_id: int, report_id: int, req: ReportEditRequest,
     user_id: int = Depends(get_user_id),
 ) -> dict:
-    with get_conn() as conn:
-        _require_own_document(conn, user_id, document_id)
-        repo = ReportRepo(conn, user_id)
-        if not repo.update_row(report_id, req.set_fields()):
-            raise HTTPException(status_code=404, detail="Заключение не найдено")
-        DocumentRepo(conn, user_id).clear_verified(document_id)
-        rows = [r for r in repo.for_document(document_id) if r["id"] == report_id]
-    return rows[0] if rows else {"id": report_id}
+    return edit_report(document_id, report_id, req.set_fields(), user_id)
 
 
 @router.get("/documents/{document_id}/versions")
 def document_versions(document_id: int, user_id: int = Depends(get_user_id)) -> dict:
     """История версий файла-исходника (появляются после замены файла)."""
     with get_conn() as conn:
-        doc = _require_own_document(conn, user_id, document_id)
+        doc = require_own_document(conn, user_id, document_id)
     if not is_stored_file(doc["source_path"]):
         return {"items": []}
     return {"items": storage_for(doc["source_path"]).versions(doc["source_path"])}
@@ -292,51 +238,15 @@ async def replace_document_source(
     file: UploadFile = File(...),
     user_id: int = Depends(get_user_id),
 ) -> dict:
-    """Замена файла-исходника новой версией (переснятый бланк) + перераспознавание.
-
-    Валидация изменений: тот же контент-контроль, что и при загрузке (тип/размер),
-    плюс запрет no-op замены тем же самым файлом (по sha256). Старая версия
-    сохраняется бэкендом хранилища (versioning MinIO / .versions на диске).
-    """
+    """Замена файла-исходника новой версией (переснятый бланк) + перераспознавание."""
     body = await file.read()
-    if len(body) > UPLOAD_MAX_BYTES:
-        raise HTTPException(status_code=413, detail=f"File too large: {len(body)} bytes")
-    if not body:
-        raise HTTPException(status_code=400, detail="Empty file")
-    if resolve_extension(file.filename, body[:32], UPLOAD_ALLOWED_EXTENSIONS) is None:
-        raise HTTPException(status_code=415, detail="Unsupported file content")
-
-    new_sha = hashlib.sha256(body).hexdigest()
-    with get_conn() as conn:
-        repo = DocumentRepo(conn, user_id)
-        doc = _require_own_document(conn, user_id, document_id)
-        if not is_stored_file(doc["source_path"]):
-            raise HTTPException(status_code=409, detail="У документа нет файла-исходника")
-        if doc["file_sha256"] == new_sha:
-            raise HTTPException(status_code=409, detail="Этот же файл уже загружен")
-        storage_for(doc["source_path"]).replace(doc["source_path"], body)
-        conn.execute(
-            "UPDATE documents SET file_sha256 = ? WHERE id = ? AND user_id = ?",
-            (new_sha, document_id, user_id),
-        )
-        conn.commit()
-        # Новое содержимое — новое распознавание: старые данные относятся к старой версии.
-        repo.clear_extracted_data(document_id)
-        repo.clear_verified(document_id)
-        tg_id = _get_telegram_id(conn, user_id)
-    background_tasks.add_task(process_document, document_id, tg_id)
-    return {"document_id": document_id, "status": "received", "file_sha256": new_sha}
+    return replace_source(document_id, file.filename, body, background_tasks, user_id)
 
 
 @router.post("/documents/{document_id}/verify")
-def verify_document(document_id: int, user_id: int = Depends(get_user_id)) -> dict:
+def verify_document_route(document_id: int, user_id: int = Depends(get_user_id)) -> dict:
     """Пользователь подтверждает: распознанные данные соответствуют оригиналу."""
-    with get_conn() as conn:
-        repo = DocumentRepo(conn, user_id)
-        if not repo.mark_verified(document_id):
-            raise HTTPException(status_code=404, detail="Документ не найден")
-        doc = repo.get(document_id)
-    return {"document_id": document_id, "verified_at": doc["verified_at"]}
+    return verify_document(document_id, user_id)
 
 
 class DeleteBatchRequest(BaseModel):
@@ -348,40 +258,14 @@ def delete_documents_batch(
     payload: DeleteBatchRequest, user_id: int = Depends(get_user_id),
 ) -> dict:
     """Массовое удаление. Чужие и несуществующие id тихо пропускаются."""
-    deleted = 0
-    with get_conn() as conn:
-        repo = DocumentRepo(conn, user_id)
-        for doc_id in payload.ids:
-            source_path = repo.delete(doc_id)
-            if source_path is not None:
-                delete_quietly(source_path)
-                deleted += 1
-    return {"deleted": deleted}
+    return delete_batch(payload.ids, user_id)
 
 
 @router.post("/documents/{document_id}/reparse")
-def reparse_document(
+def reparse_document_route(
     document_id: int,
     background_tasks: BackgroundTasks,
     user_id: int = Depends(get_user_id),
 ) -> dict:
-    """Повторное распознавание: очистка извлечённых данных + перезапуск pipeline.
-
-    Обновление реализовано через полную очистку («удаление под капотом»):
-    показатели и заключения стираются, статус сбрасывается в received,
-    файл-исходник прогоняется через classify → extract заново.
-    """
-    with get_conn() as conn:
-        repo = DocumentRepo(conn, user_id)
-        doc = repo.get(document_id)
-        if not doc:
-            raise HTTPException(status_code=404, detail="Документ не найден")
-        if open_local(doc["source_path"]) is None:
-            raise HTTPException(
-                status_code=409,
-                detail="Файл-исходник утрачен — повторное распознавание невозможно",
-            )
-        repo.clear_extracted_data(document_id)
-        tg_id = _get_telegram_id(conn, user_id)
-    background_tasks.add_task(process_document, document_id, tg_id)
-    return {"document_id": document_id, "status": "received"}
+    """Повторное распознавание: очистка извлечённых данных + перезапуск pipeline."""
+    return reparse_document(document_id, background_tasks, user_id)

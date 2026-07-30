@@ -83,6 +83,8 @@ def _client(monkeypatch, tmp_path):
     importlib.reload(docmod)
     importlib.reload(appmod)
     monkeypatch.setattr(docmod, "process_document", lambda *a, **k: None)
+    import botkin.api.services.documents as docs_svc
+    monkeypatch.setattr(docs_svc, "process_document", lambda *a, **k: None)
     return TestClient(appmod.app)
 
 
