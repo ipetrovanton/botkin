@@ -1,327 +1,433 @@
 {
   "results": [
     {
-      "model": "paddleocr-vl16:latest",
-      "passed": 27,
-      "failed": 7,
+      "model": "gemma4:26b",
+      "passed": 34,
+      "failed": 0,
       "skipped": 0,
-      "total_matched": 230,
-      "total_expected": 303,
-      "total_s": 430.1,
-      "wall_s": 622.3647364589997,
-      "accuracy": 0.759075907590759,
-      "pass_rate": 0.7941176470588235,
-      "avg_time_per_doc": 12.65,
-      "score": 0.047651824005929995,
+      "total_matched": 325,
+      "total_expected": 325,
+      "total_s": 428.7,
+      "wall_s": 430.7910221249913,
+      "vram_gb": 17.0,
+      "accuracy": 1.0,
+      "pass_rate": 1.0,
+      "avg_time_per_doc": 12.608823529411765,
+      "score": 0.034919524142757175,
       "error": null,
       "docs": [
         {
           "name": "sample_001.pdf",
-          "status": "FAIL",
+          "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 8.3,
-          "total_s": 8.4,
-          "matched": 2,
-          "expected": 3
+          "extract_s": 18.1,
+          "total_s": 18.2,
+          "matched": 3,
+          "expected": 3,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tps": 5.0
         },
         {
           "name": "sample_002.pdf",
           "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 6.8,
-          "total_s": 6.8,
+          "extract_s": 8.1,
+          "total_s": 8.1,
           "matched": 6,
-          "expected": 6
+          "expected": 6,
+          "precision": 0.75,
+          "recall": 1.0,
+          "tps": 34.5
         },
         {
           "name": "sample_003.pdf",
-          "status": "FAIL",
+          "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 14.1,
-          "total_s": 14.1,
-          "matched": 6,
-          "expected": 11
+          "extract_s": 13.5,
+          "total_s": 13.5,
+          "matched": 11,
+          "expected": 11,
+          "precision": 0.79,
+          "recall": 1.0,
+          "tps": 36.6
         },
         {
           "name": "sample_004.pdf",
           "status": "PASS",
-          "classify_s": 0.0,
-          "extract_s": 0.0,
-          "total_s": 0.0,
-          "matched": 0,
-          "expected": 0
+          "classify_s": 6.1,
+          "extract_s": 5.9,
+          "total_s": 12.0,
+          "matched": 1,
+          "expected": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tps": 19.15
         },
         {
           "name": "sample_005.pdf",
           "status": "PASS",
-          "classify_s": 0.0,
-          "extract_s": 0.0,
-          "total_s": 0.0,
-          "matched": 0,
-          "expected": 0
+          "classify_s": 5.8,
+          "extract_s": 5.3,
+          "total_s": 11.1,
+          "matched": 1,
+          "expected": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tps": 20.549999999999997
         },
         {
           "name": "sample_006.pdf",
-          "status": "FAIL",
+          "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 107.5,
-          "total_s": 107.6,
-          "matched": 0,
-          "expected": 20
+          "extract_s": 42.3,
+          "total_s": 42.4,
+          "matched": 20,
+          "expected": 20,
+          "precision": 0.95,
+          "recall": 1.0,
+          "tps": 38.1
         },
         {
           "name": "sample_007.pdf",
           "status": "PASS",
-          "classify_s": 0.0,
-          "extract_s": 0.0,
-          "total_s": 0.0,
+          "classify_s": 3.6,
+          "extract_s": 2.2,
+          "total_s": 5.8,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 19.1
         },
         {
           "name": "sample_008.pdf",
           "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 7.5,
-          "total_s": 7.5,
+          "extract_s": 15.2,
+          "total_s": 15.2,
           "matched": 24,
-          "expected": 24
+          "expected": 24,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tps": 44.0
         },
         {
           "name": "sample_009.pdf",
           "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 16.7,
-          "total_s": 16.7,
+          "extract_s": 29.2,
+          "total_s": 29.2,
           "matched": 27,
-          "expected": 27
+          "expected": 27,
+          "precision": 0.55,
+          "recall": 1.0,
+          "tps": 41.2
         },
         {
           "name": "sample_010.pdf",
           "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 17.0,
-          "total_s": 17.0,
+          "extract_s": 11.4,
+          "total_s": 11.4,
           "matched": 4,
-          "expected": 4
+          "expected": 4,
+          "precision": 0.19,
+          "recall": 1.0,
+          "tps": 39.3
         },
         {
           "name": "sample_011.pdf",
           "status": "PASS",
-          "classify_s": 0.0,
-          "extract_s": 0.0,
-          "total_s": 0.0,
-          "matched": 0,
-          "expected": 0
+          "classify_s": 5.7,
+          "extract_s": 27.5,
+          "total_s": 33.2,
+          "matched": 20,
+          "expected": 20,
+          "precision": 0.83,
+          "recall": 1.0,
+          "tps": 34.3
         },
         {
           "name": "sample_012.pdf",
-          "status": "FAIL",
+          "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 30.8,
-          "total_s": 30.8,
-          "matched": 44,
-          "expected": 47
+          "extract_s": 40.8,
+          "total_s": 40.8,
+          "matched": 47,
+          "expected": 47,
+          "precision": 0.7,
+          "recall": 1.0,
+          "tps": 37.6
         },
         {
           "name": "sample_013.pdf",
-          "status": "FAIL",
+          "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 24.3,
-          "total_s": 24.3,
-          "matched": 35,
-          "expected": 36
+          "extract_s": 28.0,
+          "total_s": 28.0,
+          "matched": 36,
+          "expected": 36,
+          "precision": 0.67,
+          "recall": 1.0,
+          "tps": 42.6
         },
         {
           "name": "sample_014.pdf",
           "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 10.5,
-          "total_s": 10.5,
+          "extract_s": 8.8,
+          "total_s": 8.8,
           "matched": 13,
-          "expected": 13
+          "expected": 13,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tps": 37.8
         },
         {
           "name": "sample_015.pdf",
           "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 20.2,
-          "total_s": 20.3,
+          "extract_s": 2.5,
+          "total_s": 2.5,
           "matched": 2,
-          "expected": 2
+          "expected": 2,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tps": 21.1
         },
         {
           "name": "sample_016.pdf",
-          "status": "FAIL",
+          "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 41.3,
-          "total_s": 41.3,
-          "matched": 22,
-          "expected": 63
+          "extract_s": 37.2,
+          "total_s": 37.2,
+          "matched": 63,
+          "expected": 63,
+          "precision": 0.94,
+          "recall": 1.0,
+          "tps": 40.7
         },
         {
           "name": "sample_017.pdf",
           "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 5.6,
-          "total_s": 5.6,
+          "extract_s": 1.4,
+          "total_s": 1.4,
           "matched": 1,
-          "expected": 1
+          "expected": 1,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tps": 17.8
         },
         {
           "name": "sample_018.pdf",
           "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 80.1,
-          "total_s": 80.1,
+          "extract_s": 19.6,
+          "total_s": 19.6,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 9.0
         },
         {
           "name": "sample_019.pdf",
-          "status": "FAIL",
+          "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 20.5,
-          "total_s": 20.5,
-          "matched": 23,
-          "expected": 25
+          "extract_s": 22.5,
+          "total_s": 22.5,
+          "matched": 25,
+          "expected": 25,
+          "precision": 0.6,
+          "recall": 1.0,
+          "tps": 41.5
         },
         {
           "name": "sample_020.pdf",
           "status": "PASS",
           "classify_s": 0.0,
-          "extract_s": 18.5,
-          "total_s": 18.6,
+          "extract_s": 13.8,
+          "total_s": 13.8,
           "matched": 21,
-          "expected": 21
+          "expected": 21,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tps": 40.4
         },
         {
           "name": "sample_021.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 4.5,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 4.5,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 19.6
         },
         {
           "name": "sample_022.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 3.5,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 3.5,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 20.4
         },
         {
           "name": "sample_023.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 3.4,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 3.4,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 22.0
         },
         {
           "name": "sample_024.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 3.2,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 3.2,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 22.7
         },
         {
           "name": "sample_025.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 3.2,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 3.2,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 22.8
         },
         {
           "name": "sample_027.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 3.5,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 3.5,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 25.9
         },
         {
           "name": "sample_028.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 3.9,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 3.9,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 27.7
         },
         {
           "name": "sample_029.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 4.6,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 4.6,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 28.1
         },
         {
           "name": "sample_030.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 3.6,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 3.6,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 24.8
         },
         {
           "name": "sample_031.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 4.2,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 4.2,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 28.7
         },
         {
           "name": "sample_032.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 3.9,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 3.9,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 28.0
         },
         {
           "name": "sample_033.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 4.7,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 4.7,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 31.0
         },
         {
           "name": "sample_034.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 4.0,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 4.0,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 27.3
         },
         {
           "name": "sample_035.jpg",
           "status": "PASS",
-          "classify_s": 0.0,
+          "classify_s": 3.8,
           "extract_s": 0.0,
-          "total_s": 0.0,
+          "total_s": 3.8,
           "matched": 0,
-          "expected": 0
+          "expected": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tps": 26.5
         }
-      ]
+      ],
+      "precision": 0.44029411764705884,
+      "recall": 0.5294117647058824,
+      "avg_tps": 28.7
     }
   ]
 }

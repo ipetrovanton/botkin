@@ -28,9 +28,7 @@ from pathlib import Path
 
 # Модели по умолчанию для сравнения — актуальные в локальном Ollama.
 DEFAULT_MODELS = [
-    "huihui_ai/Qwen3.6-abliterated:27b",
-    "huihui_ai/Qwen3.6-abliterated:35b",
-    "dhiltgen/qwen3-vl:30b-a3b-thinking",
+    "gemma4:26b",
 ]
 
 # Все модели, которые нужно выгружать перед запуском очередной —
@@ -41,6 +39,9 @@ ALL_KNOWN_MODELS = DEFAULT_MODELS + [
     "paddleocr-vl16:latest",
     "MedAIBase/MedGemma1.5:4b-it",
     "puyangwang/medgemma-27b-it:q4_k_m",
+    "gemma4:latest",
+    "odytrice/gemma4:4090-26b",
+    "batiai/gemma4-26b:iq4",
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -198,6 +199,28 @@ def _parse_tps_per_doc(output: str) -> dict[str, float]:
     return tps_by_doc
 
 
+def _parse_matched_expected_per_doc(output: str) -> dict[str, tuple[int, int]]:
+    """Извлекает совпавшие/ожидаемые значения из блока [E2E] по документу."""
+    by_doc: dict[str, tuple[int, int]] = {}
+    current_doc: str | None = None
+    match_re = re.compile(r"совпало\s+(\d+)/(\d+)")
+    for line in output.splitlines():
+        if "[E2E]" in line:
+            parts = line.split()
+            for part in parts:
+                if "." in part and not part.endswith(":"):
+                    current_doc = part
+                    break
+            continue
+        if current_doc is None:
+            continue
+        m = match_re.search(line)
+        if m:
+            by_doc[current_doc] = (int(m.group(1)), int(m.group(2)))
+            current_doc = None
+    return by_doc
+
+
 def parse_pytest_summary(output: str) -> list[DocResult]:
     """Извлекает строки документов из секции «ИТОГОВАЯ СВОДКА E2E».
 
@@ -205,6 +228,7 @@ def parse_pytest_summary(output: str) -> list[DocResult]:
     sample_001.pdf  PASS   10.5s   38.0s  48.5s      1.00     1.00        0
     """
     tps_by_doc = _parse_tps_per_doc(output)
+    matched_by_doc = _parse_matched_expected_per_doc(output)
     docs: list[DocResult] = []
     in_summary = False
     row_re = re.compile(
@@ -226,11 +250,12 @@ def parse_pytest_summary(output: str) -> list[DocResult]:
             m = row_re.match(line.strip())
             if m:
                 name, status, cls_s, ext_s, tot_s, precision_s, recall_s, _ = m.groups()
+                matched, expected = matched_by_doc.get(name, (0, 0))
                 docs.append(DocResult(
                     name=name, status=status,
                     classify_s=float(cls_s), extract_s=float(ext_s),
                     total_s=float(tot_s),
-                    matched=0, expected=0,
+                    matched=matched, expected=expected,
                     precision=_to_float(precision_s),
                     recall=_to_float(recall_s),
                     tps=tps_by_doc.get(name, 0.0),
@@ -255,15 +280,17 @@ def run_model(model: str, skip_synthetic: bool = False, timeout: int = 7200) -> 
 
     env = os.environ.copy()
     env["VLM_MODEL"] = model
-    # TEXT_MODEL оставляем по умолчанию: так сравнивается именно VLM/OCR-первая
-    # ступень, а второй этап (структурирование) идёт на штатной текстовой модели.
-    # env["TEXT_MODEL"] = model
+    env["TEXT_MODEL"] = model
     # Принудительно localhost — нативная Windows Ollama (модуль читает OLLAMA_URL).
     env["OLLAMA_URL"] = "http://localhost:11434"
     # pytest на Windows пишет stdout в cp1251; форсируем UTF-8 для корректного
     # парсинга кириллицы в итоговой сводке (надстрочные 10⁹/л, единицы измерения).
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    # Бюджеты для медленных VLM-моделей: 27b/35b генерируют ~6-14 t/s против ~30 t/s у 8b.
+    env["E2E_CLASSIFY_BUDGET_S"] = "600"
+    env["E2E_EXTRACT_BUDGET_S"] = "1800"
+    env["VLM_REQUEST_TIMEOUT"] = "600"
 
     cmd = [
         sys.executable, "-m", "pytest",
@@ -279,7 +306,7 @@ def run_model(model: str, skip_synthetic: bool = False, timeout: int = 7200) -> 
     print(f"\n{'=' * 70}")
     print(f"[BENCH] Модель: {model}")
     print(f"[BENCH] Команда: {' '.join(cmd)}")
-    text_model = os.environ.get("TEXT_MODEL", "<default>")
+    text_model = env.get("TEXT_MODEL", "<default>")
     print(f"[BENCH] VLM_MODEL={model} TEXT_MODEL={text_model}")
     print(f"{'=' * 70}", flush=True)
 
@@ -490,7 +517,7 @@ def _save_results(results: list[ModelResult]) -> None:
                 {"name": d.name, "status": d.status,
                  "classify_s": d.classify_s, "extract_s": d.extract_s,
                  "total_s": d.total_s, "matched": d.matched, "expected": d.expected,
-                 "precision": d.precision, "recall": d.recall}
+                 "precision": d.precision, "recall": d.recall, "tps": d.tps}
                 for d in mr.docs
             ],
             "precision": mr.precision,
@@ -536,6 +563,18 @@ def main():
             mr.total_s = m.get("total_s", 0.0)
             mr.wall_s = m.get("wall_s", 0.0)
             mr.error = m.get("error")
+            for d in m.get("docs", []):
+                mr.docs.append(DocResult(
+                    name=d["name"], status=d["status"],
+                    classify_s=d.get("classify_s", 0.0),
+                    extract_s=d.get("extract_s", 0.0),
+                    total_s=d.get("total_s", 0.0),
+                    matched=d.get("matched", 0),
+                    expected=d.get("expected", 0),
+                    precision=d.get("precision", 0.0),
+                    recall=d.get("recall", 0.0),
+                    tps=d.get("tps", 0.0),
+                ))
             existing[mr.model] = mr
             results.append(mr)
             print(f"[BENCH] Восстановлено из кэша: {mr.model}")
