@@ -43,8 +43,9 @@ except (AttributeError, ValueError):  # поток без reconfigure (пере�
 
 # Потолки времени щедрые: одиночный VLM-запрос ограничен VLM_REQUEST_TIMEOUT (120 с),
 # extract может сделать несколько вызовов. Цель ассерта — поймать зависание, не мерить железо.
-_CLASSIFY_BUDGET_S = 180.0
-_EXTRACT_BUDGET_S = 900.0
+# На медленных VLM-моделях бюджеты можно увеличить через env.
+_CLASSIFY_BUDGET_S = float(os.environ.get("E2E_CLASSIFY_BUDGET_S", "180.0"))
+_EXTRACT_BUDGET_S = float(os.environ.get("E2E_EXTRACT_BUDGET_S", "900.0"))
 
 _DOC_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"}
 

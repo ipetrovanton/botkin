@@ -77,6 +77,54 @@ def test_compare_analytes_ref_mismatch():
     assert {m.field for m in diff.field_mismatches} == {"ref_low", "ref_high"}
 
 
+def test_compare_analytes_qualitative_match():
+    """Качественные показатели (value — строка) матчатся по value_text."""
+    expected = [
+        {"name": "Токсокары, антитела IgG", "value": "Отрицательный", "value_text": "Отрицательный"},
+        {"name": "Гемоглобин", "value": 137.0, "unit": "г/л"},
+    ]
+    rows = [
+        _FakeRow("Токсокары (Toxocara canis), антитела класса IgG в крови", value_text="Отрицательный"),
+        _FakeRow("Гемоглобин", 137.0, "г/л"),
+    ]
+
+    diff = er.compare_analytes(expected, rows)
+
+    assert len(diff.matched) == 2
+    assert len(diff.missing) == 0
+    assert len(diff.extra) == 0
+    assert diff.recall == 1.0
+
+
+def test_compare_analytes_qualitative_missing():
+    """Качественный показатель не извлечён — попадает в missing."""
+    expected = [
+        {"name": "Токсокары, антитела IgG", "value": "Отрицательный", "value_text": "Отрицательный"},
+    ]
+    rows: list[_FakeRow] = []
+
+    diff = er.compare_analytes(expected, rows)
+
+    assert len(diff.missing) == 1
+    assert diff.missing[0]["name"] == "Токсокары, антитела IgG"
+    assert diff.recall == 0.0
+
+
+def test_compare_analytes_qualitative_case_insensitive():
+    """Регистр и лишние пробелы не влияют на матчинг качественных значений."""
+    expected = [
+        {"name": "ЦИК описторхов", "value": "Отрицательный"},
+    ]
+    rows = [
+        _FakeRow("Специфические ЦИК, содержащие антигены описторхов", value_text="  отрицательный  "),
+    ]
+
+    diff = er.compare_analytes(expected, rows)
+
+    assert len(diff.matched) == 1
+    assert len(diff.missing) == 0
+
+
 def test_metrics_capture_parses_log_metrics_output():
     logger = logging.getLogger("botkin.llm.metrics")
     logger.setLevel(logging.INFO)

@@ -225,6 +225,11 @@ def _name_score(expected_name: str, got_name: str) -> float:
     return len(expected_tokens & got_tokens) / len(expected_tokens)
 
 
+def _normalize_text(text: str) -> str:
+    """Нормализация качественных значений: нижний регистр, без лишних пробелов."""
+    return " ".join(text.lower().split())
+
+
 def _row_value(row: object) -> float | None:
     return getattr(row, "value_num", None)
 
@@ -255,11 +260,22 @@ def compare_analytes(expected_analytes: list[dict], rows: list[object]) -> Analy
         if value is None:
             continue
 
-        key = round(_to_float(value) or 0.0, 2)
-        candidates = [
-            i for i, row in enumerate(remaining)
-            if _row_value(row) is not None and round(_row_value(row), 2) == key
-        ]
+        numeric_value = _to_float(value)
+        if numeric_value is not None:
+            key = round(numeric_value, 2)
+            candidates = [
+                i for i, row in enumerate(remaining)
+                if _row_value(row) is not None and round(_row_value(row), 2) == key
+            ]
+        else:
+            # Качественный показатель (value — строка, не число): сверяем по value_text.
+            expected_text = _normalize_text(str(value))
+            candidates = [
+                i for i, row in enumerate(remaining)
+                if _row_value(row) is None
+                and _normalize_text(getattr(row, "value_text", "") or "") == expected_text
+            ]
+
         if not candidates:
             missing.append(analyte)
         else:
