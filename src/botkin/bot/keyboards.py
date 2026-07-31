@@ -14,7 +14,7 @@ PAGE_SIZE = 7
 _FILTERS = [("🧪 Анализы", "a"), ("👨‍⚕️ Заключения", "d"), ("📋 Все", "all")]
 
 
-def encode_cb(action: str, *parts) -> str:
+def encode_cb(action: str, *parts: str | int) -> str:
     return _SEP.join([action, *[str(p) for p in parts]])
 
 
@@ -23,7 +23,7 @@ def decode_cb(data: str) -> tuple[str, list[str]]:
     return action, parts
 
 
-def list_keyboard(doc_ids: list[int], doc_type, offset: int, total: int) -> InlineKeyboardMarkup:
+def list_keyboard(doc_ids: list[int], doc_type: str | None, offset: int, total: int) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     # ряд фильтров
     for label, code in _FILTERS:

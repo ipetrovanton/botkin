@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import sqlite3
 from functools import lru_cache
 from pathlib import Path
 
@@ -189,7 +190,7 @@ _EXTRACTORS = {
 
 # Дедупликация
 
-def dedupe_document(conn, document_id: int, user_id: int) -> bool:
+def dedupe_document(conn: sqlite3.Connection, document_id: int, user_id: int) -> bool:
     """Схлопывает повторную загрузку того же документа до одного экземпляра.
 
     Правило достоверности (см. tests/test_dedupe.py): если новый прогон дал

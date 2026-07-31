@@ -43,7 +43,7 @@ def rows_or_harvest(raw: RawAnalysis) -> list[LabResult]:
     return harvest_lab_rows(data) if data is not None else []
 
 
-def _raw_content(response) -> str:
+def _raw_content(response: object) -> str:
     """Сырой текст ответа модели до парсинга (для диагностики «тихого» []). '' если недоступен."""
     try:
         content = response._raw_response.choices[0].message.content

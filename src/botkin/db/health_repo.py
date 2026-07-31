@@ -1,6 +1,8 @@
 """Репозиторий здоровья: аккаунты, time-series метрик, активности."""
 from __future__ import annotations
 
+import sqlite3
+
 from .base import BaseRepo
 from .connection import transaction
 
@@ -59,7 +61,7 @@ class HealthRepo(BaseRepo):
         return cur.rowcount > 0
 
     @staticmethod
-    def accounts_due_for_sync(conn) -> list[dict]:
+    def accounts_due_for_sync(conn: sqlite3.Connection) -> list[dict]:
         """Аккаунты, чей интервал автосинка истёк (для планировщика; все пользователи).
 
         Сравнение на стороне SQLite: last_sync_at хранится в UTC (CURRENT_TIMESTAMP),

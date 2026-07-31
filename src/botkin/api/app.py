@@ -1,5 +1,6 @@
 """FastAPI-приложение."""
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -15,7 +16,7 @@ WEB_DIR = Path(__file__).parent.parent / "web"
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging()
     init_db()
     # Прогрев моделей — фоном, чтобы не блокировать старт API (см. client.warmup).
@@ -44,7 +45,7 @@ app.include_router(directory.router)
 
 
 @app.get("/health")
-def health():
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 

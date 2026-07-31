@@ -90,7 +90,7 @@ def _merge_continuation_lines(lines: list[str]) -> list[str]:
     merged: list[str] = []
     head_index: int | None = None  # индекс последней строки-головы имени
 
-    def _maybe_pull_value_after_head():
+    def _maybe_pull_value_after_head() -> None:
         """Если после головы лежит оторванное значение — подтянуть его в конец."""
         if head_index is None:
             return
@@ -142,7 +142,7 @@ def _merge_continuation_lines(lines: list[str]) -> list[str]:
     return merged
 
 
-def _page_lines(page, y_tol: float) -> list[str]:
+def _page_lines(page: pymupdf.Page, y_tol: float) -> list[str]:
     """Слова страницы → физические строки (кластеризация по скользящему центроиду Y, сорт. по X).
 
     Кластер сравнивает слово со своим средним y0 (центроидом), а не с y0 первого слова:

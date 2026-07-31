@@ -15,6 +15,7 @@ import datetime as dt
 import json
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from garminconnect import Garmin
@@ -161,7 +162,7 @@ def _activities(client: Garmin, date_from: str, date_to: str) -> list[dict]:
 
 
 def fetch(user_id: int, days: int = HEALTH_SYNC_DAYS,
-          on_progress=None) -> tuple[list[dict], list[dict]]:
+          on_progress: Callable[[int, int], None] | None = None) -> tuple[list[dict], list[dict]]:
     """Метрики и активности за последние N дней. on_progress(done, total) — коллбек."""
     client = resume(user_id)
     today = dt.date.today()

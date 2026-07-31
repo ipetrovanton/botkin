@@ -8,7 +8,7 @@ from botkin.parsing.constants import RANGE_RE, LE_RE, GE_RE, NUM_RE
 from botkin.parsing.tokens import to_float
 
 
-def parse_lab_value(value) -> tuple[Optional[float], Optional[str]]:
+def parse_lab_value(value: object) -> tuple[Optional[float], Optional[str]]:
     """Результат показателя → (value_num, value_text). Одно из них всегда None.
 
     Берём ВЕДУЩЕЕ число: «40.8»/«217»/«5,4»→число; «44.6*» (флаг)→44.6;
@@ -30,7 +30,7 @@ def parse_lab_value(value) -> tuple[Optional[float], Optional[str]]:
     return None, s
 
 
-def parse_reference_range(ref) -> tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
+def parse_reference_range(ref: object) -> tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
     """Норма → (ref_low, ref_high, ref_operator, ref_text).
 
     «35 - 45»→low/high; «< 1.0»→op '<' + high; «> 120»→op '>' + low; «≤/≥»→'<'/'>';
@@ -63,7 +63,7 @@ def looks_like_number(s: str) -> bool:
     return bool(re.match(r"^-?\d", s.strip()))
 
 
-def num_tokens(*values) -> list[str]:
+def num_tokens(*values: str) -> list[str]:
     """Нормализованные числовые токены из значений (запятая→точка, без хвостовых .0)."""
     out: list[str] = []
     for v in values:

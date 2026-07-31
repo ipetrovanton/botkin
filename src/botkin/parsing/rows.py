@@ -144,7 +144,7 @@ def rows_from_raw(raw: RawAnalysis) -> list[LabResult]:
     return dedup_rows(out)
 
 
-def _row_key(r: LabResult):
+def _row_key(r: LabResult) -> tuple[str, float | None, str | None]:
     return (r.analyte_name.strip().lower(), r.value_num, r.value_text)
 
 

@@ -39,7 +39,7 @@ def read_registry(path: Path) -> list[dict]:
 class BaseNormalizer:
     """Скелет сверки имени со справочником. Наследник задаёт индекс и форму результата."""
 
-    def __init__(self, records: Iterable[dict], max_edit_ratio: float, ratio_floor: float):
+    def __init__(self, records: Iterable[dict], max_edit_ratio: float, ratio_floor: float) -> None:
         self._max_edit_ratio = max_edit_ratio
         self._ratio_floor = ratio_floor
         self._by_key = self._build_index(list(records))
@@ -61,17 +61,17 @@ class BaseNormalizer:
         """Готовит строку к матчингу. Наследник может срезать лишнее (квалификаторы и т.п.)."""
         return normalize_name(raw_name)
 
-    def _short_circuit(self, query: str, raw_name: str):
+    def _short_circuit(self, query: str, raw_name: str) -> object:
         """Хук досрочного ответа до фаззи-поиска (например, точное совпадение аббревиатур)."""
         return None
 
-    def _matched(self, raw_name: str, record: dict, dist: int, ratio: float):
+    def _matched(self, raw_name: str, record: dict, dist: int, ratio: float) -> object:
         raise NotImplementedError
 
-    def _unverified(self, raw_name: str, dist: int | None = None, ratio: float = 0.0):
+    def _unverified(self, raw_name: str, dist: int | None = None, ratio: float = 0.0) -> object:
         raise NotImplementedError
 
-    def correct(self, raw_name: str):
+    def correct(self, raw_name: str) -> object:
         query = self._prepare_query(raw_name)
         if not query or not self._choices:
             return self._unverified(raw_name)

@@ -8,6 +8,8 @@ import httpx
 from aiogram import F, Router
 from aiogram.types import Message
 
+from collections.abc import Awaitable, Callable
+
 from botkin.bot.document_view import compose_card
 from botkin.bot.progress import poll_until_done, render_progress
 from botkin.bot.services import (
@@ -81,7 +83,7 @@ def claim_delivery_for(doc_id: int, user_id: int) -> bool:
     return _claim_delivery_svc(doc_id, user_id)
 
 
-async def run_progress_flow(tg_user_id: int, doc_id: int, edit) -> None:
+async def run_progress_flow(tg_user_id: int, doc_id: int, edit: Callable[[str], Awaitable[None]]) -> None:
     """Поллит статус и по завершении показывает карточку. `edit(text)` — корутина."""
     log.info("[FLOW_START] Doc %d | tg_user=%d", doc_id, tg_user_id)
     try:
@@ -90,7 +92,7 @@ async def run_progress_flow(tg_user_id: int, doc_id: int, edit) -> None:
             log.warning("[FLOW_NO_USER] Doc %d | tg_user=%d не зарегистрирован", doc_id, tg_user_id)
             return
 
-        async def _get_status():
+        async def _get_status() -> str | None:
             return _get_status_svc(doc_id, user_id)
 
         final = await poll_until_done(
@@ -130,7 +132,7 @@ async def _start_upload_flow(
             await message.answer(followup)
         sent = await message.answer(render_progress("received", doc_id))
 
-        async def _edit(text: str):
+        async def _edit(text: str) -> None:
             try:
                 await sent.edit_text(text)
             except Exception as e:  # noqa: BLE001 — "message is not modified" и пр.

@@ -1,4 +1,5 @@
 """Навигация по документам: /list, /period, карточка, листание, фильтр."""
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from aiogram import Router
@@ -20,7 +21,7 @@ from botkin.bot.services import (
 router = Router(name="browse")
 
 
-async def _need_user(obj, tg_id: int) -> int | None:
+async def _need_user(obj: Message | CallbackQuery, tg_id: int) -> int | None:
     uid = resolve_user(tg_id)
     if not uid:
         answer = obj.answer if isinstance(obj, Message) else obj.message.answer
@@ -28,7 +29,7 @@ async def _need_user(obj, tg_id: int) -> int | None:
     return uid
 
 
-def _render_card(doc_id: int, user_id: int):
+def _render_card(doc_id: int, user_id: int) -> tuple[str | None, object]:
     doc = get_document(doc_id, user_id)
     if not doc:
         return None, None
@@ -38,7 +39,9 @@ def _render_card(doc_id: int, user_id: int):
     return text, card_keyboard(doc_id, has_prev=has_prev, has_next=has_next)
 
 
-async def _show_list(target, user_id: int, code: str, offset: int):
+async def _show_list(
+    target: Callable[..., Awaitable[None]], user_id: int, code: str, offset: int,
+) -> None:
     doc_type = TYPE_CODES.get(code)
     total, docs = list_documents(
         user_id, doc_type=doc_type, limit=PAGE_SIZE, offset=offset,
@@ -56,12 +59,18 @@ async def cmd_list(message: Message) -> None:
     await _show_list(message.answer, uid, "all", 0)
 
 
-async def _period_labs(target, user_id, start, end, label):
+async def _period_labs(
+    target: Callable[..., Awaitable[None]], user_id: int,
+    start: datetime, end: datetime, label: str,
+) -> None:
     groups = get_period_labs(user_id, start, end)
     await target(format_labs_summary(groups, label=label))
 
 
-async def _show_period_docs(target, user_id, start, end, preset):
+async def _show_period_docs(
+    target: Callable[..., Awaitable[None]], user_id: int,
+    start: datetime, end: datetime, preset: str,
+) -> None:
     docs = list_period_docs(user_id, start, end, limit=PAGE_SIZE)
     body = format_list_body(docs, offset=0, total=len(docs))
     kb = list_keyboard([d["id"] for d in docs], doc_type=None, offset=0, total=len(docs))

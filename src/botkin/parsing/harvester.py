@@ -102,7 +102,7 @@ def _harvest_row(d: dict) -> Optional[LabResult]:
     )
 
 
-def _is_row_dict(d) -> bool:
+def _is_row_dict(d: object) -> bool:
     """dict «похож на строку показателя»: ≥2 скаляра и есть значение/норма (по виду или ключу)."""
     if not isinstance(d, dict):
         return False
@@ -117,7 +117,7 @@ def _is_row_dict(d) -> bool:
     return by_content or by_key
 
 
-def _collect_tables(node, out: list) -> None:
+def _collect_tables(node: object, out: list) -> None:
     """Рекурсивно ищет списки строк-показателей в произвольном JSON."""
     if isinstance(node, list):
         rows = [x for x in node if _is_row_dict(x)]
@@ -132,7 +132,7 @@ def _collect_tables(node, out: list) -> None:
             _collect_tables(v, out)
 
 
-def harvest_lab_rows(data) -> list[LabResult]:
+def harvest_lab_rows(data: object) -> list[LabResult]:
     """Сырой JSON ответа модели (любой структуры) → список LabResult по содержимому."""
     tables: list = []
     _collect_tables(data, tables)
@@ -145,7 +145,7 @@ def harvest_lab_rows(data) -> list[LabResult]:
     return dedup_rows(out)
 
 
-def loads_json(text: str):
+def loads_json(text: str) -> object:
     """Толерантный json.loads сырого ответа модели. None, если не разобрать.
 
     Сначала пробует стандартный json.loads (быстрее), при неудаче — json_repair
@@ -170,7 +170,7 @@ def salvage_json_objects(text: str) -> list[dict]:
     return _extract_all_dicts(repaired)
 
 
-def _extract_all_dicts(node) -> list[dict]:
+def _extract_all_dicts(node: object) -> list[dict]:
     """Рекурсивно собирает все dict из произвольной структуры."""
     if isinstance(node, dict):
         return [node] + [d for v in node.values() for d in _extract_all_dicts(v)]

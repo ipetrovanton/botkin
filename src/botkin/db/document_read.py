@@ -1,6 +1,8 @@
 """Методы чтения документов: get, search, stats, навигация."""
 from __future__ import annotations
 
+from datetime import datetime
+
 
 class DocumentReadMixin:
     """Примешивается к DocumentRepo; использует self.conn и self.user_id."""
@@ -124,7 +126,7 @@ class DocumentReadMixin:
         rows = self.conn.execute(sql, tuple(params)).fetchall()
         return [dict(r) for r in rows]
 
-    def in_period(self, start, end, doc_type: str | None = None,
+    def in_period(self, start: datetime, end: datetime, doc_type: str | None = None,
                   limit: int = 7, offset: int = 0) -> list[dict]:
         sql = "SELECT * FROM documents WHERE user_id = ? AND created_at >= ? AND created_at <= ?"
         params: list = [self.user_id, str(start), str(end)]

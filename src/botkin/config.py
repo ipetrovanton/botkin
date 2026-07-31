@@ -10,7 +10,6 @@ import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -169,7 +168,7 @@ def _load_json_config() -> dict:
 _json = _load_json_config()
 
 
-def _default_for(key_path: str):
+def _default_for(key_path: str) -> object:
     """Значение из _DEFAULTS по точечному пути; None, если пути там нет."""
     value = _DEFAULTS
     for part in key_path.split("."):
@@ -179,7 +178,7 @@ def _default_for(key_path: str):
     return value
 
 
-def _get(key_path: str):
+def _get(key_path: str, default: object = None) -> object:
     """config.json по пути, иначе дефолт из _DEFAULTS. Дефолт хранится в одном месте."""
     value = _json
     for part in key_path.split("."):
@@ -192,12 +191,12 @@ def _get(key_path: str):
     return value if value is not None else _default_for(key_path)
 
 
-def _as_bool(v) -> bool:
+def _as_bool(v: object) -> bool:
     """Истинность строки/значения env: 1/true/yes/on (регистронезависимо)."""
     return str(v).strip().lower() in ("1", "true", "yes", "on")
 
 
-def setting(key_path: str, env_name: str, cast: Callable[[Any], Any] = str) -> Any:
+def setting(key_path: str, env_name: str, cast: Callable[[object], object] = str) -> object:
     """Единый порядок разрешения настройки: env → config.json → _DEFAULTS.
 
     Приведение типа cast применяется в одной точке к любому источнику — закрывает

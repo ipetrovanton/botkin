@@ -48,7 +48,7 @@ class DrugNormalizer(BaseNormalizer):
         records: Iterable[dict],
         max_edit_ratio: float = DRUG_MAX_EDIT_RATIO,
         ratio_floor: float = DRUG_RATIO_FLOOR,
-    ):
+    ) -> None:
         super().__init__(records, max_edit_ratio, ratio_floor)
 
     def _matched(self, raw_name: str, record: dict, dist: int, ratio: float) -> DrugMatch:

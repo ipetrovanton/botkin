@@ -58,7 +58,7 @@ class LabResult(BaseModel):
 
     @field_validator("taken_at", mode="before")
     @classmethod
-    def _validate_taken_at(cls, v):
+    def _validate_taken_at(cls, v: object) -> object:
         return parse_ru_date(v)
 
 
@@ -77,7 +77,7 @@ class DoctorReport(BaseModel):
 
     @field_validator("visit_date", mode="before")
     @classmethod
-    def _validate_visit_date(cls, v):
+    def _validate_visit_date(cls, v: object) -> object:
         return parse_ru_date(v)
 
 

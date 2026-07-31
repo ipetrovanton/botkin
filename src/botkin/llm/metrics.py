@@ -28,21 +28,21 @@ class InferenceMetrics:
     total_duration_ns: int | None = None
 
 
-def _to_int(value, default: int = 0) -> int:
+def _to_int(value: object, default: int = 0) -> int:
     try:
         return int(value)
     except (TypeError, ValueError):
         return default
 
 
-def _to_float(value, default: float | None = None) -> float | None:
+def _to_float(value: object, default: float | None = None) -> float | None:
     try:
         return float(value)
     except (TypeError, ValueError):
         return default
 
 
-def _usage_from_response(response) -> tuple[int, int]:
+def _usage_from_response(response: object) -> tuple[int, int]:
     """(prompt_tokens, completion_tokens) с учётом обёрток и неполного usage."""
     try:
         raw = getattr(response, "_raw_response", None) or response
@@ -54,7 +54,7 @@ def _usage_from_response(response) -> tuple[int, int]:
         return 0, 0
 
 
-def _ollama_duration_ns(usage) -> int | None:
+def _ollama_duration_ns(usage: object) -> int | None:
     """Ollama-специфичное поле eval_duration (ns) из usage-like объекта, если оно есть."""
     try:
         return _to_int(getattr(usage, "eval_duration", None), 0) or None
@@ -62,21 +62,21 @@ def _ollama_duration_ns(usage) -> int | None:
         return None
 
 
-def _ollama_total_duration_ns(usage) -> int | None:
+def _ollama_total_duration_ns(usage: object) -> int | None:
     try:
         return _to_int(getattr(usage, "total_duration", None), 0) or None
     except (AttributeError, TypeError, ValueError):
         return None
 
 
-def _ollama_prompt_eval_count(usage) -> int | None:
+def _ollama_prompt_eval_count(usage: object) -> int | None:
     try:
         return _to_int(getattr(usage, "prompt_eval_count", None), 0) or None
     except (AttributeError, TypeError, ValueError):
         return None
 
 
-def _ollama_eval_count(usage) -> int | None:
+def _ollama_eval_count(usage: object) -> int | None:
     try:
         return _to_int(getattr(usage, "eval_count", None), 0) or None
     except (AttributeError, TypeError, ValueError):
@@ -91,7 +91,7 @@ def _tokens_per_second(prompt_tokens: int, completion_tokens: int, elapsed_s: fl
 
 
 def metrics_of(
-    response,
+    response: object,
     model: str,
     elapsed_s: float,
     *,

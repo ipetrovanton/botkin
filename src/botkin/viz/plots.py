@@ -41,7 +41,7 @@ def lab_dynamics_chart(points: list[dict], analyte_name: str) -> bytes:
     return _to_png(fig)
 
 
-def _parse_date(s):
+def _parse_date(s: str | datetime) -> datetime | None:
     if isinstance(s, datetime):
         return s
     if not s:
@@ -52,7 +52,7 @@ def _parse_date(s):
         return None
 
 
-def _to_png(fig) -> bytes:
+def _to_png(fig: go.Figure) -> bytes:
     buf = BytesIO()
     fig.write_image(buf, format="png", scale=2)
     return buf.getvalue()

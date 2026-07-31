@@ -9,7 +9,7 @@ class BaseRepo:
 
     table: str = ""
 
-    def __init__(self, conn: sqlite3.Connection, user_id: int):
+    def __init__(self, conn: sqlite3.Connection, user_id: int) -> None:
         if user_id <= 0:
             raise ValueError("user_id обязателен и должен быть > 0")
         self.conn = conn

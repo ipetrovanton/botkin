@@ -139,11 +139,17 @@ def build_extra_body(
     # mlx: no native grammar constraint; instructor handles validation + retry
 
     if os.getenv("VLM_DISABLE_THINKING", "").lower() in ("1", "true", "yes", "on"):
+        # Ollama: чат-шаблон Qwen3.x смотрит enable_thinking; OpenAI-compat endpoint — reasoning_effort.
         body["chat_template_kwargs"] = {"enable_thinking": False}
+        body["reasoning_effort"] = "none"
+        # Gemma 4: отключение thinking через options.think
+        opts = body.get("options")
+        if isinstance(opts, dict):
+            opts["think"] = False
     return body
 
 
-def usage_of(response) -> tuple[int, int]:
+def usage_of(response: object) -> tuple[int, int]:
     """(prompt_tokens, completion_tokens) из ответа instructor; (0, 0) если их нет.
 
     usage — приватное поле _raw_response и нужно только для лога. Раньше обращение к нему
@@ -215,7 +221,7 @@ def get_raw_client(timeout: float | None = None) -> OpenAI:
     )
 
 
-def get_client(mode: instructor.Mode = instructor.Mode.JSON):
+def get_client(mode: instructor.Mode = instructor.Mode.JSON) -> instructor.Instructor:
     # Температура задаётся per-request через extra_body/options, не при создании клиента.
     return instructor.from_openai(get_raw_client(), mode=mode)
 

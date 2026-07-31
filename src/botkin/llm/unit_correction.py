@@ -10,7 +10,7 @@ import re
 from functools import lru_cache
 
 from botkin.domain.models import LabResult
-from botkin.normalize.analytes import load_default as _load_analyte_normalizer
+from botkin.normalize.analytes import AnalyteNormalizer, load_default as _load_analyte_normalizer
 from botkin.normalize.units import canonical_unit
 
 log = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ _FUZZY_UNIT_THRESHOLD = 85
 
 
 @lru_cache(maxsize=1)
-def get_normalizer():
+def get_normalizer() -> AnalyteNormalizer:
     """Синглтон AnalyteNormalizer — справочник ФСЛИ читается один раз."""
     return _load_analyte_normalizer()
 

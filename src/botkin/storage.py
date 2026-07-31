@@ -122,7 +122,7 @@ class MinioStorage:
         self._cache_dir = Path(tempfile.gettempdir()) / "botkin-minio-cache"
 
     @property
-    def client(self):
+    def client(self) -> object:
         # Ленивая инициализация: пакет minio нужен только при backend=minio.
         if self._client is None:
             from minio import Minio
@@ -217,7 +217,7 @@ _local = LocalStorage()
 _minio: MinioStorage | None = None
 
 
-def default_storage():
+def default_storage() -> LocalStorage | MinioStorage:
     """Бэкенд для НОВЫХ загрузок — по конфигу STORAGE_BACKEND."""
     global _minio
     if STORAGE_BACKEND == "minio":
@@ -227,7 +227,7 @@ def default_storage():
     return _local
 
 
-def storage_for(uri: str):
+def storage_for(uri: str) -> LocalStorage | MinioStorage:
     """Бэкенд для СУЩЕСТВУЮЩЕГО uri: в одной БД могут жить и локальные пути
     (загружены до включения MinIO), и minio:// — диспетчеризация по схеме."""
     global _minio

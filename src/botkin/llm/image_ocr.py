@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 
-from botkin.config import OCR_MODEL, OCR_MAX_TOKENS, RAW_LOG_LIMIT
+from botkin.config import OCR_MODEL, OCR_MAX_TOKENS, OCR_NUM_CTX, RAW_LOG_LIMIT
 from botkin.llm.client import get_raw_client, ocr_options, model_name
+from botkin.llm.metrics import metrics_of, log_metrics
 from botkin.llm.prompts import IMAGE_OCR_PROMPT, IMAGE_OCR_SYSTEM
 
 log = logging.getLogger(__name__)
@@ -48,12 +50,17 @@ def call_image_ocr(b64_images: list[str], doc_name: str, task_token: str | None 
     last_exc: Exception | None = None
     for attempt in range(_IMAGE_OCR_TRANSIENT_RETRIES):
         try:
+            extra_body: dict = {"options": {**ocr_options(), "temperature": 0.0}}
+            if os.getenv("VLM_DISABLE_THINKING", "").lower() in ("1", "true", "yes", "on"):
+                extra_body["chat_template_kwargs"] = {"enable_thinking": False}
+                extra_body["reasoning_effort"] = "none"
+                extra_body["options"]["think"] = False
             response = client.chat.completions.create(
                 model=model_name(OCR_MODEL),
                 messages=messages,
                 max_tokens=OCR_MAX_TOKENS,
                 temperature=0.0,
-                extra_body={"options": {**ocr_options(), "temperature": 0.0}},
+                extra_body=extra_body,
             )
             break
         except Exception as e:  # noqa: BLE001 — транзиентная 500 от llama-server, не наша ошибка схемы
@@ -65,6 +72,8 @@ def call_image_ocr(b64_images: list[str], doc_name: str, task_token: str | None 
     elapsed = time.perf_counter() - t0
     content = response.choices[0].message.content
     text = content if isinstance(content, str) else ""
+    metrics = metrics_of(response, model_name(OCR_MODEL), elapsed, num_ctx=OCR_NUM_CTX)
+    log_metrics(metrics, doc_name=doc_name)
     log.info("[IMAGE_OCR] Doc: '%s' | Elapsed: %.2fs | символов=%d | task_token=%s",
               doc_name, elapsed, len(text), task_token or "-")
     log.debug("[IMAGE_OCR_RAW] Doc: '%s' | %s", doc_name, text[:RAW_LOG_LIMIT])

@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import sqlite3
 import time
 
 from botkin.config import (
@@ -48,7 +49,7 @@ _RECENT_MEDS_SQL = """
 """
 
 
-def _profile_context(conn, user_id: int) -> str | None:
+def _profile_context(conn: sqlite3.Connection, user_id: int) -> str | None:
     """Формы пациента (этап 4): профиль тела, текущие препараты, свежие жалобы.
 
     Возраст вычисляется из birth_date на момент запроса — хранимый «возраст» устаревает."""
@@ -137,7 +138,7 @@ def _patient_context(user_id: int) -> str:
     return "\n\n".join(parts) if parts else "Данных о пациенте в базе нет."
 
 
-def _external_context(conn, user_id: int) -> str | None:
+def _external_context(conn: sqlite3.Connection, user_id: int) -> str | None:
     """Погода, геомагнитная активность и (опционально) развлекательный гороскоп.
 
     Погода запрашивается по координатам из профиля пациента или по умолчанию (Москва).
@@ -243,7 +244,7 @@ def recommend(
     }
 
 
-def _chat(client, model: str, messages: list[dict], num_predict: int, think: bool | None = None):
+def _chat(client: object, model: str, messages: list[dict], num_predict: int, think: bool | None = None) -> object:
     """Вызов Ollama /v1. think=False (нативный параметр Ollama) отключает рассуждения —
     весь num_predict уходит в ответ; для нерассуждающих моделей это быстрее и без пустых content."""
     body: dict = {"options": {
@@ -259,7 +260,7 @@ def _chat(client, model: str, messages: list[dict], num_predict: int, think: boo
     )
 
 
-def _split_message(response) -> tuple[str, str]:
+def _split_message(response: object) -> tuple[str, str]:
     """(content, reasoning) из ответа. Reasoning у thinking-моделей — в отдельном поле."""
     msg = response.choices[0].message
     text = (msg.content or "").strip()

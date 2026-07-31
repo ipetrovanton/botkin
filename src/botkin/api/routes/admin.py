@@ -104,7 +104,7 @@ class LabFields(BaseModel):
         return {k: getattr(self, k) for k in self.model_fields_set}
 
 
-def _labs_repo(conn, target_user_id: int) -> LabRepo:
+def _labs_repo(conn: sqlite3.Connection, target_user_id: int) -> LabRepo:
     if not UserRepo(conn).get(target_user_id):
         raise HTTPException(status_code=404, detail="Пользователь не найден")
     return LabRepo(conn, target_user_id)
@@ -179,7 +179,7 @@ def delete_lab(
     return {"deleted": 1}
 
 
-def _manual_document(conn, user_id: int) -> int:
+def _manual_document(conn: sqlite3.Connection, user_id: int) -> int:
     """Служебный документ «ручной ввод»: lab_results.document_id NOT NULL,
     а показатель, добавленный админом без бланка, ни к какому файлу не привязан.
     Один такой документ на пользователя, создаётся лениво."""

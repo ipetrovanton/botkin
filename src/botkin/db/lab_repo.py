@@ -1,6 +1,8 @@
 """Репозиторий лабораторных показателей: вставка панелей, строчный CRUD, динамика."""
 from __future__ import annotations
 
+from datetime import datetime
+
 from .base import BaseRepo
 from .connection import transaction
 
@@ -133,7 +135,7 @@ class LabRepo(BaseRepo):
             ).fetchall()
         return [dict(r) for r in reversed(rows)]
 
-    def in_period(self, start, end) -> list[dict]:
+    def in_period(self, start: datetime, end: datetime) -> list[dict]:
         """Показатели за период, сгруппированные по analyte_name, точки по времени."""
         rows = self.conn.execute(
             "SELECT analyte_name, value_num, unit, ref_low, ref_high, taken_at "

@@ -1,5 +1,6 @@
 """Прогресс-бар обработки документа: рендер стадий + поллинг статуса."""
 import logging
+from collections.abc import Awaitable, Callable
 
 log = logging.getLogger("botkin.bot.progress")
 
@@ -32,8 +33,14 @@ def render_progress(status: str, doc_id: int) -> str:
     return "\n".join(lines)
 
 
-async def poll_until_done(doc_id, get_status, edit, sleep, now,
-                          interval: float = 2.0, timeout: float = 120.0):
+async def poll_until_done(
+    doc_id: int,
+    get_status: Callable[[], Awaitable[str | None]],
+    edit: Callable[[str], Awaitable[None]],
+    sleep: Callable[[float], Awaitable[None]],
+    now: Callable[[], float],
+    interval: float = 2.0, timeout: float = 120.0,
+) -> str | None:
     """Поллит статус, редактирует сообщение при смене стадии.
 
     Параметры-функции инъектируются для тестируемости:

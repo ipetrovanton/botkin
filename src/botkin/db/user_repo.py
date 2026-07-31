@@ -40,7 +40,7 @@ class UserRepo:
 
     ROLES = ("admin", "user")
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
     def get_or_create(self, telegram_user_id: int) -> int:
@@ -191,7 +191,7 @@ class UserRepo:
 class AuthRepo:
     """Управление сессиями веб-кабинета."""
 
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
     def create_session(self, user_id: int) -> str:

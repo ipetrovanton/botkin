@@ -13,6 +13,7 @@ import json
 import logging
 import xml.etree.ElementTree as ET
 import zipfile
+from typing import IO
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ def parse_export_zip(payload: bytes, max_records: int = 2_000_000) -> list[dict]
             return _parse_export_xml(fh, max_records)
 
 
-def _parse_export_xml(fh, max_records: int) -> list[dict]:
+def _parse_export_xml(fh: IO[bytes], max_records: int) -> list[dict]:
     rows: list[dict] = []
     for _, elem in ET.iterparse(fh, events=("end",)):
         if elem.tag != "Record":

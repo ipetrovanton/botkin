@@ -2,8 +2,8 @@
 
 import logging
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Generator
 
 from botkin.llm.metrics import InferenceMetrics, log_metrics
 
@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 
 
 @contextmanager
-def timed(label: str, doc_name: str = "") -> Generator[dict, None, None]:
+def timed(label: str, doc_name: str = "") -> Iterator[dict]:
     """Context manager that logs elapsed time for an operation.
 
     Usage:

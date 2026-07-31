@@ -56,7 +56,7 @@ async def main() -> None:
         await upload.close_http_client()
 
 
-def run():
+def run() -> None:
     asyncio.run(main())
 
 

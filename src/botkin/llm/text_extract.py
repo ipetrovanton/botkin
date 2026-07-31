@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Callable
 
 import instructor
@@ -187,12 +188,12 @@ def structure_text(lines: list[str], doc_name: str) -> list[LabResult]:
         return salvage_rows(e)
 
 
-def should_use_text_layer(source_path) -> bool:
+def should_use_text_layer(source_path: Path) -> bool:
     return source_path.suffix.lower() == ".pdf" and has_usable_text_layer(source_path)
 
 
 def extract_from_text_layer(
-    source_path,
+    source_path: Path,
     sibr_ocr_fn: "Callable | None" = None,
     extract_once_fn: "Callable | None" = None,
     androflor_min_rows: int = 0,
@@ -270,7 +271,7 @@ def extract_from_text_layer(
         for i in empty_pages:
             b64 = to_base64_jpegs([images[i]])
 
-            def _low_res_fn(_page_index=i):
+            def _low_res_fn(_page_index: int = i) -> list[str]:
                 low = prepare_images(
                     source_path, long_side=androflor_retry_long_side,
                     upscale=False, deskew=False, enhance=False,

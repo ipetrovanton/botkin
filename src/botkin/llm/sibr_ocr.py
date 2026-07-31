@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 
-from botkin.config import OCR_MODEL, OCR_MAX_TOKENS, RAW_LOG_LIMIT
+from botkin.config import OCR_MODEL, OCR_MAX_TOKENS, OCR_NUM_CTX, RAW_LOG_LIMIT
 from botkin.domain.models import LabResult
 from botkin.llm.client import get_raw_client, ocr_options, model_name
 from botkin.llm.image_ocr import messages_from_images
+from botkin.llm.metrics import metrics_of, log_metrics
 from botkin.llm.prompts import SIBR_OCR_PROMPT, SIBR_OCR_SYSTEM
 from botkin.parsing.sibr import parse_sibr_ocr
 
@@ -28,14 +30,21 @@ def call_sibr_ocr(b64_images: list[str], doc_name: str) -> str:
     messages = messages_from_images(SIBR_OCR_SYSTEM, SIBR_OCR_PROMPT, b64_images)
     client = get_raw_client()
     t0 = time.perf_counter()
+    extra_body: dict = {"options": {**ocr_options(), "temperature": 0.0}}
+    if os.getenv("VLM_DISABLE_THINKING", "").lower() in ("1", "true", "yes", "on"):
+        extra_body["chat_template_kwargs"] = {"enable_thinking": False}
+        extra_body["reasoning_effort"] = "none"
+        extra_body["options"]["think"] = False
     response = client.chat.completions.create(
         model=model_name(OCR_MODEL),
         messages=messages,
         max_tokens=OCR_MAX_TOKENS,
         temperature=0.0,
-        extra_body={"options": {**ocr_options(), "temperature": 0.0}},
+        extra_body=extra_body,
     )
     elapsed = time.perf_counter() - t0
+    metrics = metrics_of(response, model_name(OCR_MODEL), elapsed, num_ctx=OCR_NUM_CTX)
+    log_metrics(metrics, doc_name=doc_name)
     content = response.choices[0].message.content
     text = content if isinstance(content, str) else ""
     log.info("[SIBR_OCR] Doc: '%s' | Elapsed: %.2fs | символов=%d", doc_name, elapsed, len(text))

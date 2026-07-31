@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import instructor
+import pymupdf
 from pydantic import BaseModel
 
 from botkin.config import (
@@ -65,7 +66,7 @@ def _correct_classification_by_content(doc_type: str, title: str | None, visible
     return doc_type
 
 
-def _detect_clinic(pdf) -> str | None:
+def _detect_clinic(pdf: pymupdf.Document) -> str | None:
     """Название организации из шапки текстового слоя (первая строка в кавычках) или None."""
     if not pdf.pages:
         return None

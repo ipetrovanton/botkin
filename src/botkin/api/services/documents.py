@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 
 from fastapi import BackgroundTasks, HTTPException
 
@@ -15,7 +16,7 @@ from botkin.preprocess.formats import resolve_extension
 from botkin.storage import delete_quietly, is_stored_file, open_local, storage_for
 
 
-def get_telegram_id(conn, user_id: int) -> int:
+def get_telegram_id(conn: sqlite3.Connection, user_id: int) -> int:
     """telegram_user_id пользователя для уведомлений; 0 если нет Telegram-аккаунта."""
     row = UserRepo(conn).get(user_id)
     return row.get("telegram_user_id") or 0 if row else 0
@@ -32,7 +33,7 @@ def loads_list(raw: str | None) -> list[str]:
         return []
 
 
-def require_own_document(conn, user_id: int, document_id: int) -> dict:
+def require_own_document(conn: sqlite3.Connection, user_id: int, document_id: int) -> dict:
     doc = DocumentRepo(conn, user_id).get(document_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")

@@ -9,7 +9,7 @@ TYPE_EMOJI = {"analysis": "🧪", "doctor_report": "👨‍⚕️",
               "certificate": "📄", "unknown": "📄"}
 
 
-def ref_marker(value_num, ref_low, ref_high) -> str:
+def ref_marker(value_num: float | None, ref_low: float | None, ref_high: float | None) -> str:
     """⬆️/⬇️ если значение вне границ нормы (учитывает односторонние границы), иначе ''."""
     if value_num is None:
         return ""

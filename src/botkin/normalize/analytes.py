@@ -120,7 +120,7 @@ class AnalyteNormalizer(BaseNormalizer):
         records: Iterable[dict],
         max_edit_ratio: float = ANALYTE_MAX_EDIT_RATIO,
         ratio_floor: float = ANALYTE_RATIO_FLOOR,
-    ):
+    ) -> None:
         super().__init__(records, max_edit_ratio, ratio_floor)
 
     def _build_index(self, records: list[dict]) -> dict[str, dict]:

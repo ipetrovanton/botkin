@@ -17,6 +17,7 @@ Heartbeat: сам факт ответа /status с растущим processing_s
 """
 from __future__ import annotations
 
+import sqlite3
 import time
 from dataclasses import dataclass
 
@@ -69,7 +70,7 @@ class StageDurationStore:
         ")"
     )
 
-    def __init__(self, conn) -> None:
+    def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
         conn.execute(self._DDL)
         conn.commit()

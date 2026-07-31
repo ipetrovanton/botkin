@@ -36,7 +36,7 @@ def _collapse_numeric_spaces(tokens: list[str]) -> list[str]:
     return collapsed
 
 
-def _verbatim_guard(rows: list[LabResult], src_text: str):
+def _verbatim_guard(rows: list[LabResult], src_text: str) -> tuple[list[LabResult], list[LabResult]]:
     """Делит строки на (kept, rejected): каждое число строки обязано быть в src_text.
 
     Числа источника собираем в множество нормализованных токенов; строка проходит,
