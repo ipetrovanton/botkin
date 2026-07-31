@@ -10,9 +10,13 @@ from aiogram.types import Message
 
 from botkin.bot.document_view import compose_card
 from botkin.bot.progress import poll_until_done, render_progress
+from botkin.bot.services import (
+    claim_delivery as _claim_delivery_svc,
+    get_document as _get_document_svc,
+    get_document_status as _get_status_svc,
+    resolve_user as _resolve_user_svc,
+)
 from botkin.config import BOT_API_URL, BOT_PROGRESS_TIMEOUT, PHOTO_LOWRES_WARN, UPLOAD_MAX_BYTES
-from botkin.db.connection import get_conn
-from botkin.db.repos import DocumentRepo, UserRepo
 
 router = Router(name="upload")
 log = logging.getLogger("botkin.bot.upload")
@@ -60,23 +64,21 @@ async def _upload_to_api(tg_user_id: int, filename: str, file_bytes: bytes) -> d
 
 
 def _resolve_user_id(tg_user_id: int) -> int | None:
-    """user_id по telegram-id (шов: в тестах подменяется без обращения к БД)."""
-    with get_conn() as conn:
-        return UserRepo(conn).get_id(tg_user_id)
+    """user_id по telegram-id (реэкспорт service для тестов)."""
+    return _resolve_user_svc(tg_user_id)
 
 
 def render_document_card(doc_id: int, user_id: int) -> str:
-    """Полная карточка документа по id (шапка + детали)."""
-    with get_conn() as conn:
-        doc = DocumentRepo(conn, user_id).get(doc_id)
+    """Полная карточка документа по id (реэкспорт service для тестов)."""
+    doc = _get_document_svc(doc_id, user_id)
     if not doc:
         return "❌ Документ не найден."
     return compose_card(doc_id, doc)
 
 
 def claim_delivery_for(doc_id: int, user_id: int) -> bool:
-    with get_conn() as conn:
-        return DocumentRepo(conn, user_id).claim_delivery(doc_id)
+    """Реэкспорт service для тестов."""
+    return _claim_delivery_svc(doc_id, user_id)
 
 
 async def run_progress_flow(tg_user_id: int, doc_id: int, edit) -> None:
@@ -89,8 +91,7 @@ async def run_progress_flow(tg_user_id: int, doc_id: int, edit) -> None:
             return
 
         async def _get_status():
-            with get_conn() as conn:
-                return DocumentRepo(conn, user_id).get_status(doc_id)
+            return _get_status_svc(doc_id, user_id)
 
         final = await poll_until_done(
             doc_id=doc_id, get_status=_get_status, edit=edit,

@@ -3,8 +3,7 @@ from aiogram import Router
 from aiogram.filters import CommandStart
 from aiogram.types import Message
 
-from botkin.db.connection import get_conn
-from botkin.db.repos import UserRepo
+from botkin.bot.services import resolve_user_or_create
 
 router = Router(name="start")
 
@@ -18,6 +17,5 @@ WELCOME = (
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
-    with get_conn() as conn:
-        UserRepo(conn).get_or_create(message.from_user.id)
+    resolve_user_or_create(message.from_user.id)
     await message.answer(WELCOME)

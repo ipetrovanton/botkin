@@ -9,20 +9,18 @@ from botkin.bot.document_view import (  # noqa: F401
     _format_doctor_reports, _format_document, _format_labs, _format_ref, compose_card,
 )
 from botkin.bot.keyboards import card_keyboard
-from botkin.db.connection import get_conn
-from botkin.db.repos import DocumentRepo, UserRepo
+from botkin.bot.services import get_last_document, resolve_user
 
 router = Router(name="show")
 
 
 @router.message(Command("show", "last"))
 async def cmd_show(message: Message) -> None:
-    with get_conn() as conn:
-        user_id = UserRepo(conn).get_id(message.from_user.id)
-        doc = DocumentRepo(conn, user_id).get_last() if user_id else None
+    user_id = resolve_user(message.from_user.id)
     if not user_id:
         await message.answer("⚠️ Отправь /start для регистрации.")
         return
+    doc = get_last_document(user_id)
     if not doc:
         await message.answer("📭 Документов пока нет.")
         return

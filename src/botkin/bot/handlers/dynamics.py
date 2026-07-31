@@ -3,8 +3,7 @@ from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import BufferedInputFile, Message
 
-from botkin.db.connection import get_conn
-from botkin.db.repos import LabRepo, UserRepo
+from botkin.bot.services import get_dynamics, resolve_user
 from botkin.viz.plots import lab_dynamics_chart
 
 router = Router(name="dynamics")
@@ -17,12 +16,11 @@ async def cmd_dynamics(message: Message, command: CommandObject) -> None:
         await message.answer("Использование: /dynamics холестерин")
         return
 
-    with get_conn() as conn:
-        user_id = UserRepo(conn).get_id(message.from_user.id)
-        points = LabRepo(conn, user_id).dynamics(analyte, limit=30) if user_id else None
+    user_id = resolve_user(message.from_user.id)
     if not user_id:
         await message.answer("⚠️ Отправь /start для регистрации.")
         return
+    points = get_dynamics(user_id, analyte, limit=30)
     if not points:
         await message.answer(f"❌ Данных по «{analyte}» нет. Загрузи анализ с этим показателем.")
         return
