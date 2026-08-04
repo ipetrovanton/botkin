@@ -3332,3 +3332,28 @@ E2E sample_011: field_mismatch **20 → 0**.
 
 ### Unit
 tests/test_compact_rows.py + related: 74 passed.
+
+## Итерация 40: e2e doctor_report — сверка содержимого, не только doc_type
+
+### Проблема
+E2E для JPG-заключений (021–035) проверял только `doc_type`. Extract
+`run_doctor_report` не вызывался — регрессии по диагнозу/врачу/медам не ловились.
+
+### Решение
+1. `tests/e2e_report.py`: `compare_doctor_reports`, `ReportContentDiff`,
+   fuzzy (rapidfuzz token_set_ratio):
+   - hard: diagnosis, doctor_name, medications (recall ≥0.5), wrong visit_date;
+   - soft: recommendations, anamnesis, missing visit_date (МРТ/ЭКГ).
+   - diagnosis fallback: blob из diagnosis+anamnesis+recs+meds (ЭКГ/МРТ).
+2. `tests/test_e2e_llm.py`: при `doc_type==doctor_report` → `run_doctor_report` + compare.
+3. `doctor_report.md`: явно — ЭКГ/МРТ findings в diagnosis.
+4. Unit: `tests/test_e2e_report.py` (+6 тестов).
+
+### E2E
+- doctor_report JPG (11): **11/11 PASS**
+- full suite 34 docs: **34/34 PASS**, wall ~11.2 мин (extract заключений +~3.5 мин)
+  Log: `bench_full_with_doctor_report.log`, `bench_doctor_report_e2e2.log`.
+
+### Итог
+Заключения врача в e2e сверяются по содержимому. unknown-рецепты (022/024/025) — по-прежнему
+только doc_type (extract не для unknown).

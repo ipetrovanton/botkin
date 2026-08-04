@@ -234,10 +234,18 @@ def test_e2e_real_document_pipeline(doc_path):
 
     report.doc_type_got = classified.doc_type
 
+    doctor_reports: list = []
     if classified.doc_type == "analysis":
         with er.MetricsCapture() as capture:
             t0 = time.perf_counter()
             rows = ex.run_analysis(doc_path)
+            report.extract_s = time.perf_counter() - t0
+            report.extract_metrics = list(capture.records)
+    elif classified.doc_type == "doctor_report":
+        # Раньше e2e для заключений проверял только doc_type — extract не вызывался.
+        with er.MetricsCapture() as capture:
+            t0 = time.perf_counter()
+            doctor_reports = ex.run_doctor_report(doc_path)
             report.extract_s = time.perf_counter() - t0
             report.extract_metrics = list(capture.records)
 
@@ -251,6 +259,18 @@ def test_e2e_real_document_pipeline(doc_path):
         if report.missing:
             report.fail_reasons.append(
                 f"не найдено {len(report.missing)}/{report.expected_values} эталонных значений")
+
+    if (
+        classified.doc_type == "doctor_report"
+        and er.has_doctor_report_content(expected)
+    ):
+        report.report_diff = er.compare_doctor_reports(expected, doctor_reports)
+        rd = report.report_diff
+        if rd.missing:
+            report.fail_reasons.append(
+                f"doctor_report: не найдено {len(rd.missing)}/{rd.expected_count} "
+                f"обязательных полей/пунктов: {rd.missing[:5]}"
+            )
 
     if report.fail_reasons:
         report.status = "FAIL"

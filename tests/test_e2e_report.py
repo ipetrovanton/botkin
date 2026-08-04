@@ -125,6 +125,103 @@ def test_compare_analytes_qualitative_case_insensitive():
     assert len(diff.missing) == 0
 
 
+@dataclass
+class _FakeDoctorReport:
+    diagnosis: str | None = None
+    doctor_name: str | None = None
+    visit_date: object | None = None
+    recommendations: list | None = None
+    medications: list | None = None
+    anamnesis: str | None = None
+
+    def __post_init__(self):
+        if self.recommendations is None:
+            self.recommendations = []
+        if self.medications is None:
+            self.medications = []
+
+
+def test_compare_doctor_reports_matches_core_fields():
+    expected = {
+        "diagnosis": "E07.9 Исключить гипотиреоз",
+        "doctor_name": "Звонова Наталья Николаевна",
+        "visit_date": "07.03.2026",
+        "anamnesis": "Не нуждается в выдаче листка нетрудоспособности",
+        "recommendations": ["Тиреотропный гормон (ТТГ)"],
+    }
+    got = [_FakeDoctorReport(
+        diagnosis="E07.9 Исключить гипотиреоз",
+        doctor_name="Звонова Наталья Николаевна",
+        visit_date="2026-03-07",
+        anamnesis="Не нуждается в выдаче листка нетрудоспособности",
+        recommendations=[],
+    )]
+    diff = er.compare_doctor_reports(expected, got)
+    assert "diagnosis" in diff.matched
+    assert "doctor_name" in diff.matched
+    assert "visit_date" in diff.matched
+    assert "anamnesis" in diff.matched
+    assert not diff.missing
+    # recs soft — пустой extract не роняет hard-missing
+    assert any(s.startswith("recommendations:") for s in diff.soft_missing)
+
+
+def test_compare_doctor_reports_missing_visit_date_is_soft():
+    """Пропуск даты (МРТ) — soft; неверная дата — hard."""
+    expected = {"diagnosis": "Очаги в белом веществе", "visit_date": "17.11.2024"}
+    got_empty = [_FakeDoctorReport(diagnosis="Очаги в белом веществе сосудистого генеза")]
+    soft = er.compare_doctor_reports(expected, got_empty)
+    assert "visit_date" in soft.soft_missing
+    assert "visit_date" not in soft.missing
+
+    got_wrong = [_FakeDoctorReport(
+        diagnosis="Очаги в белом веществе",
+        visit_date="01.01.2020",
+    )]
+    hard = er.compare_doctor_reports(expected, got_wrong)
+    assert "visit_date" in hard.missing
+
+
+def test_compare_doctor_reports_missing_diagnosis_fails_hard():
+    expected = {"diagnosis": "G90.8 Расстройство ВНС", "doctor_name": "Иванов"}
+    got = [_FakeDoctorReport(diagnosis=None, doctor_name="Иванов И.И.")]
+    diff = er.compare_doctor_reports(expected, got)
+    assert "diagnosis" in diff.missing
+    assert "doctor_name" in diff.matched
+
+
+def test_compare_doctor_reports_medications_fuzzy():
+    expected = {
+        "medications": [
+            "Капс. Брейнмакс по 1 капс 2 раза в день - 6 недель",
+            "Таб. Бринтелликс 20мг по 1 таб утром",
+        ],
+    }
+    got = [_FakeDoctorReport(
+        medications=["Брейнмакс", "Бринтелликс 20 мг"],
+    )]
+    diff = er.compare_doctor_reports(expected, got)
+    assert len([m for m in diff.matched if m.startswith("medications:")]) == 2
+    assert not any(m.startswith("medications:") for m in diff.missing)
+
+
+def test_compare_doctor_reports_medications_from_recommendations_pool():
+    """Схема/дозировка часто уезжает в recommendations — матчим по объединённому пулу."""
+    expected = {"medications": ["Таб. Триттико 150мг по 100мг за час до сна"]}
+    got = [_FakeDoctorReport(
+        medications=[],
+        recommendations=["Таб. Триттико 150мг по 100мг за час до сна - длительно"],
+    )]
+    diff = er.compare_doctor_reports(expected, got)
+    assert any(m.startswith("medications:") for m in diff.matched)
+
+
+def test_has_doctor_report_content():
+    assert er.has_doctor_report_content({"diagnosis": "x"}) is True
+    assert er.has_doctor_report_content({"doc_type": "doctor_report"}) is False
+    assert er.has_doctor_report_content({"medications": ["A"]}) is True
+
+
 def test_metrics_capture_parses_log_metrics_output():
     logger = logging.getLogger("botkin.llm.metrics")
     logger.setLevel(logging.INFO)

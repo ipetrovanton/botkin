@@ -19,9 +19,16 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from botkin.llm.metrics import InferenceMetrics
+from botkin.normalize.dates import parse_date
 from botkin.normalize.units import canonical_unit
 
 log = logging.getLogger(__name__)
+
+# Пороги fuzzy-матчинга (rapidfuzz token_set_ratio, 0–100) для doctor_report.
+_DR_TEXT_THRESHOLD = 55
+_DR_LIST_THRESHOLD = 50
+# Минимальный recall по medications, чтобы не ронять тест при вариациях формулировок.
+_DR_MEDS_RECALL_MIN = 0.5
 
 # Формат, который печатает log_metrics(...) в botkin.llm.metrics.
 # Пример: "[METRICS] Doc: 'sample.pdf' model=qwen3-vl:8b | ctx=123/4096 | out=45 | tps=12.3 | t=2.10s"
@@ -79,6 +86,38 @@ class AnalyteDiff:
 
 
 @dataclass
+class ReportContentDiff:
+    """Diff по полям заключения врача (diagnosis/doctor/date/meds/recs)."""
+
+    matched: list[str] = field(default_factory=list)  # "diagnosis", "medications: …"
+    missing: list[str] = field(default_factory=list)
+    field_mismatches: list[FieldMismatch] = field(default_factory=list)
+    # Мягкие замечания (recommendations), не роняют e2e сами по себе.
+    soft_missing: list[str] = field(default_factory=list)
+
+    @property
+    def expected_count(self) -> int:
+        # matched + missing = обязательные пункты сверки (без soft).
+        return len(self.matched) + len(self.missing)
+
+    @property
+    def actual_count(self) -> int:
+        return len(self.matched)
+
+    @property
+    def precision(self) -> float:
+        # Для report-content precision ≈ доля закрытых обязательных пунктов.
+        return self.recall
+
+    @property
+    def recall(self) -> float:
+        n = self.expected_count
+        if n == 0:
+            return 0.0
+        return len(self.matched) / n
+
+
+@dataclass
 class DocReport:
     """Итог по одному документу: тайминг, тип, diff, метрики инференса."""
 
@@ -92,6 +131,7 @@ class DocReport:
     doc_type_expected: str | None = None
     doc_type_got: str | None = None
     diff: AnalyteDiff = field(default_factory=AnalyteDiff)
+    report_diff: ReportContentDiff | None = None
 
     @property
     def total_s(self) -> float:
@@ -99,14 +139,20 @@ class DocReport:
 
     @property
     def expected_values(self) -> int:
+        if self.report_diff is not None and self.report_diff.expected_count:
+            return self.report_diff.expected_count
         return self.diff.expected_count
 
     @property
     def extracted_rows(self) -> int:
+        if self.report_diff is not None and self.report_diff.expected_count:
+            return self.report_diff.actual_count
         return self.diff.actual_count
 
     @property
     def matched_values(self) -> int:
+        if self.report_diff is not None and self.report_diff.expected_count:
+            return len(self.report_diff.matched)
         return len(self.diff.matched)
 
     @property
@@ -115,7 +161,25 @@ class DocReport:
 
     @property
     def field_mismatches(self) -> list[FieldMismatch]:
+        if self.report_diff is not None and self.report_diff.field_mismatches:
+            return self.report_diff.field_mismatches
         return self.diff.field_mismatches
+
+    @property
+    def content_precision(self) -> float | None:
+        if self.report_diff is not None and self.report_diff.expected_count:
+            return self.report_diff.precision
+        if self.diff.expected_count:
+            return self.diff.precision
+        return None
+
+    @property
+    def content_recall(self) -> float | None:
+        if self.report_diff is not None and self.report_diff.expected_count:
+            return self.report_diff.recall
+        if self.diff.expected_count:
+            return self.diff.recall
+        return None
 
 
 def _to_int(value: Any, default: int = 0) -> int:
@@ -305,6 +369,226 @@ def compare_analytes(expected_analytes: list[dict], rows: list[object]) -> Analy
     )
 
 
+def _text_similarity(a: str, b: str) -> float:
+    """token_set_ratio 0–100; 0 если одна из строк пуста."""
+    a_n = _normalize_text(a)
+    b_n = _normalize_text(b)
+    if not a_n or not b_n:
+        return 0.0
+    from rapidfuzz import fuzz
+    return float(fuzz.token_set_ratio(a_n, b_n))
+
+
+def _texts_match(expected: str, got: str, threshold: int = _DR_TEXT_THRESHOLD) -> bool:
+    return _text_similarity(expected, got) >= threshold
+
+
+def _as_datetime(value: object):
+    """datetime из datetime / ISO / русской даты; None если не разобрали."""
+    from datetime import datetime as _dt
+
+    if value is None:
+        return None
+    if isinstance(value, _dt):
+        return value
+    if isinstance(value, str):
+        dt, _ = parse_date(value)
+        return dt
+    dt, _ = parse_date(str(value))
+    return dt
+
+
+def _dates_equal(expected: object, got: object) -> bool:
+    """Сравнивает даты по календарному дню (игнор TZ/времени)."""
+    exp_dt = _as_datetime(expected)
+    got_dt = _as_datetime(got)
+    if exp_dt is None or got_dt is None:
+        return False
+    return exp_dt.date() == got_dt.date()
+
+
+def _match_list_items(
+    expected_items: list[str],
+    got_items: list[str],
+    threshold: int = _DR_LIST_THRESHOLD,
+) -> tuple[list[str], list[str]]:
+    """Жадный матч expected→got по token_set_ratio. (matched_expected, missing_expected)."""
+    remaining = list(got_items)
+    matched: list[str] = []
+    missing: list[str] = []
+    for exp in expected_items:
+        if not (exp or "").strip():
+            continue
+        best_i, best_score = -1, -1.0
+        for i, got in enumerate(remaining):
+            score = _text_similarity(exp, got)
+            if score > best_score:
+                best_score, best_i = score, i
+        if best_i >= 0 and best_score >= threshold:
+            matched.append(exp)
+            remaining.pop(best_i)
+        else:
+            missing.append(exp)
+    return matched, missing
+
+
+def _pick_primary_report(reports: list[object]) -> object | None:
+    """Первый непустой DoctorReport (с диагнозом/рекомендациями/медами)."""
+    if not reports:
+        return None
+    for r in reports:
+        if (
+            getattr(r, "diagnosis", None)
+            or getattr(r, "recommendations", None)
+            or getattr(r, "medications", None)
+            or getattr(r, "doctor_name", None)
+        ):
+            return r
+    return reports[0]
+
+
+def compare_doctor_reports(expected: dict, reports: list[object]) -> ReportContentDiff:
+    """Сверка sidecar doctor_report с извлечённым DoctorReport.
+
+    Обязательные (роняют e2e при missing):
+      - diagnosis, doctor_name, visit_date — если заданы в expected;
+      - medications — recall ≥ _DR_MEDS_RECALL_MIN (fuzzy по строкам).
+    Мягкие (soft_missing, не роняют сами):
+      - recommendations, anamnesis.
+    """
+    diff = ReportContentDiff()
+    got = _pick_primary_report(reports)
+
+    if got is None:
+        for key in ("diagnosis", "doctor_name", "visit_date"):
+            if expected.get(key):
+                diff.missing.append(key)
+        for med in expected.get("medications") or []:
+            if med:
+                diff.missing.append(f"medications: {med}")
+        for rec in expected.get("recommendations") or []:
+            if rec:
+                diff.soft_missing.append(f"recommendations: {rec}")
+        return diff
+
+    # --- diagnosis ---
+    # Для ЭКГ/МРТ модель иногда кладёт findings в anamnesis или recommendations —
+    # сверяем также с «blob» всех текстовых полей.
+    exp_diag = (expected.get("diagnosis") or "").strip()
+    got_diag = (getattr(got, "diagnosis", None) or "").strip()
+    got_blob = " ".join(
+        p for p in [
+            got_diag,
+            getattr(got, "anamnesis", None) or "",
+            *list(getattr(got, "recommendations", None) or []),
+            *list(getattr(got, "medications", None) or []),
+        ] if p
+    )
+    if exp_diag:
+        diag_ok = (
+            (got_diag and _texts_match(exp_diag, got_diag))
+            or (got_blob and _texts_match(exp_diag, got_blob, threshold=50))
+            # Короткий «хвост» заключения МРТ: «Заключение: …»
+            or (
+                "заключение:" in exp_diag.lower()
+                and got_blob
+                and _texts_match(exp_diag.lower().split("заключение:")[-1], got_blob, threshold=50)
+            )
+        )
+        if diag_ok:
+            diff.matched.append("diagnosis")
+        else:
+            diff.missing.append("diagnosis")
+            diff.field_mismatches.append(
+                FieldMismatch("doctor_report", "diagnosis", exp_diag, got_diag or None)
+            )
+
+    # --- doctor_name ---
+    exp_doc = (expected.get("doctor_name") or "").strip()
+    got_doc = (getattr(got, "doctor_name", None) or "").strip()
+    if exp_doc:
+        if got_doc and _texts_match(exp_doc, got_doc, threshold=50):
+            diff.matched.append("doctor_name")
+        else:
+            diff.missing.append("doctor_name")
+            diff.field_mismatches.append(
+                FieldMismatch("doctor_report", "doctor_name", exp_doc, got_doc or None)
+            )
+
+    # --- visit_date ---
+    # Дата на МРТ/ЭКГ часто в шапке и VLM её пропускает → отсутствие = soft.
+    # Неверная дата (модель выдумала другой день) — hard-missing.
+    exp_visit = expected.get("visit_date")
+    got_visit = getattr(got, "visit_date", None)
+    if exp_visit:
+        if got_visit is not None and _dates_equal(exp_visit, got_visit):
+            diff.matched.append("visit_date")
+        elif got_visit is not None:
+            diff.missing.append("visit_date")
+            diff.field_mismatches.append(
+                FieldMismatch("doctor_report", "visit_date", exp_visit, got_visit)
+            )
+        else:
+            diff.soft_missing.append("visit_date")
+            diff.field_mismatches.append(
+                FieldMismatch("doctor_report", "visit_date", exp_visit, None)
+            )
+
+    # --- medications (hard recall) ---
+    exp_meds = [m for m in (expected.get("medications") or []) if (m or "").strip()]
+    got_meds = [m for m in (getattr(got, "medications", None) or []) if (m or "").strip()]
+    # Часто схема/дозировка попадает в recommendations — учитываем оба списка.
+    got_meds_pool = got_meds + [
+        r for r in (getattr(got, "recommendations", None) or []) if (r or "").strip()
+    ]
+    if exp_meds:
+        med_matched, med_missing = _match_list_items(exp_meds, got_meds_pool)
+        for m in med_matched:
+            diff.matched.append(f"medications: {m}")
+        recall = len(med_matched) / len(exp_meds)
+        if recall < _DR_MEDS_RECALL_MIN:
+            for m in med_missing:
+                diff.missing.append(f"medications: {m}")
+        else:
+            # Ниже порога hard-fail не роняем, но помечаем soft.
+            for m in med_missing:
+                diff.soft_missing.append(f"medications: {m}")
+
+    # --- recommendations (soft) ---
+    exp_recs = [r for r in (expected.get("recommendations") or []) if (r or "").strip()]
+    got_recs = [r for r in (getattr(got, "recommendations", None) or []) if (r or "").strip()]
+    if exp_recs:
+        rec_matched, rec_missing = _match_list_items(exp_recs, got_recs + got_meds)
+        for r in rec_matched:
+            diff.matched.append(f"recommendations: {r}")
+        for r in rec_missing:
+            diff.soft_missing.append(f"recommendations: {r}")
+
+    # --- anamnesis (soft) ---
+    exp_anam = (expected.get("anamnesis") or "").strip()
+    got_anam = (getattr(got, "anamnesis", None) or "").strip()
+    if exp_anam:
+        if got_anam and _texts_match(exp_anam, got_anam, threshold=45):
+            diff.matched.append("anamnesis")
+        else:
+            diff.soft_missing.append("anamnesis")
+            if got_anam:
+                diff.field_mismatches.append(
+                    FieldMismatch("doctor_report", "anamnesis", exp_anam, got_anam)
+                )
+
+    return diff
+
+
+def has_doctor_report_content(expected: dict) -> bool:
+    """True, если в sidecar есть поля для сверки doctor_report (не только doc_type)."""
+    if expected.get("diagnosis") or expected.get("doctor_name") or expected.get("visit_date"):
+        return True
+    if expected.get("medications") or expected.get("recommendations") or expected.get("anamnesis"):
+        return True
+    return False
+
+
 def _format_value(value: Any) -> str:
     if value is None:
         return "—"
@@ -423,7 +707,32 @@ def print_report(report: DocReport, file: TextIO | None = None) -> None:
         file=file,
     )
 
-    if report.expected_values:
+    if report.report_diff is not None and report.report_diff.expected_count:
+        rd = report.report_diff
+        print(
+            f"  Заключение: precision={rd.precision:.2f} recall={rd.recall:.2f} | "
+            f"совпало {len(rd.matched)}/{rd.expected_count}",
+            file=file,
+        )
+        if rd.missing:
+            print(f"  MISSING ({len(rd.missing)}):", file=file)
+            for item in rd.missing:
+                print(f"    - {item}", file=file)
+        if rd.soft_missing:
+            print(f"  SOFT_MISSING ({len(rd.soft_missing)}):", file=file)
+            for item in rd.soft_missing[:12]:
+                print(f"    ~ {item}", file=file)
+            if len(rd.soft_missing) > 12:
+                print(f"    … +{len(rd.soft_missing) - 12} ещё", file=file)
+        if rd.field_mismatches:
+            print(f"  MISMATCH ({len(rd.field_mismatches)}):", file=file)
+            for mismatch in rd.field_mismatches:
+                print(
+                    f"    ~ {mismatch.field}: expected={_format_value(mismatch.expected)} "
+                    f"got={_format_value(mismatch.got)}",
+                    file=file,
+                )
+    elif report.expected_values:
         print(
             f"  Значения: precision={report.diff.precision:.2f} "
             f"recall={report.diff.recall:.2f} | "
@@ -470,9 +779,14 @@ def print_summary(reports: list[DocReport], file: TextIO | None = None) -> None:
         passed += report.status == "PASS"
         failed += report.status == "FAIL"
 
-        precision = f"{report.diff.precision:.2f}" if report.expected_values else "—"
-        recall = f"{report.diff.recall:.2f}" if report.expected_values else "—"
-        mismatch = f"{len(report.field_mismatches)}" if report.expected_values else "—"
+        prec = report.content_precision
+        rec = report.content_recall
+        precision = f"{prec:.2f}" if prec is not None else "—"
+        recall = f"{rec:.2f}" if rec is not None else "—"
+        has_content = report.expected_values > 0 or (
+            report.report_diff is not None and report.report_diff.expected_count > 0
+        )
+        mismatch = f"{len(report.field_mismatches)}" if has_content else "—"
 
         print(
             f"{report.name:<22}"
@@ -548,9 +862,20 @@ def save_benchmark(
             "field_mismatches": [{
                 "analyte": m.analyte,
                 "field": m.field,
-                "expected": m.expected,
-                "got": m.got,
+                "expected": str(m.expected) if m.expected is not None else None,
+                "got": str(m.got) if m.got is not None else None,
             } for m in report.field_mismatches],
+            "report_content": (
+                {
+                    "matched": report.report_diff.matched,
+                    "missing": report.report_diff.missing,
+                    "soft_missing": report.report_diff.soft_missing,
+                    "precision": report.report_diff.precision,
+                    "recall": report.report_diff.recall,
+                }
+                if report.report_diff is not None
+                else None
+            ),
         }
 
     payload = {
