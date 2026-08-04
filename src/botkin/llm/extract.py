@@ -47,7 +47,7 @@ from botkin.parsing.harvester import (
     _collect_tables, harvest_lab_rows, loads_json, salvage_json_objects,
 )
 from botkin.parsing.rows import (
-    RawAnalysis, extraction_quality, merge_dedup, rows_from_raw,
+    RawAnalysis, extraction_quality, filter_noise_rows, merge_dedup, rows_from_raw,
 )
 from botkin.parsing.scalars import parse_lab_value, parse_reference_range
 from botkin.parsing.text_layer import _parse_text_line, _verbatim_guard, completeness_guard
@@ -316,6 +316,13 @@ def _extract_once(
 
 def _finish(rows: list[LabResult], doc_name: str, t0: float, n_calls: int) -> list[LabResult]:
     """Финальное логирование качества (общий хвост текстового и VLM путей)."""
+    before = len(rows)
+    rows = filter_noise_rows(rows)
+    if len(rows) < before:
+        log.info(
+            "[EXTRACT_NOISE_FILTER] Doc: '%s' | отброшено шапок/мусора: %d",
+            doc_name, before - len(rows),
+        )
     rows = _correct_units(rows)
     q = extraction_quality(rows)
     total_s = time.perf_counter() - t0

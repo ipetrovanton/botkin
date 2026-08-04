@@ -3304,3 +3304,31 @@ ruff clean.
 Production: qwen3-vl:8b-instruct, extract_long_side=1600, unit cleanup, early-exit voting.
 Не в default: gemma4, glm-ocr. Ветка `feat/pipeline-speed-accuracy`, e2e gate без регрессий.
 
+## Итерация 39: фазы 4–7 pipeline (TEXT split / long_side 1280 / unit-ref / noise filter)
+
+### Фаза 4 — TEXT_MODEL=qwen3:8b
+E2E: **33/34 FAIL** sample_003 (пропуск ЦИК); avg **26.8 s** (хуже 13.3).
+Много EXTRA-прозы, swap моделей VL↔text. **REJECT**. TEXT остаётся qwen3-vl:8b-instruct.
+Log: `bench_phase4_text_qwen3_8b.log`.
+
+### Фаза 5 — IMAGE_EXTRACT_LONG_SIDE=1280
+E2E: **34/34**, recall 1.0, но avg **14.6 s** (медленнее 1600=13.3). **REJECT** скорость.
+Оставляем **1600**. Log: `bench_phase5_long1280.log`.
+
+### Фаза 7 — unit/ref swap (sample_011)
+`_fix_unit_ref_fields` в `parsing/rows.py`: если unit похож на референс («4 - 8,8»),
+переносим в ref; swap unit↔ref; strip «%/».
+E2E sample_011: field_mismatch **20 → 0**.
+
+### Фаза 6 — noise filter (консервативный)
+`filter_noise_rows`: шапки «Исследование», «—», длинная проза, trailing «:» в имени.
+В `_finish` extract. EXTRA слегка ↓ (009: 22→19, 010: 17→15). Recall 1.0.
+
+### Фаза 8 hybrid OCR
+Пропущена по решению пользователя (риск glm-ocr).
+
+### Итоговый e2e (qwen3-vl + long_side=1600 + phase 6/7)
+**34/34 PASS**, avg **13.4 s/doc**, wall 7.6 мин. Log: `bench_phase7_6_final.log`.
+
+### Unit
+tests/test_compact_rows.py + related: 74 passed.

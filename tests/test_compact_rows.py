@@ -73,3 +73,55 @@ def test_value_flags_are_preserved_verbatim():
     rows = rows_from_raw(parse_compact_rows("Нейтрофилы, %|44.6*|%|47 - 72"))
     assert rows[0].value_raw == "44.6*"
     assert rows[0].value_num == 44.6
+
+
+def test_ref_mistakenly_in_unit_field_is_recovered():
+    """Регрессия sample_011: модель писала референс в колонку unit, unit пустой."""
+    rows = rows_from_raw(parse_compact_rows(
+        "Лейкоциты|4.14|4 - 8,8|\n"
+        "Гемоглобин|153|118 - 168|\n"
+    ))
+    assert rows[0].value_num == 4.14
+    assert rows[0].unit is None
+    assert rows[0].ref_low == 4.0
+    assert rows[0].ref_high == 8.8
+    assert rows[1].ref_low == 118.0
+    assert rows[1].ref_high == 168.0
+
+
+def test_swapped_unit_and_ref_are_reordered():
+    """unit=диапазон, ref=единица → меняем местами."""
+    rows = rows_from_raw(parse_compact_rows("Тромбоциты|164|150 - 400|10^9/л"))
+    assert rows[0].unit == "10^9/л"
+    assert rows[0].ref_low == 150.0
+    assert rows[0].ref_high == 400.0
+
+
+def test_trailing_slash_on_unit_is_stripped():
+    rows = rows_from_raw(parse_compact_rows("Гематокрит|40.8|%/|35 - 45"))
+    assert rows[0].unit == "%"
+
+
+def test_noise_filter_drops_headers_keeps_analytes():
+    from botkin.domain.models import LabResult
+    from botkin.parsing.rows import filter_noise_rows
+
+    rows = [
+        LabResult(analyte_name="Исследование", value_text="—"),
+        LabResult(analyte_name="Лейкоциты::", value_num=4.14, unit="10^9/л"),
+        LabResult(analyte_name="—", value_num=4.8),
+        LabResult(analyte_name="Гемоглобин", value_num=137.0, unit="г/л"),
+    ]
+    out = filter_noise_rows(rows)
+    assert [r.analyte_name for r in out] == ["Лейкоциты", "Гемоглобин"]
+
+
+def test_dedup_collapses_trailing_colon_names():
+    from botkin.domain.models import LabResult
+    from botkin.parsing.rows import dedup_rows
+
+    rows = dedup_rows([
+        LabResult(analyte_name="Лейкоциты", value_num=4.14),
+        LabResult(analyte_name="Лейкоциты::", value_num=4.14),
+    ])
+    assert len(rows) == 1

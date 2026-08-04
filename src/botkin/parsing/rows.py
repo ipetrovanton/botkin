@@ -8,7 +8,7 @@ from typing import Optional, Union
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from botkin.domain.models import LabResult
-from botkin.parsing.scalars import parse_lab_value, parse_reference_range
+from botkin.parsing.scalars import looks_like_ref, parse_lab_value, parse_reference_range
 
 # Модель естественно отдаёт вложенную структуру tests[].results[] с полями
 # parameter/value/reference_range, а не плоский LabResult. Принимаем её как есть
@@ -109,13 +109,41 @@ def parse_compact_rows(text: str) -> RawAnalysis:
             continue
         if not value:
             continue
+        unit = parts[2] or None if len(parts) > 2 else None
+        ref = parts[3] or None if len(parts) > 3 else None
+        unit, ref = _fix_unit_ref_fields(unit, ref)
         rows.append(_RawRow(
             parameter=name,
             value=value,
-            unit=parts[2] or None if len(parts) > 2 else None,
-            reference_range=parts[3] or None if len(parts) > 3 else None,
+            unit=unit,
+            reference_range=ref,
         ))
     return RawAnalysis(results=rows)
+
+
+def _fix_unit_ref_fields(
+    unit: str | None, ref: str | None,
+) -> tuple[str | None, str | None]:
+    """Восстанавливает unit/ref, если модель переставила колонки.
+
+    Частый сбой (sample_011): «Лейкоциты|4.14|4 - 8,8|» — референс попал в unit,
+    unit пуст. Также «имя|val|4 - 8|10^9/л» (unit и ref поменяны местами).
+    """
+    if unit:
+        unit = unit.strip() or None
+    if ref:
+        ref = ref.strip() or None
+    # Хвостовой мусор compact: «%/» → «%».
+    if unit and unit.endswith("/") and not looks_like_ref(unit):
+        unit = unit.rstrip("/").strip() or None
+
+    if unit and looks_like_ref(unit):
+        if not ref:
+            return None, unit
+        if not looks_like_ref(ref):
+            # unit=диапазон, ref=единица → поменять местами
+            return ref, unit
+    return unit, ref
 
 
 def rows_from_raw(raw: RawAnalysis) -> list[LabResult]:
@@ -128,13 +156,14 @@ def rows_from_raw(raw: RawAnalysis) -> list[LabResult]:
         if not r.parameter:
             continue
         value_num, value_text = parse_lab_value(r.value)
-        ref_low, ref_high, ref_operator, ref_text = parse_reference_range(r.reference_range)
+        unit, ref_s = _fix_unit_ref_fields(r.unit, r.reference_range)
+        ref_low, ref_high, ref_operator, ref_text = parse_reference_range(ref_s)
         out.append(LabResult(
             analyte_name=r.parameter,
             value_num=value_num,
             value_text=value_text,
             value_raw=str(r.value) if r.value is not None else None,
-            unit=r.unit,
+            unit=unit,
             ref_low=ref_low,
             ref_high=ref_high,
             ref_operator=ref_operator,
@@ -145,7 +174,7 @@ def rows_from_raw(raw: RawAnalysis) -> list[LabResult]:
 
 
 def _row_key(r: LabResult) -> tuple[str, float | None, str | None]:
-    return (r.analyte_name.strip().lower(), r.value_num, r.value_text)
+    return (_name_key(r), r.value_num, r.value_text)
 
 
 def dedup_rows(rows: list[LabResult]) -> list[LabResult]:
@@ -165,8 +194,66 @@ def dedup_rows(rows: list[LabResult]) -> list[LabResult]:
 
 
 def _name_key(r: LabResult) -> str:
-    """Ключ показателя по имени (без значения): lower, ё→е, схлопывание пробелов."""
-    return " ".join(r.analyte_name.strip().lower().replace("ё", "е").split())
+    """Ключ показателя по имени (без значения): lower, ё→е, схлопывание пробелов.
+
+    Хвостовые «:»/«::» (OCR-дубли sample_011 «Лейкоциты::») срезаются.
+    """
+    name = r.analyte_name.strip().lower().replace("ё", "е").rstrip(":").strip()
+    return " ".join(name.split())
+
+
+# Имена-шапки бланка / метаданные, не показатели (sample_012 EXTRA).
+_NOISE_NAME_EXACT = frozenset({
+    "исследование", "результат", "результаты", "единицы", "значения",
+    "референс", "норма", "комментарии", "комментарий", "исполнитель",
+    "внимание", "страница", "пол", "возраст", "врач", "дата",
+    "описание бланка результатов",
+})
+_NOISE_NAME_PREFIXES = (
+    "дата ", "саулина ", "перейти на ", "результаты исследований не являются",
+    "внимание!", "* результат", "инз:", "www.",
+)
+
+
+def is_noise_row(r: LabResult) -> bool:
+    """True, если строка — шапка/метаданные/мусор, а не лабораторный показатель.
+
+    Консервативно: не отбрасываем строки с числовым значением и коротким именем
+    (типичный показатель). Не трогаем качественные «не обнаружено» с нормальным именем.
+    """
+    name = (r.analyte_name or "").strip()
+    if not name:
+        return True
+    key = _name_key(r)
+    if not key or key in {"-", "—", "%", "п/з", "в п/зр."}:
+        return True
+    if key in _NOISE_NAME_EXACT:
+        return True
+    lower = name.lower()
+    if any(lower.startswith(p) for p in _NOISE_NAME_PREFIXES):
+        return True
+    # Длинная проза без числа (описания методик Андрофлор и т.п.).
+    if r.value_num is None and len(name) > 100:
+        return True
+    # Пустое значение-заглушка «—»/«-» без числа.
+    if r.value_num is None and (r.value_text or "").strip() in {"", "—", "-", "–"}:
+        if not r.unit and r.ref_low is None and r.ref_high is None:
+            return True
+    return False
+
+
+def filter_noise_rows(rows: list[LabResult]) -> list[LabResult]:
+    """Убирает шапки/метаданные/пустые заглушки; нормализует хвостовые «:» в имени."""
+    out: list[LabResult] = []
+    for r in rows:
+        if is_noise_row(r):
+            continue
+        # «Лейкоциты::» → «Лейкоциты» для UI и дальнейшей нормализации.
+        cleaned = r.analyte_name.rstrip(":").strip()
+        if cleaned != r.analyte_name:
+            r.analyte_name = cleaned
+        out.append(r)
+    return out
 
 
 def _unit_dimension(unit: str | None) -> str | None:
