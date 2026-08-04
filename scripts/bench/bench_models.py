@@ -26,9 +26,9 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Модели по умолчанию для сравнения — актуальные в локальном Ollama.
+# Модели по умолчанию для сравнения — production VLM (gemma4 снята: хуже accuracy/wall).
 DEFAULT_MODELS = [
-    "gemma4:26b",
+    "qwen3-vl:8b-instruct",
 ]
 
 # Все модели, которые нужно выгружать перед запуском очередной —
@@ -280,7 +280,11 @@ def run_model(model: str, skip_synthetic: bool = False, timeout: int = 7200) -> 
 
     env = os.environ.copy()
     env["VLM_MODEL"] = model
-    env["TEXT_MODEL"] = model
+    # OCR первой ступени — та же модель (чистый замер VLM/OCR).
+    env["OCR_MODEL"] = model
+    # TEXT_MODEL НЕ перезаписываем: структурирование text-layer/OCR-текста должно
+    # оставаться на стабильной text-модели из .env/config (иначе бенч смешивает
+    # vision- и structure-эффекты). Явно задать: TEXT_MODEL=... env перед запуском.
     # Принудительно localhost — нативная Windows Ollama (модуль читает OLLAMA_URL).
     env["OLLAMA_URL"] = "http://localhost:11434"
     # pytest на Windows пишет stdout в cp1251; форсируем UTF-8 для корректного
@@ -306,8 +310,9 @@ def run_model(model: str, skip_synthetic: bool = False, timeout: int = 7200) -> 
     print(f"\n{'=' * 70}")
     print(f"[BENCH] Модель: {model}")
     print(f"[BENCH] Команда: {' '.join(cmd)}")
-    text_model = env.get("TEXT_MODEL", "<default>")
-    print(f"[BENCH] VLM_MODEL={model} TEXT_MODEL={text_model}")
+    text_model = env.get("TEXT_MODEL", "<from config>")
+    ocr_model = env.get("OCR_MODEL", model)
+    print(f"[BENCH] VLM_MODEL={model} OCR_MODEL={ocr_model} TEXT_MODEL={text_model}")
     print(f"{'=' * 70}", flush=True)
 
     # Вывод pytest перенаправляем в файл — capture_output на Windows падает

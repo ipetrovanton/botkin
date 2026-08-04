@@ -16,6 +16,17 @@ from botkin.normalize.units import canonical_unit
 log = logging.getLogger(__name__)
 
 _UNIT_PARENS_RE = re.compile(r"\([^)]*\)")
+# OCR/LLM иногда кладёт качественный результат в unit: «Отрицательный КП» → «КП».
+_UNIT_QUAL_PREFIX_RE = re.compile(
+    r"^(?:"
+    r"отрицательн\w*|положительн\w*|"
+    r"negativ\w*|positiv\w*|"
+    r"не\s+обнаружен\w*|не\s+обнар\.?"
+    r")[\s:]+",
+    re.IGNORECASE,
+)
+# Артефакты compact/markdown: «| 10⁹/л |» → «10⁹/л».
+_UNIT_PIPE_RE = re.compile(r"^\s*\|\s*(.+?)\s*\|\s*$")
 _FUZZY_UNIT_THRESHOLD = 85
 
 
@@ -26,8 +37,23 @@ def get_normalizer() -> AnalyteNormalizer:
 
 
 def strip_unit_explanations(unit: str) -> str:
-    """Убирает пояснения из unit: '% (алгоритм ROMA)' → '%'."""
-    cleaned = _UNIT_PARENS_RE.sub("", unit).strip()
+    """Убирает пояснения и OCR-мусор из unit: '% (алгоритм ROMA)' → '%'.
+
+    Также:
+    - качественные префиксы («Отрицательный КП» → «КП»);
+    - pipe-обёртки compact/markdown («| г/л |» → «г/л»).
+    """
+    cleaned = unit.strip()
+    pipe = _UNIT_PIPE_RE.match(cleaned)
+    if pipe:
+        cleaned = pipe.group(1).strip()
+    cleaned = _UNIT_PARENS_RE.sub("", cleaned).strip()
+    # Повторяем: «Отрицательный  Отрицательный КП» → «КП».
+    for _ in range(3):
+        stripped = _UNIT_QUAL_PREFIX_RE.sub("", cleaned).strip()
+        if stripped == cleaned:
+            break
+        cleaned = stripped
     return cleaned if cleaned else unit
 
 
@@ -93,6 +119,13 @@ def correct_units(rows: list[LabResult]) -> list[LabResult]:
         if not row.unit_raw:
             row.unit_raw = row.unit
 
+        # Сначала детерминированная зачистка (скобки, качественный префикс, pipes) —
+        # работает даже без матча в ФСЛИ (паразиты «Отрицательный КП», markdown-юниты).
+        cleaned = strip_unit_explanations(row.unit)
+        if cleaned != row.unit:
+            row.unit = cleaned
+            corrected_count += 1
+
         match = normalizer.correct(row.analyte_name)
         if match.status == "matched" and match.expected_units:
             fixed = correct_unit_against_registry(row.unit, match.expected_units)
@@ -101,11 +134,6 @@ def correct_units(rows: list[LabResult]) -> list[LabResult]:
                 corrected_count += 1
             elif fixed:
                 row.unit = fixed
-        else:
-            cleaned = strip_unit_explanations(row.unit)
-            if cleaned != row.unit:
-                row.unit = cleaned
-                corrected_count += 1
 
     if corrected_count:
         log.info("[UNIT_CORRECTION] Исправлено единиц: %d/%d", corrected_count, len(rows))

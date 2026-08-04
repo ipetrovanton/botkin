@@ -22,6 +22,30 @@ def test_strip_parenthetical_explanation():
     assert _strip_unit_explanations("(+)") == "(+)"
 
 
+def test_strip_qualitative_prefix_from_unit():
+    """Качественный результат, ошибочно попавший в unit (e2e sample_003)."""
+    assert _strip_unit_explanations("Отрицательный КП") == "КП"
+    assert _strip_unit_explanations("отрицательный  КП") == "КП"
+    assert _strip_unit_explanations("Положительный %") == "%"
+
+
+def test_strip_pipe_wrapped_unit():
+    """Markdown/compact-артефакт: «| г/л |»."""
+    assert _strip_unit_explanations("| 10⁹/л |") == "10⁹/л"
+    assert _strip_unit_explanations("| г/л |") == "г/л"
+
+
+def test_correct_units_strips_qual_prefix_without_registry():
+    rows = [LabResult(
+        analyte_name="Неизвестный паразит IgG",
+        value_num=0.1,
+        unit="Отрицательный КП",
+    )]
+    _correct_units(rows)
+    assert rows[0].unit == "КП"
+    assert rows[0].unit_raw == "Отрицательный КП"
+
+
 def test_correct_unit_superscript_broken():
     fixed = _correct_unit_against_registry("10^1   2/л", ("10^12/л",))
     assert fixed is not None

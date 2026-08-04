@@ -29,6 +29,10 @@ _ANDROFLOR_RETRY_LONG_SIDE = 1264
 # выбираем результат с максимальным числом распарсенных строк.
 _ANDROFLOR_VOTING_TRIES = 3
 
+# Early-exit: полная таблица Андрофлор ~20 строк. Если voting уже набрал столько —
+# дальнейшие попытки не улучшают recall, только жгут GPU (qwen3-vl: ~15–20 с/вызов).
+_ANDROFLOR_FULL_ROWS = 18
+
 
 def androflor_voting(
     b64_images: list[str],
@@ -40,7 +44,8 @@ def androflor_voting(
 
     PaddleOCR-VL стохастичен — один прогон даёт 2 строки, другой 11. Делаем N дополнительных
     вызовов с чередованием task-токенов и разрешений, выбираем результат с максимальным числом
-    распарсенных строк. Возвращает лучший набор строк (≥ initial_rows по длине).
+    распарсенных строк. Early-exit при наборе «полной» таблицы (≥ _ANDROFLOR_FULL_ROWS).
+    Возвращает лучший набор строк (≥ initial_rows по длине).
     """
     if len(initial_rows) >= _ANDROFLOR_MIN_ROWS:
         return initial_rows
@@ -61,6 +66,13 @@ def androflor_voting(
             )
             if len(vote_rows) > len(best_rows):
                 best_rows = vote_rows
+            # Полная таблица — дальше не голосуем (скорость без потери recall).
+            if len(best_rows) >= _ANDROFLOR_FULL_ROWS:
+                log.info(
+                    "[ANDROFLOR_VOTE_EARLY_EXIT] Doc: '%s' | строк=%d ≥ %d — стоп",
+                    doc_name, len(best_rows), _ANDROFLOR_FULL_ROWS,
+                )
+                break
         except Exception as e:  # noqa: BLE001
             log.warning("[ANDROFLOR_VOTE] Doc: '%s' | попытка %d упала: %s", doc_name, i + 1, e)
     if len(best_rows) > len(initial_rows):

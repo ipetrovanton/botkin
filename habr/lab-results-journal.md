@@ -3189,3 +3189,118 @@ OCR-мусор или перепутанный контент между док�
 ### Итог
 15 expected-файлов приведены к фактическому содержанию бланков. e2e-критичны в основном числовые analytes (003/010) и doc_type для JPG.
 
+
+
+## Итерация 37: e2e-бенч qwen3-vl vs gemma4 — скорость, точность, варианты оптимизации
+
+### Проблема
+Нужно прогнать полный e2e-флоу на актуальном корпусе (34 документа) и предложить
+варианты ускорения и повышения точности для `qwen3-vl:8b-instruct` и семейства
+`gemma4` на железе M3 Max 36 GB (Ollama, macOS).
+
+### Диагноз (текущий пайплайн)
+
+Пути извлечения (`src/botkin/llm/extract.py`):
+1. **text_layer** (цифровой PDF) → `TEXT_MODEL` compact → verbatim/completeness_guard
+2. **OCR-primary** (скан/фото/растровая страница) → free-text OCR (`OCR_MODEL`) →
+   structure_text → optional structured VLM fallback
+3. **Доменные ветки**: Андрофлор (parser + voting), СИБР (special OCR + voting)
+
+Факторы стоимости:
+- `config.json`: `image.extract_long_side=2200` (выше дефолта 1280) → больше vision-токенов
+- `bench_models.py` ставит `TEXT_MODEL=VLM_MODEL` — при gemma text-структурирование
+  идёт тяжёлой vision-моделью
+- Ollama `ps` показывает CONTEXT=32768 при запросах с `num_ctx=8192` — модель часто
+  живёт с раздутым KV-cache
+- Voting (`_ANDROFLOR_VOTING_TRIES=3`, `_SIBR_VOTING_TRIES=3`) умножает вызовы на hard-кейсах
+- У gemma: runaway generation (sample_007: out=9207 tok, extract 391s)
+
+### Решение (замер, без правок кода)
+
+Команда:
+```bash
+uv run python scripts/bench/bench_models.py \
+  --models qwen3-vl:8b-instruct gemma4:26b gemma4:latest --skip-synthetic
+```
+
+| Модель | PASS | FAIL | values matched | avg s/doc | wall | VRAM |
+|--------|------|------|----------------|-----------|------|------|
+| **qwen3-vl:8b-instruct** | **34/34** | 0 | **327/327 (100%)** | **17.6** | 601s | 7.8 GB |
+| gemma4:latest (≈12B) | 27/34 | 7 | 289/327 (88.4%) | 64.1 | 2179s | 9.6 GB |
+| gemma4:26b | 26/34 | 8 | 260/327 (79.5%) | 100.1 | 3407s | 17.0 GB |
+
+Recall по документам с числовой разметкой (18 docs): qwen **1.000**, gemma4:latest 0.918,
+gemma4:26b 0.819. Precision «в среднем» у qwen 0.83 — из-за EXTRA-строк (лишние показатели),
+не из-за пропусков эталона.
+
+**FAIL gemma4:26b:** 001, 003, 006(0/20 Андрофлор), 011(0/20), 012, 013, 016(СИБР), 019.
+**FAIL gemma4:latest:** 006(2/20), 011, 012, 016, 019 + misclassify 028/030 → unknown.
+
+Тяжёлые для qwen (всё PASS): 016 СИБР 61s, 011 56s, 012 45s, 006 45s.
+У gemma те же + runaway (007 438s, 018 383s, 006 545s).
+
+Логи: `bench_qwen3-vl_8b-instruct.log`, `bench_gemma4_26b.log`, `bench_gemma4_latest.log`.
+Отчёт: `benchmarks/models_comparison_2026-08-03.md`.
+
+### Варианты оптимизации (ранжировано)
+
+**Скорость (qwen, production-путь):**
+1. Разделить `TEXT_MODEL` (лёгкий text-only, напр. `qwen3:8b`) от `VLM_MODEL` — не
+   гонять vision-модель на text-layer/structure.
+2. `OCR_MODEL=glm-ocr` (2.2 GB, уже в Ollama) для первой ступени + qwen на classify/fallback.
+3. Снизить `IMAGE_EXTRACT_LONG_SIDE` 2200→1280/1600 (A/B на e2e).
+4. Early-exit voting: не делать 3 OCR-попытки, если уже ≥ порога строк.
+5. Согласовать реальный `num_ctx` Ollama с конфигом (избежать 32k KV).
+6. Параллель страниц multipage (осторожно с unified memory).
+7. MLX-бэкенд на M3 Max (`LLM_BACKEND=mlx`).
+
+**Точность:**
+1. Оставить qwen3-vl как production VLM — gemma4 сейчас не замена (recall/pass).
+2. Пост-фильтр EXTRA: ФСЛИ-score + verbatim (источник текста).
+3. Unit-cleanup: «Отрицательный КП»→КП; strip `| unit |` артефактов gemma.
+4. Model-specific OCR-промпт для Lg-нотаций (Андрофлор) / gemma.
+5. Каскад: qwen primary; gemma только consensus на low-confidence.
+6. Доменные парсеры ОАК/ОАМ (как Андрофлор/СИБР) — меньше LLM-шума.
+7. Для gemma: `VLM_DISABLE_THINKING=1`, жёсткий `num_predict`, не ставить как TEXT_MODEL.
+
+### Итог
+Живой прогон 2026-08-03: **qwen3-vl:8b-instruct = 34/34, 100% values, 17.6s/doc**.
+Gemma4:latest/26b — 79–88% values, 3.5–5.7× медленнее, ломают Андрофлор/СИБР и
+частично multipage. Рекомендация: не менять VLM на gemma; ускорять двухступенчатый
+пайплайн (OCR_MODEL + TEXT_MODEL) и post-process precision.
+
+
+
+## Итерация 38: pipeline speed/accuracy — ветка feat/pipeline-speed-accuracy
+
+### Проблема
+Ускорить распознавание без потери e2e-качества (34/34, 327/327 values). Gemma4 снята.
+
+### Решение по фазам (TDD + e2e gate)
+
+**Фаза 1 — код (качество-safe):**
+- `unit_correction`: strip qualitative prefixes («Отрицательный КП»→КП) + pipe-units
+- `androflor_ocr` / `sibr_ocr`: early-exit voting при полной таблице
+- `bench_models`: не перезаписывать TEXT_MODEL; default model = qwen3-vl
+- `config.json`: compact_output=true, text max_tokens 1024→2048
+
+E2E phase1 (qwen, long_side=2200): **34/34 PASS**, avg **16.9 s/doc** (baseline 17.6),
+sample_003 unit-mismatch → 0. Log: `bench_phase1_qwen.log`.
+
+**Фаза 2 — OCR_MODEL=glm-ocr:latest (A/B):**
+E2E: **32/34 FAIL** sample_011 (1/20, галлюцинации) + sample_016 СИБР (31/63).
+**REJECT** — не включать в default. Log: `bench_phase2_glm_ocr.log`.
+
+**Фаза 3 — IMAGE_EXTRACT_LONG_SIDE=1600:**
+E2E: **34/34 PASS**, avg **13.3 s/doc** (−21% vs phase1, −24% vs baseline 17.6),
+wall 7.5 мин. Recall 1.0 на всех value-docs. **ACCEPT** → `config.json` = 1600.
+Log: `bench_phase3_long1600.log`.
+
+### Unit
+`tests/test_unit_correction.py` + `tests/test_androflor_voting.py` + related: 110 passed.
+ruff clean.
+
+### Итог
+Production: qwen3-vl:8b-instruct, extract_long_side=1600, unit cleanup, early-exit voting.
+Не в default: gemma4, glm-ocr. Ветка `feat/pipeline-speed-accuracy`, e2e gate без регрессий.
+

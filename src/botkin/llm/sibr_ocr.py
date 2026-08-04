@@ -16,7 +16,10 @@ from botkin.parsing.sibr import parse_sibr_ocr
 log = logging.getLogger(__name__)
 
 # Минимум строк: полная таблица СИБР даёт 8 временных точек × 4 газа = 32 показателя.
+# Ниже — не принимаем блок (слишком много пропусков).
 _SIBR_MIN_ROWS = 16
+# Early-exit voting: «почти полная» таблица — дальше не крутим GPU.
+_SIBR_FULL_ROWS = 28
 
 # СИБР-таблица тоже читается одним VLM-вызовом при temperature=0.0, но GPU-инференс
 # не гарантирует побитовую детерминированность — редкий сбой формата/цифры роняет
@@ -62,6 +65,9 @@ def sibr_ocr_with_voting(b64_images: list[str], doc_name: str) -> list[LabResult
     """
     sibr_text = call_sibr_ocr(b64_images, doc_name)
     rows = parse_sibr_ocr(sibr_text)
+    # Уже почти полная таблица — voting не нужен.
+    if len(rows) >= _SIBR_FULL_ROWS:
+        return rows
     if len(rows) < _SIBR_MIN_ROWS:
         for i in range(_SIBR_VOTING_TRIES):
             try:
@@ -73,7 +79,8 @@ def sibr_ocr_with_voting(b64_images: list[str], doc_name: str) -> list[LabResult
                 )
                 if len(vote_rows) > len(rows):
                     rows = vote_rows
-                if len(rows) >= _SIBR_MIN_ROWS:
+                # Early-exit: полный набор или достаточный минимум после улучшения.
+                if len(rows) >= _SIBR_FULL_ROWS or len(rows) >= _SIBR_MIN_ROWS:
                     break
             except Exception as e:  # noqa: BLE001
                 log.warning("[SIBR_VOTE] Doc: '%s' | попытка %d упала: %s", doc_name, i + 1, e)
