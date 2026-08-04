@@ -516,22 +516,17 @@ def compare_doctor_reports(expected: dict, reports: list[object]) -> ReportConte
             )
 
     # --- visit_date ---
-    # Дата на МРТ/ЭКГ часто в шапке и VLM её пропускает → отсутствие = soft.
-    # Неверная дата (модель выдумала другой день) — hard-missing.
+    # Дата исследования/приёма — hard: на МРТ есть «Дата исследования: DD.MM.YYYY»,
+    # extract обязан добрать (VLM + salvage OCR). Неверная или пустая — missing.
     exp_visit = expected.get("visit_date")
     got_visit = getattr(got, "visit_date", None)
     if exp_visit:
         if got_visit is not None and _dates_equal(exp_visit, got_visit):
             diff.matched.append("visit_date")
-        elif got_visit is not None:
+        else:
             diff.missing.append("visit_date")
             diff.field_mismatches.append(
                 FieldMismatch("doctor_report", "visit_date", exp_visit, got_visit)
-            )
-        else:
-            diff.soft_missing.append("visit_date")
-            diff.field_mismatches.append(
-                FieldMismatch("doctor_report", "visit_date", exp_visit, None)
             )
 
     # --- medications (hard recall) ---

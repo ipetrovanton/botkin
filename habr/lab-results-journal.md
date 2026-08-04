@@ -3357,3 +3357,20 @@ E2E для JPG-заключений (021–035) проверял только `d
 ### Итог
 Заключения врача в e2e сверяются по содержимому. unknown-рецепты (022/024/025) — по-прежнему
 только doc_type (extract не для unknown).
+
+## Итерация 41: МРТ sample_029 — visit_date 17.11.2024 обязательна
+
+### Проблема
+На бланке МРТ явно «Дата исследования: 17.11.2024», но VLM часто оставлял
+visit_date=null. E2e сначала сделали missing date soft — неправильно: дата есть.
+
+### Решение
+1. `llm/visit_date.py`: парсер «Дата исследования/приёма» (не дата рождения).
+2. `run_doctor_report` → `_enrich_visit_date`: salvage из полей отчёта, иначе OCR.
+3. Промпт doctor_report: явный пример «Дата исследования: 17.11.2024».
+4. e2e: missing visit_date снова hard.
+
+### Проверка
+- unit: test_visit_date + e2e_report
+- live extract sample_029 → visit_date=2024-11-17
+- e2e sample_029: PASS 4/4 (diagnosis, doctor, visit_date, rec soft)

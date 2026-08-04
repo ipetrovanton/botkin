@@ -405,4 +405,38 @@ def run_analysis(source_path: Path) -> list[LabResult]:
 
 def run_doctor_report(source_path: Path) -> list[DoctorReport]:
     messages = _build_messages(DOCTOR_REPORT_VLM_SYSTEM, DOCTOR_REPORT_INSTRUCTION, source_path)
-    return _call_vlm(messages, DoctorReports, source_path.name, "doctor_report").results
+    reports = _call_vlm(messages, DoctorReports, source_path.name, "doctor_report").results
+    return [_enrich_visit_date(r, source_path) for r in reports]
+
+
+def _enrich_visit_date(report: DoctorReport, source_path: Path) -> DoctorReport:
+    """Добирает visit_date, если VLM пропустила «Дата исследования» (часто МРТ/ЭКГ).
+
+    1) Ищем дату в уже извлечённых текстовых полях.
+    2) Если пусто — free-text OCR картинки + парсер меток (не дата рождения).
+    """
+    from botkin.llm.visit_date import extract_visit_date_from_text, report_text_blob
+
+    if report.visit_date is not None:
+        return report
+
+    dt = extract_visit_date_from_text(report_text_blob(report))
+    if dt is None:
+        try:
+            b64 = _prepare_b64(source_path)
+            if b64:
+                ocr_text = _call_image_ocr(b64, f"{source_path.name}#visit_date")
+                dt = extract_visit_date_from_text(ocr_text)
+        except Exception as e:  # noqa: BLE001 — salvage best-effort
+            log.warning(
+                "[VISIT_DATE_OCR_FAILED] Doc: '%s' | %s", source_path.name, e,
+            )
+            dt = None
+
+    if dt is not None:
+        report.visit_date = dt
+        log.info(
+            "[VISIT_DATE_SALVAGED] Doc: '%s' | visit_date=%s",
+            source_path.name, dt.date().isoformat(),
+        )
+    return report

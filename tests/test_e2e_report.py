@@ -166,13 +166,12 @@ def test_compare_doctor_reports_matches_core_fields():
     assert any(s.startswith("recommendations:") for s in diff.soft_missing)
 
 
-def test_compare_doctor_reports_missing_visit_date_is_soft():
-    """Пропуск даты (МРТ) — soft; неверная дата — hard."""
+def test_compare_doctor_reports_missing_visit_date_is_hard():
+    """Дата исследования на МРТ обязательна: пустая или неверная — hard-missing."""
     expected = {"diagnosis": "Очаги в белом веществе", "visit_date": "17.11.2024"}
     got_empty = [_FakeDoctorReport(diagnosis="Очаги в белом веществе сосудистого генеза")]
-    soft = er.compare_doctor_reports(expected, got_empty)
-    assert "visit_date" in soft.soft_missing
-    assert "visit_date" not in soft.missing
+    empty = er.compare_doctor_reports(expected, got_empty)
+    assert "visit_date" in empty.missing
 
     got_wrong = [_FakeDoctorReport(
         diagnosis="Очаги в белом веществе",
@@ -180,6 +179,13 @@ def test_compare_doctor_reports_missing_visit_date_is_soft():
     )]
     hard = er.compare_doctor_reports(expected, got_wrong)
     assert "visit_date" in hard.missing
+
+    got_ok = [_FakeDoctorReport(
+        diagnosis="Очаги в белом веществе",
+        visit_date="17.11.2024",
+    )]
+    ok = er.compare_doctor_reports(expected, got_ok)
+    assert "visit_date" in ok.matched
 
 
 def test_compare_doctor_reports_missing_diagnosis_fails_hard():
