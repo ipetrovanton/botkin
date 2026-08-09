@@ -1,20 +1,26 @@
-# Handoff: feat/pipeline-speed-accuracy
+# Handoff: feat/queue-and-lifestyle-recs
 
-**Ветка:** `feat/pipeline-speed-accuracy`
+**Ветка:** `feat/queue-and-lifestyle-recs` (от master; feat/pipeline-speed-accuracy влита в master ff)
 
 **Коммиты:**
-- `56e6309` — long_side 1600, unit cleanup, early-exit voting
-- `97ef735` — unit/ref swap + noise filter
-- `6e045c0` — e2e doctor_report content (not only doc_type)
+- `76f408f` — очередь VLM с видимой позицией (pipeline/queue.py, queue_position в /status, UI)
+- `aad23de` — lifestyle-рекомендации uncensored-моделью (recommend_lifestyle, /api/rag/lifestyle, кнопка UI)
+- статья habr/botkin-habr-article.md: цифры обновлены (13–14 с/док, 640+ тестов)
 
-**E2E сейчас:** 34/34 PASS (analysis + doctor_report content), wall ~11.2 мин.
+**Тесты:** 611 passed (`uv run pytest -m "not llm" -k "not test_e2e_reasoning" -q`), ruff clean.
+На Mac test_e2e_reasoning виснет без Ollama — исключать через -k.
 
-**doctor_report e2e:**
-- hard: diagnosis, doctor_name, medications (recall≥0.5), wrong visit_date
-- soft: recommendations, anamnesis, missing visit_date
-- unknown 022/024/025: still doc_type only
+**Что сделано в этой сессии (2026-08-09):**
+- pipeline/queue.py: LlmQueue поверх Semaphore(1), position()/snapshot(), тесты в test_llm_queue.py
+- /api/documents/{id}/status → + queue_position, queue_waiting; app.js показывает «В очереди: N-й»
+- rag/recommend.py: recommend_lifestyle() + _reports_context (диагнозы врача в контекст)
+- llm/prompts/lifestyle_recommend.md: 4 раздела (образ жизни/нагрузки/препараты/взаимодействия)
+- config: rag.lifestyle_model / RAG_LIFESTYLE_MODEL, default huihui_ai/Qwen3.6-abliterated:27b
+- тесты: tests/test_lifestyle_recommend.py (4), фактура habr/2026-08-09--queue-and-lifestyle-recs.md
 
-**Следующее (опционально):**
-- phase 9: Ollama num_ctx, multipage parallel
-- e2e for unknown prescriptions (medications) if product wants
-- push branch / PR
+**Следующий шаг:**
+1. Живой прогон lifestyle на GPU: `curl -X POST localhost:8000/api/rag/lifestyle -H "X-Telegram-User-Id: <id>"`
+   (нужна Ollama + huihui_ai/Qwen3.6-abliterated:27b)
+2. e2e-прогон 34 доков на GPU для gate перед merge в master
+3. Merge feat/queue-and-lifestyle-recs → master, push
+4. Техдолг: персистентность фоновых задач после рестарта; unknown-рецепты

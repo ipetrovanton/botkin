@@ -18,9 +18,9 @@ import time
 
 from botkin.config import (
     EXT_ASTROLOGY_ENABLED, EXT_DEFAULT_LAT, EXT_DEFAULT_LON, EXT_GEOMAGNETIC_ENABLED,
-    EXT_WEATHER_ENABLED, OLLAMA_KEEP_ALIVE, RAG_LIFESTYLE_MODEL, RAG_RECOMMEND_MODEL,
-    RAG_RECOMMEND_NUM_CTX, RAG_RECOMMEND_NUM_PREDICT, RAG_TOP_K, RAG_WEB_ENABLED,
-    RAG_WEB_RESULTS,
+    EXT_WEATHER_ENABLED, OLLAMA_KEEP_ALIVE, RAG_LIFESTYLE_MODEL,
+    RAG_LIFESTYLE_NUM_PREDICT, RAG_RECOMMEND_MODEL, RAG_RECOMMEND_NUM_CTX,
+    RAG_RECOMMEND_NUM_PREDICT, RAG_TOP_K, RAG_WEB_ENABLED, RAG_WEB_RESULTS,
 )
 from botkin.db.connection import get_conn
 from botkin.clinical.facts import build_lab_facts, render_lab_facts
@@ -292,19 +292,25 @@ def recommend_lifestyle(
     (RAG_LIFESTYLE_MODEL) с промптом lifestyle_recommend: образ жизни, физнагрузки,
     приём препаратов, межлекарственные взаимодействия.
     """
-    num_predict = num_predict or RAG_RECOMMEND_NUM_PREDICT
+    num_predict = num_predict or RAG_LIFESTYLE_NUM_PREDICT
     chunks: list[dict] = []
     seen: set[str] = set()
-    for query in _LIFESTYLE_QUERIES:
-        for c in retriever.search(query, user_id=user_id, top_k=RAG_TOP_K // 2 or 1):
-            if c["ref_key"] not in seen:
-                seen.add(c["ref_key"])
-                chunks.append(c)
-    for name in _extract_med_mentions(user_id)[:8]:
-        for c in retriever.search(name, sources=["drugs"], user_id=user_id, top_k=2):
-            if c["ref_key"] not in seen:
-                seen.add(c["ref_key"])
-                chunks.append(c)
+    # RAG-добор вспомогательный: без embed-модели/индекса рекомендация всё равно
+    # строится по картине пациента, а не падает целиком.
+    try:
+        for query in _LIFESTYLE_QUERIES:
+            for c in retriever.search(query, user_id=user_id, top_k=RAG_TOP_K // 2 or 1):
+                if c["ref_key"] not in seen:
+                    seen.add(c["ref_key"])
+                    chunks.append(c)
+        for name in _extract_med_mentions(user_id)[:8]:
+            for c in retriever.search(name, sources=["drugs"], user_id=user_id, top_k=2):
+                if c["ref_key"] not in seen:
+                    seen.add(c["ref_key"])
+                    chunks.append(c)
+    except Exception as e:
+        log.warning("RAG-добор недоступен (%s) — lifestyle без справочных чанков", e)
+        chunks = []
 
     context_blocks = [f"[{c['source']}] {c['text']}" for c in chunks]
     user_msg = f"КАРТИНА ПАЦИЕНТА:\n{_patient_context(user_id)}"

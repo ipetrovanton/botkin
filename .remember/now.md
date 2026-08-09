@@ -35,3 +35,4 @@ qwen2.5vl:7b исключена из покрытия (76.3%, слишком с�
 2026-08-03 19:08 | feat/pipeline-speed-accuracy | phase1+3 ship: long_side=1600 e2e 34/34 13.3s; glm-ocr reject
 2026-08-04 10:17 | feat/pipeline-speed-accuracy | commit 56e6309 pipeline speed e2e 34/34 13.3s
 2026-08-04 12:09 | feat/pipeline-speed-accuracy | 97ef735 phase4/5 reject; phase6/7 ship e2e 34/34 13.4s
+2026-08-09 10:15 | feat/queue-and-lifestyle-recs | queue+lifestyle ship: 611 passed, ruff clean, статья обновлена (13-14с, 640+ тестов)

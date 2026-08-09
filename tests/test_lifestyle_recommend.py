@@ -103,6 +103,32 @@ def test_recommend_lifestyle_calls_model_with_full_picture(monkeypatch, tmp_path
     assert "Лозартан" in user_msg
 
 
+def test_recommend_lifestyle_survives_broken_retriever(monkeypatch, tmp_path):
+    """RAG-индекс недоступен (нет bge-m3) — рекомендация строится по картине пациента."""
+    _client(monkeypatch, tmp_path)
+    from botkin.db.repos import UserRepo
+    with botkin.db.connection.get_conn() as conn:
+        UserRepo(conn).get_or_create(int(TG))
+        uid = UserRepo(conn).get_id(int(TG))
+    _seed_reports(uid)
+
+    import botkin.rag.recommend as recommend
+    importlib.reload(recommend)
+
+    def broken_search(*a, **kw):
+        raise OSError("HTTP Error 404: Not Found")
+
+    monkeypatch.setattr(recommend.retriever, "search", broken_search)
+    monkeypatch.setattr(recommend, "_chat",
+                        lambda *a, **kw: _fake_response("## Образ жизни\nОК."))
+    monkeypatch.setattr(recommend, "get_raw_client",
+                        lambda timeout=None: SimpleNamespace(with_options=lambda **kw: None))
+
+    result = recommend.recommend_lifestyle(uid)
+    assert result["answer"].startswith("## Образ жизни")
+    assert result["chunks"] == []
+
+
 def test_api_lifestyle_endpoint(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     import botkin.rag.recommend as recommend

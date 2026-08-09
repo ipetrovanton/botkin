@@ -39,6 +39,22 @@ def test_build_lab_facts_accepts_database_rows():
     assert facts[0].reference == "120–150"
 
 
+def test_build_lab_facts_accepts_real_sqlite_rows():
+    """sqlite3.Row не имеет .get() — реальные строки БД не должны ронять функцию."""
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE t (name TEXT, value_num REAL, unit TEXT,"
+        " ref_low REAL, ref_high REAL, ref_text TEXT)")
+    conn.execute("INSERT INTO t VALUES ('Ферритин', 8.0, 'нг/мл', 10.0, 120.0, NULL)")
+    rows = conn.execute("SELECT * FROM t").fetchall()
+    facts = build_lab_facts(rows)
+    assert facts[0].name == "Ферритин"
+    assert facts[0].status == "low"
+
+
 def test_build_lab_facts_skips_unnamed_rows():
     assert build_lab_facts([{"value_num": 10, "ref_high": 5}]) == []
 

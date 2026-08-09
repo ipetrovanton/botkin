@@ -77,6 +77,8 @@ def build_lab_facts(rows: Iterable[Mapping[str, object]]) -> list[LabFact]:
     """Преобразует строки БД/API в детерминированные лабораторные факты."""
     facts: list[LabFact] = []
     for row in rows:
+        if not hasattr(row, "get"):  # sqlite3.Row: есть [key], но нет .get()
+            row = dict(row)
         name = str(row.get("name") or row.get("analyte_name") or "").strip()
         if not name:
             continue
