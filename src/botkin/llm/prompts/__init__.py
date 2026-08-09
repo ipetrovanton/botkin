@@ -76,6 +76,7 @@ _analysis_text_compact = load_prompt("analysis_text_compact")
 _image_ocr = load_prompt("image_ocr")
 _sibr_ocr = load_prompt("sibr_ocr")
 _rag_recommend = load_prompt("rag_recommend")
+_lifestyle_recommend = load_prompt("lifestyle_recommend")
 
 # Обратная совместимость: плоские константы (как раньше в прежнем llm/prompts.py).
 CLASSIFY_VLM_SYSTEM = _classify.text
@@ -96,6 +97,8 @@ SIBR_OCR_SYSTEM = _sibr_ocr.system
 
 # RAG-рекомендации пациенту.
 RAG_RECOMMEND_SYSTEM = _rag_recommend.text
+# Комплексные lifestyle-рекомендации (uncensored-модель).
+LIFESTYLE_RECOMMEND_SYSTEM = _lifestyle_recommend.text
 
 # Версия для лога вызовов classify/extract (основной VLM-пайплайн: классификация +
 # извлечение). Берём самую свежую дату среди core-промтов пайплайна.

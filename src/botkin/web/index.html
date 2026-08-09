@@ -774,6 +774,9 @@
                     placeholder="Например: что означает мой повышенный холестерин и на что обратить внимание?"></textarea>
           <button class="btn btn-primary" style="margin-top:10px" @click="askAssistant()" :disabled="assistant.busy"
                   x-text="assistant.busy ? 'Думаю…' : 'Спросить'"></button>
+          <button class="btn" style="margin-top:10px;margin-left:8px" @click="askLifestyle()" :disabled="assistant.busy"
+                  x-text="assistant.busy ? 'Думаю…' : 'Рекомендации по образу жизни'"
+                  title="Комплексный разбор всей картины: анализы, заключения, препараты, носимые устройства"></button>
           <div class="panel" style="margin-top:12px" x-show="assistant.answer">
             <div class="report-diagnosis" style="white-space:pre-wrap" x-text="assistant.answer"></div>
             <div class="muted" style="margin-top:10px;font-size:12px" x-show="assistant.chunks.length"

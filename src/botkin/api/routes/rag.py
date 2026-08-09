@@ -80,6 +80,17 @@ def recommend(req: RecommendRequest, user_id: int = Depends(get_user_id)) -> dic
         raise HTTPException(status_code=502, detail=f"LLM недоступна: {e}")
 
 
+@router.post("/lifestyle")
+def lifestyle(user_id: int = Depends(get_user_id)) -> dict:
+    """Комплексная lifestyle-рекомендация по всей картине пациента (uncensored-модель)."""
+    from botkin.rag.recommend import recommend_lifestyle
+    try:
+        return recommend_lifestyle(user_id)
+    except Exception as e:
+        log.exception("Lifestyle-рекомендация не удалась")
+        raise HTTPException(status_code=502, detail=f"LLM недоступна: {e}")
+
+
 _research_state: dict = {"state": "idle"}
 _research_lock = threading.Lock()
 

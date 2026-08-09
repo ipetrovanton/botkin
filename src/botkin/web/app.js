@@ -1223,6 +1223,17 @@ function cabinet() {
       } catch (e) { this.toast("Ассистент недоступен (проверьте Ollama)", "error"); console.error(e); }
       finally { this.assistant.busy = false; }
     },
+    // Комплексная lifestyle-рекомендация: без вопроса, по всей картине пациента.
+    async askLifestyle() {
+      this.assistant.busy = true;
+      this.assistant.answer = "";
+      try {
+        const data = await this.api("/api/rag/lifestyle", { method: "POST" });
+        this.assistant.answer = data?.answer || "Ответ пуст.";
+        this.assistant.chunks = data?.chunks || [];
+      } catch (e) { this.toast("Ассистент недоступен (проверьте Ollama)", "error"); console.error(e); }
+      finally { this.assistant.busy = false; }
+    },
     async ragReindex() {
       try {
         await this.api("/api/rag/reindex", { method: "POST" });

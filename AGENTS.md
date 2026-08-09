@@ -225,6 +225,8 @@ Ollama должна быть доступна по `OLLAMA_URL` (по умолч
 - `POST /api/rag/reindex` — индексация справочников ГРЛС/ФСЛИ в векторный индекс
 - `GET /api/rag/status` — статус индексации и число чанков
 - `POST /api/rag/recommend` — RAG-рекомендация (вопрос → контекст → LLM-ответ)
+- `POST /api/rag/lifestyle` — комплексная lifestyle-рекомендация по всей картине пациента
+  (анализы + заключения + препараты + носимые устройства; uncensored-модель `RAG_LIFESTYLE_MODEL`)
 - `POST /api/rag/research/update` — подгрузка публикаций PubMed в локальный индекс
 - `GET /api/rag/research/status` — статус обновления PubMed
 - `POST /api/rag/benchmark` — бенчмарк embedding-моделей (hit_rate, MRR, avg_distance)

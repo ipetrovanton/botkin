@@ -113,6 +113,9 @@ _DEFAULTS: dict = {
         "recommend_model": "qwen3:8b",
         "recommend_num_ctx": 8192,
         "recommend_num_predict": 2048,
+        # Мощная uncensored-модель для комплексных рекомендаций по образу жизни:
+        # медицинские темы без отказов (лучшая по бенчу habr/bench-health-report).
+        "lifestyle_model": "huihui_ai/Qwen3.6-abliterated:27b",
         # Живой веб-доступ модели: подмешивание веб-поиска и PubMed в контекст.
         "web_enabled": False,
         "web_results": 4,
@@ -330,6 +333,7 @@ class RagConfig(BaseModel):
     recommend_model: str
     recommend_num_ctx: int
     recommend_num_predict: int
+    lifestyle_model: str
     web_enabled: bool
     web_results: int
     research_tool: str
@@ -477,6 +481,7 @@ def _build_settings() -> Settings:
             recommend_model=setting("rag.recommend_model", "RAG_RECOMMEND_MODEL", str),
             recommend_num_ctx=setting("rag.recommend_num_ctx", "RAG_RECOMMEND_NUM_CTX", int),
             recommend_num_predict=setting("rag.recommend_num_predict", "RAG_RECOMMEND_NUM_PREDICT", int),
+            lifestyle_model=setting("rag.lifestyle_model", "RAG_LIFESTYLE_MODEL", str),
             web_enabled=setting("rag.web_enabled", "RAG_WEB_ENABLED", _as_bool),
             web_results=setting("rag.web_results", "RAG_WEB_RESULTS", int),
             research_tool=_get("rag.research.tool"),
@@ -660,6 +665,8 @@ RAG_TOP_K = settings.rag.top_k
 RAG_RECOMMEND_MODEL = settings.rag.recommend_model
 RAG_RECOMMEND_NUM_CTX = settings.rag.recommend_num_ctx
 RAG_RECOMMEND_NUM_PREDICT = settings.rag.recommend_num_predict
+# Мощная uncensored-модель для комплексных lifestyle-рекомендаций.
+RAG_LIFESTYLE_MODEL = settings.rag.lifestyle_model
 
 # Живой веб-доступ модели: веб-поиск + PubMed в контекст рекомендации.
 RAG_WEB_ENABLED = settings.rag.web_enabled

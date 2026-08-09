@@ -18,15 +18,16 @@ import time
 
 from botkin.config import (
     EXT_ASTROLOGY_ENABLED, EXT_DEFAULT_LAT, EXT_DEFAULT_LON, EXT_GEOMAGNETIC_ENABLED,
-    EXT_WEATHER_ENABLED, OLLAMA_KEEP_ALIVE, RAG_RECOMMEND_MODEL, RAG_RECOMMEND_NUM_CTX,
-    RAG_RECOMMEND_NUM_PREDICT, RAG_TOP_K, RAG_WEB_ENABLED, RAG_WEB_RESULTS,
+    EXT_WEATHER_ENABLED, OLLAMA_KEEP_ALIVE, RAG_LIFESTYLE_MODEL, RAG_RECOMMEND_MODEL,
+    RAG_RECOMMEND_NUM_CTX, RAG_RECOMMEND_NUM_PREDICT, RAG_TOP_K, RAG_WEB_ENABLED,
+    RAG_WEB_RESULTS,
 )
 from botkin.db.connection import get_conn
 from botkin.clinical.facts import build_lab_facts, render_lab_facts
 from botkin.db.repos import HealthRepo, PatientRepo
 from botkin.external import astrology, weather
 from botkin.llm.client import get_raw_client
-from botkin.llm.prompts import RAG_RECOMMEND_SYSTEM
+from botkin.llm.prompts import LIFESTYLE_RECOMMEND_SYSTEM, RAG_RECOMMEND_SYSTEM
 from botkin.rag import retriever, websearch
 
 log = logging.getLogger(__name__)
@@ -46,6 +47,13 @@ _RECENT_MEDS_SQL = """
     FROM doctor_reports
     WHERE user_id = ? AND medications_json IS NOT NULL
     ORDER BY visit_date DESC LIMIT 3
+"""
+
+_RECENT_REPORTS_SQL = """
+    SELECT diagnosis, recommendations_json, visit_date, doctor_name, department
+    FROM doctor_reports
+    WHERE user_id = ? AND (diagnosis IS NOT NULL OR recommendations_json IS NOT NULL)
+    ORDER BY visit_date DESC LIMIT 5
 """
 
 
@@ -95,6 +103,26 @@ def _profile_context(conn: sqlite3.Connection, user_id: int) -> str | None:
     return "\n".join(lines) if len(lines) > 1 else None
 
 
+def _reports_context(conn: sqlite3.Connection, user_id: int) -> str | None:
+    """Заключения врачей: диагнозы и рекомендации из последних визитов."""
+    rows = conn.execute(_RECENT_REPORTS_SQL, (user_id,)).fetchall()
+    if not rows:
+        return None
+    lines = ["Заключения врачей (последние визиты):"]
+    for r in rows:
+        parts = [p for p in (r["visit_date"], r["department"], r["doctor_name"]) if p]
+        head = ", ".join(str(p) for p in parts)
+        if r["diagnosis"]:
+            lines.append(f"- [{head}] Диагноз: {r['diagnosis']}")
+        try:
+            recs = json.loads(r["recommendations_json"] or "[]") or []
+        except (json.JSONDecodeError, TypeError):
+            recs = []
+        if recs:
+            lines.append(f"  Рекомендации врача: {'; '.join(str(x) for x in recs[:8])}")
+    return "\n".join(lines) if len(lines) > 1 else None
+
+
 def _patient_context(user_id: int) -> str:
     """Профиль/жалобы/препараты + отклонения анализов + назначения + носимые устройства."""
     parts: list[str] = []
@@ -117,6 +145,10 @@ def _patient_context(user_id: int) -> str:
                 continue
         if med_names:
             parts.append("Назначенные врачами лекарства: " + "; ".join(med_names[:15]))
+
+        reports_block = _reports_context(conn, user_id)
+        if reports_block:
+            parts.append(reports_block)
 
         health = HealthRepo(conn, user_id)
         since = str(dt.date.today() - dt.timedelta(days=14))
@@ -237,6 +269,71 @@ def recommend(
             "prompt_tokens": getattr(usage, "prompt_tokens", None),
             "completion_tokens": getattr(usage, "completion_tokens", None),
         } if usage else None,
+        "chunks": [
+            {"source": c["source"], "ref_key": c["ref_key"], "distance": c["distance"]}
+            for c in chunks
+        ],
+    }
+
+
+_LIFESTYLE_QUERIES = (
+    "рекомендации по образу жизни и физическим нагрузкам",
+    "взаимодействие лекарственных препаратов",
+)
+
+
+def recommend_lifestyle(
+    user_id: int, *, model: str | None = None, num_predict: int | None = None,
+) -> dict:
+    """Комплексная рекомендация по образу жизни без вопроса пациента.
+
+    Агрегирует все источники (анализы, заключения врачей, назначения, носимые
+    устройства, профиль, внешние факторы) и отдаёт их мощной uncensored-модели
+    (RAG_LIFESTYLE_MODEL) с промптом lifestyle_recommend: образ жизни, физнагрузки,
+    приём препаратов, межлекарственные взаимодействия.
+    """
+    num_predict = num_predict or RAG_RECOMMEND_NUM_PREDICT
+    chunks: list[dict] = []
+    seen: set[str] = set()
+    for query in _LIFESTYLE_QUERIES:
+        for c in retriever.search(query, user_id=user_id, top_k=RAG_TOP_K // 2 or 1):
+            if c["ref_key"] not in seen:
+                seen.add(c["ref_key"])
+                chunks.append(c)
+    for name in _extract_med_mentions(user_id)[:8]:
+        for c in retriever.search(name, sources=["drugs"], user_id=user_id, top_k=2):
+            if c["ref_key"] not in seen:
+                seen.add(c["ref_key"])
+                chunks.append(c)
+
+    context_blocks = [f"[{c['source']}] {c['text']}" for c in chunks]
+    user_msg = f"КАРТИНА ПАЦИЕНТА:\n{_patient_context(user_id)}"
+    if context_blocks:
+        user_msg += "\n\nВЫДЕРЖКИ ИЗ СПРАВОЧНИКОВ:\n" + "\n\n".join(context_blocks)
+    user_msg += (
+        "\n\nЗАДАЧА: составь комплексную рекомендацию по разделам "
+        "«Образ жизни», «Физические нагрузки», «Приём препаратов», «Взаимодействия»."
+    )
+    messages = [
+        {"role": "system", "content": LIFESTYLE_RECOMMEND_SYSTEM},
+        {"role": "user", "content": user_msg},
+    ]
+    the_model = model or RAG_LIFESTYLE_MODEL
+    client = get_raw_client(timeout=1800.0).with_options(max_retries=0)
+    t0 = time.perf_counter()
+    response = _chat(client, the_model, messages, num_predict)
+    text, reasoning = _split_message(response)
+    if not text:
+        log.info("Пустой content lifestyle-рекомендации — повтор с think=False")
+        response = _chat(client, the_model, messages, num_predict, think=False)
+        text, reasoning = _split_message(response)
+    elapsed = time.perf_counter() - t0
+    log.info("Lifestyle-рекомендация за %.1fs, чанков: %d", elapsed, len(chunks))
+    return {
+        "answer": text,
+        "reasoning": reasoning,
+        "model": the_model,
+        "elapsed_s": round(elapsed, 2),
         "chunks": [
             {"source": c["source"], "ref_key": c["ref_key"], "distance": c["distance"]}
             for c in chunks
