@@ -29,11 +29,10 @@ from botkin.pipeline.notifications import (
     classify_failed, document_processed, duplicate_document, extract_failed,
     notify_user, pipeline_failed,
 )
+from botkin.pipeline.queue import LLM_QUEUE
 from botkin.storage import open_local
 
 log = logging.getLogger("botkin.pipeline")
-
-LLM_SEMAPHORE = asyncio.Semaphore(1)
 
 
 @lru_cache(maxsize=1)
@@ -88,7 +87,7 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
         DocumentRepo(conn, user_id).set_status(document_id, "recognizing")
 
     # 2. Classify (VLM)
-    async with LLM_SEMAPHORE:
+    async with LLM_QUEUE.slot(document_id):
         try:
             result = await asyncio.to_thread(classify.run_vlm, source_path)
         except ClassificationError as e:
@@ -110,7 +109,7 @@ async def _run(document_id: int, telegram_user_id: int) -> None:
         DocumentRepo(conn, user_id).set_status(document_id, "normalizing")
 
     # 3. Extract (VLM)
-    async with LLM_SEMAPHORE:
+    async with LLM_QUEUE.slot(document_id):
         try:
             handler = _EXTRACTORS.get(doc_type)
             if handler is not None:

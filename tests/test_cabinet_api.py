@@ -115,7 +115,10 @@ def test_api_documents_status(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     r = client.get(f"/api/documents/{_client.last_ids['d1']}/status", headers={"X-Telegram-User-Id": TG})
     assert r.status_code == 200
-    assert r.json()["status"] == "extracted"
+    data = r.json()
+    assert data["status"] == "extracted"
+    assert data["queue_position"] is None  # обработан — в очереди VLM не стоит
+    assert data["queue_waiting"] == 0
 
 
 def test_api_dynamics(monkeypatch, tmp_path):

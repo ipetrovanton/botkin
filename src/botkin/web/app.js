@@ -1010,6 +1010,7 @@ function cabinet() {
           item.etaSeconds = Number.isFinite(data.eta_seconds) ? data.eta_seconds : null;
           item.stageElapsedSeconds = Number.isFinite(data.stage_elapsed_s) ? data.stage_elapsed_s : 0;
           item.alive = data.alive !== false;
+          item.queuePosition = Number.isFinite(data.queue_position) ? data.queue_position : null;
           if (data.status === "extracted") {
             item.progress = 100;
             item.state = "done";
@@ -1036,6 +1037,7 @@ function cabinet() {
       if (item.state === "done") return "Результат готов";
       if (item.state === "failed") return "Нужно повторить загрузку";
       if (!item.alive) return "Связь с сервером прервалась — перепроверяю…";
+      if (item.queuePosition >= 1) return `В очереди на распознавание: ${item.queuePosition}-й`;
       if (item.etaSeconds === null) return "Модель готовит анализ…";
       if (item.etaSeconds < 60) return `Ориентир: меньше минуты · ${item.progress}%`;
       return `Ориентир: около ${Math.ceil(item.etaSeconds / 60)} мин · ${item.progress}%`;
@@ -1049,6 +1051,7 @@ function cabinet() {
     },
     queueStateText(item) {
       if (item.state === "uploading") return "Загрузка…";
+      if (item.state === "processing" && item.queuePosition >= 1) return `В очереди: ${item.queuePosition}-й`;
       if (item.state === "processing") return STATUS_LABELS[item.status] || "Обработка";
       if (item.state === "done") return "Готово";
       if (item.state === "duplicate") return "Уже был загружен";

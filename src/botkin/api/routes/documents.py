@@ -17,6 +17,7 @@ from ..deps import get_user_id
 from botkin.db.connection import get_conn
 from botkin.db.repos import DocumentRepo, LabRepo, ReportRepo
 from botkin.pipeline.progress_model import StageDurationStore, estimate_progress
+from botkin.pipeline.queue import LLM_QUEUE
 from botkin.storage import is_stored_file, open_local, storage_for
 
 from botkin.api.services.documents import (
@@ -126,6 +127,8 @@ def document_status(document_id: int, user_id: int = Depends(get_user_id)) -> di
         "eta_seconds": est.eta_seconds,
         "stage_elapsed_s": est.stage_elapsed_s,
         "alive": est.alive,
+        "queue_position": LLM_QUEUE.position(document_id),
+        "queue_waiting": LLM_QUEUE.snapshot()["waiting"],
     }
 
 
