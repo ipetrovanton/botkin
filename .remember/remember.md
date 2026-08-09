@@ -1,16 +1,20 @@
-# Handoff: правка expected.json завершена
+# Handoff: feat/pipeline-speed-accuracy
 
-**Цель:** исправить все рассинхроны sample vs expected по результатам ручной валидации.
+**Ветка:** `feat/pipeline-speed-accuracy`
 
-**Сделано (2026-07-28, feat/email-auth):**
-- Обновлены 15 sidecar: 003, 010, 021–025, 028–035.
-- PDF: 003 (+Токсокары, ЦИК описторхов), 010 (полный ОАМ).
-- Критические doctor_report/рецепты переписаны по бланкам.
-- sample_025: имя препарата (Terbinafini) — best-effort по рукописи; D.t.d. N 60 и схема 1×2 / 21 день читаются уверенно.
+**Коммиты:**
+- `56e6309` — long_side 1600, unit cleanup, early-exit voting
+- `97ef735` — unit/ref swap + noise filter
+- `6e045c0` — e2e doctor_report content (not only doc_type)
 
-**Следующий шаг (по желанию):**
-- Прогнать e2e llm: `wsl -d Ubuntu -- .venv/Scripts/python.exe -m pytest tests/test_e2e_llm.py -m llm -s --tb=short`
-- Пользователь может перепроверить рукопись sample_025 (Terbinafini vs иное).
-- Закоммитить expected при approve.
+**E2E сейчас:** 34/34 PASS (analysis + doctor_report content), wall ~11.2 мин.
 
-**Не закоммичено** — ждать слова пользователя.
+**doctor_report e2e:**
+- hard: diagnosis, doctor_name, medications (recall≥0.5), wrong visit_date
+- soft: recommendations, anamnesis, missing visit_date
+- unknown 022/024/025: still doc_type only
+
+**Следующее (опционально):**
+- phase 9: Ollama num_ctx, multipage parallel
+- e2e for unknown prescriptions (medications) if product wants
+- push branch / PR

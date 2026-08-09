@@ -31,3 +31,7 @@ qwen2.5vl:7b исключена из покрытия (76.3%, слишком с�
 Добавлено: VLM_DISABLE_THINKING env в client.py (для оптимизационных прогонов).
 367 passed, ruff clean. Следующий шаг: коммит.
 - 2026-07-28 20:19 | feat/email-auth | Валидация expected vs sample: найдено ~12 серьёзных рассинхронов (023,024,025,028,029,030,031 и др.)
+2026-08-03 17:12 | master | e2e bench qwen3-vl 34/34 100% 17.6s; gemma4:latest 27/34 88%; gemma4:26b 26/34 80%; journal it37
+2026-08-03 19:08 | feat/pipeline-speed-accuracy | phase1+3 ship: long_side=1600 e2e 34/34 13.3s; glm-ocr reject
+2026-08-04 10:17 | feat/pipeline-speed-accuracy | commit 56e6309 pipeline speed e2e 34/34 13.3s
+2026-08-04 12:09 | feat/pipeline-speed-accuracy | 97ef735 phase4/5 reject; phase6/7 ship e2e 34/34 13.4s
