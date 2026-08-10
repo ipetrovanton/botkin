@@ -7,8 +7,8 @@
 - `aad23de` — lifestyle-рекомендации uncensored-моделью (recommend_lifestyle, /api/rag/lifestyle, кнопка UI)
 - статья habr/botkin-habr-article.md: цифры обновлены (13–14 с/док, 640+ тестов)
 
-**Тесты:** 611 passed (`uv run pytest -m "not llm" -k "not test_e2e_reasoning" -q`), ruff clean.
-На Mac test_e2e_reasoning виснет без Ollama — исключать через -k.
+**Тесты:** 613 passed (`uv run pytest -m "not llm" -q`), ruff clean.
+`test_e2e_reasoning.py` теперь помечен `@pytest.mark.llm`, поэтому `-m "not llm"` сам исключает его.
 
 **Что сделано в этой сессии (2026-08-09):**
 - pipeline/queue.py: LlmQueue поверх Semaphore(1), position()/snapshot(), тесты в test_llm_queue.py
@@ -18,9 +18,13 @@
 - config: rag.lifestyle_model / RAG_LIFESTYLE_MODEL, default huihui_ai/Qwen3.6-abliterated:27b
 - тесты: tests/test_lifestyle_recommend.py (4), фактура habr/2026-08-09--queue-and-lifestyle-recs.md
 
+**Сделано дополнительно в этой сессии (2026-08-09):**
+- `src/botkin/defaults.json` вынесены дефолты из `config.py`.
+- `src/botkin/rag/context.py` — сборка контекста пациента отдельно от `recommend.py`.
+- `src/botkin/web/app.js` разбит на модули documents/health/assistant/admin.
+- `HANDOFF.md` актуализирован (613 passed, маркер `llm`).
+
 **Следующий шаг:**
-1. Живой прогон lifestyle на GPU: `curl -X POST localhost:8000/api/rag/lifestyle -H "X-Telegram-User-Id: <id>"`
-   (нужна Ollama + huihui_ai/Qwen3.6-abliterated:27b)
-2. e2e-прогон 34 доков на GPU для gate перед merge в master
-3. Merge feat/queue-and-lifestyle-recs → master, push
-4. Техдолг: персистентность фоновых задач после рестарта; unknown-рецепты
+1. e2e-прогон 34 доков на GPU для gate перед merge в master
+2. Merge feat/queue-and-lifestyle-recs → master, push
+3. Техдолг: персистентность фоновых задач после рестарта; unknown-рецепты
