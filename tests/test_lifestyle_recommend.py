@@ -63,7 +63,7 @@ def test_lifestyle_context_includes_doctor_reports(monkeypatch, tmp_path):
 
     import botkin.rag.recommend as recommend
     importlib.reload(recommend)
-    ctx = recommend._patient_context(uid)
+    ctx = recommend.build_patient_context(uid)
     assert "Гипертоническая болезнь" in ctx
     assert "Ограничить соль" in ctx
     assert "Иванов И.И." in ctx

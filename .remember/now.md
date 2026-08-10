@@ -36,3 +36,5 @@ qwen2.5vl:7b исключена из покрытия (76.3%, слишком с�
 2026-08-04 10:17 | feat/pipeline-speed-accuracy | commit 56e6309 pipeline speed e2e 34/34 13.3s
 2026-08-04 12:09 | feat/pipeline-speed-accuracy | 97ef735 phase4/5 reject; phase6/7 ship e2e 34/34 13.4s
 2026-08-09 10:15 | feat/queue-and-lifestyle-recs | queue+lifestyle ship: 611 passed, ruff clean, статья обновлена (13-14с, 640+ тестов)
+2026-08-09 10:41 | feat/queue-and-lifestyle-recs | f7a58ef live run: 404.5s 27b, 2 боевых бага (bge-m3 404, sqlite3.Row.get), 613 passed
+2026-08-09 — refactor web/app.js cabinet() into four module factories (documents/health/assistant/admin). node --check passes. /tmp/refactor_app_js.py removed.

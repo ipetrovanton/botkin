@@ -44,24 +44,18 @@ const STAGE_PROGRESS = {
   received: 12, processing: 25, recognizing: 45, normalizing: 75, extracted: 100, failed: 100,
 };
 
-function cabinet() {
+
+function bindMethods(app, methods) {
+  const out = {};
+  for (const [key, value] of Object.entries(methods)) {
+    if (typeof value === "function") out[key] = value.bind(app);
+    else out[key] = value;
+  }
+  return out;
+}
+
+function documentsModule(app) {
   return {
-    PAGE_SIZE,
-    screen: "overview",
-    theme: localStorage.getItem("botkin.theme") || "dark",
-
-    // Аутентификация
-    isAuthed: false,
-    authMode: "login",
-    authForm: { email: "", password: "", display_name: "" },
-    authBusy: false,
-    user: null,
-
-    // Данные
-    stats: {},
-    analytesCount: 0,
-    clinics: [],
-    doctors: [],
     docs: { items: [], total: 0 },
     current: { doc: null, kind: null, labs: [], reports: [] },
     currentVersions: [],
@@ -99,108 +93,7 @@ function cabinet() {
     selMode: false,
     selected: [],
 
-    // Здоровье (Garmin/Strava/Apple Health) и ассистент
-    health: {
-      accounts: [], stravaConfigured: false, metrics: [], stats: {},
-      activities: [], series: { metric: "", unit: "", points: [] },
-      picked: "", syncState: { state: "idle" },
-      garminEmail: "", garminPassword: "", connecting: false,
-    },
-    assistant: { question: "", answer: "", chunks: [], busy: false },
-    external: { today: null },
-
-    // Формы пациента: профиль тела, жалобы, текущие препараты (учитываются в рекомендациях)
-    patient: {
-      profile: { sex: "", birth_date: "", height_cm: "", weight_kg: "", blood_type: "", allergies: "", chronic_conditions: "", latitude: "", longitude: "" },
-      complaints: [],
-      medications: [],
-      newComplaint: "",
-      newMed: { name: "", dosage: "", schedule: "" },
-      busy: false,
-      cityQuery: "", cityResults: [], showCities: false,
-      drugResults: [], showDrugs: false,
-    },
-
-    // Администрирование (видно только роли admin — см. user.role)
-    admin: {
-      users: [],
-      newUser: { telegram_user_id: "", display_name: "" },
-      labsUser: null,          // пользователь, чьи анализы открыты
-      labs: { items: [], total: 0 },
-      labsQuery: "",
-      labsOffset: 0,
-      editLab: null,           // копия строки в форме редактирования (null = закрыта)
-      newLabOpen: false,
-      newLab: { analyte_name: "", value_num: "", unit: "", ref_low: "", ref_high: "", taken_at: "" },
-      busy: false,
-    },
-    ragIndex: { chunks: {}, reindex: { state: "idle" }, research: { state: "idle" }, benching: false, benchModels: "", benchResults: null },
-
-    // UI-состояние
-    loading: { stats: false, docs: false, doc: false, reports: false, dynamics: false },
-    toasts: [],
-    // Счётчики запросов по ресурсам: ответ применяется только если он от
-    // ПОСЛЕДНЕГО запроса. Иначе при быстрой смене фильтров/показателей поздно
-    // пришедший старый ответ перезатирает свежие данные (out-of-order fetch).
-    _req: { docs: 0, doc: 0, reports: 0, dynamics: 0 },
-
-    // ===== Инициализация =====
-    async init() {
-      document.documentElement.setAttribute("data-theme", this.theme);
-      // Проверяем сессию: cookie отправляется автоматически.
-      try {
-        this.user = await this.api("/api/auth/me", { headers: {} });
-        this.isAuthed = true;
-      } catch (e) {
-        this.isAuthed = false;
-        return;
-      }
-      await Promise.all([this.loadStats(), this.loadSelectors()]);
-      this.loadExternal();
-      // Закрытие подсказок анализов по клику вне.
-      document.addEventListener("click", (e) => {
-        if (!e.target.closest(".analyte-picker")) this.analyteFocused = false;
-      });
-    },
-
-    // ===== API-клиент =====
-    async api(path, opts = {}) {
-      const headers = { ...(opts.headers || {}) };
-      const res = await fetch(path, { ...opts, headers, credentials: "same-origin" });
-      if (res.status === 404) return null;
-      if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => "")}`);
-      const ct = res.headers.get("content-type") || "";
-      return ct.includes("application/json") ? res.json() : res.text();
-    },
-
-    toast(msg, type = "info") {
-      const id = ++this._seq;
-      this.toasts.push({ id, msg, type });
-      setTimeout(() => { this.toasts = this.toasts.filter((t) => t.id !== id); }, 3200);
-    },
-
-    toggleTheme() {
-      this.theme = this.theme === "dark" ? "light" : "dark";
-      document.documentElement.setAttribute("data-theme", this.theme);
-      localStorage.setItem("botkin.theme", this.theme);
-      // Перерисовать график при смене темы — цвета берутся из CSS-переменных.
-      if (this.dynamics.points.length) this.$nextTick(() => this.renderChart());
-    },
-
-    // ===== Навигация =====
-    // Списки загружаются сразу при входе на экран (без ожидания фильтров).
-    go(s) {
-      this.screen = s;
-      if (s === "documents") this.loadDocs();
-      else if (s === "reports") this.loadReports();
-      else if (s === "overview") { this.loadStats(); this.loadExternal(); }
-      else if (s === "health") this.loadHealth();
-      else if (s === "admin") this.adminLoadUsers();
-      else if (s === "profile") this.loadPatient();
-      if (s !== "documents" && this.selMode) this.toggleSelMode();
-    },
-
-    // ===== Режим выбора и массовое удаление =====
+    ...bindMethods(app, {
     toggleSelMode() {
       this.selMode = !this.selMode;
       this.selected = [];
@@ -230,8 +123,6 @@ function cabinet() {
       this.toggleSelMode();
       this.loadDocs(); this.loadStats(); this.loadSelectors();
     },
-
-    // ===== Действия с открытым документом =====
     async deleteCurrentDoc() {
       const id = this.current.doc?.id;
       if (!id || !window.confirm("Удалить документ со всеми показателями и заключениями?")) return;
@@ -314,204 +205,6 @@ function cabinet() {
         setTimeout(() => URL.revokeObjectURL(url), 60000);
       } catch (e) { this.toast("Оригинал недоступен", "error"); console.error(e); }
     },
-
-    // ===== Аутентификация =====
-    toggleAuthMode() {
-      this.authMode = this.authMode === "login" ? "register" : "login";
-      this.authForm.password = "";
-    },
-    async submitAuth() {
-      this.authBusy = true;
-      const endpoint = this.authMode === "login" ? "/api/auth/login" : "/api/auth/register";
-      const body = this.authMode === "login"
-        ? { email: this.authForm.email, password: this.authForm.password }
-        : { email: this.authForm.email, password: this.authForm.password, display_name: this.authForm.display_name || null };
-      try {
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-          credentials: "same-origin",
-        });
-        if (!res.ok) {
-          const detail = (await res.json().catch(() => ({})))?.detail || `Ошибка ${res.status}`;
-          this.toast(detail, "error");
-          return;
-        }
-        this.user = await this.api("/api/auth/me", { headers: {} });
-        this.isAuthed = true;
-        this.authForm = { email: "", password: "", display_name: "" };
-        await Promise.all([this.loadStats(), this.loadSelectors()]);
-        this.loadExternal();
-        this.go("overview");
-        this.toast(this.authMode === "login" ? "Вход выполнен" : "Аккаунт создан", "success");
-      } catch (e) {
-        this.toast("Ошибка сети", "error"); console.error(e);
-      } finally {
-        this.authBusy = false;
-      }
-    },
-    async logout() {
-      try {
-        await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
-      } catch (e) { /* ignored */ }
-      this.isAuthed = false;
-      this.user = null;
-      this.screen = "overview";
-      this.authMode = "login";
-    },
-
-    // ===== Загрузка данных =====
-    async loadStats() {
-      this.loading.stats = true;
-      try {
-        const [s, me] = await Promise.all([
-          this.api("/api/stats"),
-          this.api("/api/me"),
-        ]);
-        this.stats = s || {};
-        this.user = me;
-        // Отдельный лёгкий запрос за списком анализов — только ради счётчика на дашборде.
-        this.api("/api/analytes").then((a) => { this.analytesCount = (a || []).length; });
-      } catch (e) { this.toast("Не удалось загрузить сводку", "error"); console.error(e); }
-      finally { this.loading.stats = false; }
-    },
-    async loadExternal() {
-      try {
-        this.external.today = await this.api("/api/external/today");
-      } catch (e) { console.error("external", e); }
-    },
-
-    // ===== Формы пациента =====
-    async loadPatient() {
-      try {
-        const [profile, complaints, meds] = await Promise.all([
-          this.api("/api/patient/profile"),
-          this.api("/api/patient/complaints"),
-          this.api("/api/patient/medications"),
-        ]);
-        const p = profile || {};
-        this.patient.profile = {
-          sex: p.sex || "", birth_date: p.birth_date || "",
-          height_cm: p.height_cm ?? "", weight_kg: p.weight_kg ?? "",
-          blood_type: p.blood_type || "", allergies: p.allergies || "",
-          chronic_conditions: p.chronic_conditions || "",
-          latitude: p.latitude ?? "", longitude: p.longitude ?? "",
-        };
-        this.patient.complaints = complaints?.items || [];
-        this.patient.medications = meds?.items || [];
-        // Восстанавливаем город по координатам
-        if (p.latitude && p.longitude) {
-          this.patient.cityQuery = p.city_name || "";
-        }
-      } catch (e) { console.error("patient", e); }
-    },
-
-    async savePatientProfile() {
-      const p = this.patient.profile;
-      this.patient.busy = true;
-      try {
-        await this.api("/api/patient/profile", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sex: p.sex || null,
-            birth_date: p.birth_date || null,
-            height_cm: p.height_cm === "" ? null : Number(p.height_cm),
-            weight_kg: p.weight_kg === "" ? null : Number(p.weight_kg),
-            blood_type: p.blood_type || null,
-            allergies: p.allergies || null,
-            chronic_conditions: p.chronic_conditions || null,
-            latitude: p.latitude === "" ? null : Number(p.latitude),
-            longitude: p.longitude === "" ? null : Number(p.longitude),
-          }),
-        });
-        this.toast("Профиль сохранён — будет учтён в рекомендациях", "success");
-      } catch (e) { this.toast("Не удалось сохранить профиль", "error"); console.error(e); }
-      finally { this.patient.busy = false; }
-    },
-
-    async searchCities() {
-      const q = this.patient.cityQuery.trim();
-      if (q.length < 2) { this.patient.cityResults = []; return; }
-      try {
-        this.patient.cityResults = await this.api(`/api/directory/cities?q=${encodeURIComponent(q)}`);
-      } catch (e) { console.error("cities", e); }
-    },
-
-    selectCity(c) {
-      this.patient.cityQuery = c.name;
-      this.patient.profile.latitude = c.lat;
-      this.patient.profile.longitude = c.lon;
-      this.patient.showCities = false;
-    },
-
-    async searchDrugs() {
-      const q = this.patient.newMed.name.trim();
-      if (q.length < 2) { this.patient.drugResults = []; return; }
-      try {
-        this.patient.drugResults = await this.api(`/api/directory/drugs?q=${encodeURIComponent(q)}`);
-      } catch (e) { console.error("drugs", e); }
-    },
-
-    selectDrug(d) {
-      this.patient.newMed.name = d.name;
-      this.patient.showDrugs = false;
-    },
-
-    async addComplaint() {
-      const text = this.patient.newComplaint.trim();
-      if (text.length < 3) { this.toast("Опишите жалобу подробнее", "error"); return; }
-      try {
-        await this.api("/api/patient/complaints", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
-        });
-        this.patient.newComplaint = "";
-        this.toast("Жалоба записана", "success");
-        this.loadPatient();
-      } catch (e) { this.toast("Не удалось сохранить", "error"); console.error(e); }
-    },
-
-    async deleteComplaint(c) {
-      try {
-        await this.api(`/api/patient/complaints/${c.id}`, { method: "DELETE" });
-        this.loadPatient();
-      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
-    },
-
-    async addMedication() {
-      const m = this.patient.newMed;
-      if (!m.name.trim()) { this.toast("Укажите название препарата", "error"); return; }
-      try {
-        await this.api("/api/patient/medications", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: m.name.trim(), dosage: m.dosage || null, schedule: m.schedule || null }),
-        });
-        this.patient.newMed = { name: "", dosage: "", schedule: "" };
-        this.toast("Препарат добавлен", "success");
-        this.loadPatient();
-      } catch (e) { this.toast("Не удалось добавить", "error"); console.error(e); }
-    },
-
-    async toggleMedication(m) {
-      try {
-        await this.api(`/api/patient/medications/${m.id}?is_active=${m.is_active ? "false" : "true"}`,
-                       { method: "PATCH" });
-        this.loadPatient();
-      } catch (e) { this.toast("Не удалось изменить статус", "error"); console.error(e); }
-    },
-
-    async deleteMedication(m) {
-      try {
-        await this.api(`/api/patient/medications/${m.id}`, { method: "DELETE" });
-        this.loadPatient();
-      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
-    },
-
-    // ===== Верификация распознанного =====
     async reloadDoc() {
       // Тихая перезагрузка карточки без сброса режима редактирования.
       const id = this.current.doc?.id;
@@ -633,152 +326,6 @@ function cabinet() {
       } catch (e) { this.toast("Не удалось сохранить", "error"); console.error(e); }
       finally { this.verify.busy = false; }
     },
-
-    // ===== Администрирование =====
-    isAdmin() { return this.user?.role === "admin"; },
-
-    async adminLoadUsers() {
-      try {
-        const data = await this.api("/api/admin/users");
-        this.admin.users = data?.items || [];
-      } catch (e) { this.toast("Нет доступа к администрированию", "error"); console.error(e); }
-    },
-
-    async adminCreateUser() {
-      const tg = parseInt(String(this.admin.newUser.telegram_user_id).trim(), 10);
-      if (!tg || tg <= 0) { this.toast("Введите числовой Telegram ID", "error"); return; }
-      try {
-        await this.api("/api/admin/users", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ telegram_user_id: tg, display_name: this.admin.newUser.display_name || null }),
-        });
-        this.admin.newUser = { telegram_user_id: "", display_name: "" };
-        this.toast("Пользователь добавлен", "success");
-        this.adminLoadUsers();
-      } catch (e) {
-        this.toast(String(e.message).includes("409") ? "Такой пользователь уже есть" : "Не удалось добавить пользователя", "error");
-      }
-    },
-
-    async adminSetRole(u, role) {
-      try {
-        await this.api(`/api/admin/users/${u.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role }),
-        });
-        this.toast(`Роль обновлена: ${role}`, "success");
-      } catch (e) {
-        this.toast(String(e.message).includes("409") ? "Нельзя разжаловать последнего администратора" : "Не удалось сменить роль", "error");
-      }
-      this.adminLoadUsers();
-    },
-
-    async adminDeleteUser(u) {
-      if (!confirm(`Удалить пользователя ${u.display_name || u.telegram_user_id} со всеми данными? Это необратимо.`)) return;
-      try {
-        await this.api(`/api/admin/users/${u.id}`, { method: "DELETE" });
-        this.toast("Пользователь удалён", "success");
-        if (this.admin.labsUser?.id === u.id) this.admin.labsUser = null;
-      } catch (e) {
-        this.toast(String(e.message).includes("409") ? "Нельзя удалить самого себя" : "Не удалось удалить", "error");
-      }
-      this.adminLoadUsers();
-    },
-
-    async adminOpenLabs(u) {
-      this.admin.labsUser = u;
-      this.admin.labsQuery = "";
-      this.admin.labsOffset = 0;
-      this.admin.editLab = null;
-      this.admin.newLabOpen = false;
-      await this.adminLoadLabs();
-    },
-
-    async adminLoadLabs() {
-      if (!this.admin.labsUser) return;
-      try {
-        const p = new URLSearchParams({ limit: 50, offset: this.admin.labsOffset });
-        if (this.admin.labsQuery) p.set("q", this.admin.labsQuery);
-        const data = await this.api(`/api/admin/users/${this.admin.labsUser.id}/labs?${p}`);
-        this.admin.labs = data || { items: [], total: 0 };
-      } catch (e) { this.toast("Не удалось загрузить анализы", "error"); console.error(e); }
-    },
-
-    adminStartEditLab(row) {
-      // Копия, а не ссылка: отмена редактирования не должна портить список.
-      this.admin.editLab = { ...row };
-    },
-
-    async adminSaveLab() {
-      const l = this.admin.editLab;
-      if (!l) return;
-      this.admin.busy = true;
-      try {
-        await this.api(`/api/admin/labs/${l.id}?user_id=${this.admin.labsUser.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            analyte_name: l.analyte_name,
-            value_num: l.value_num === "" ? null : Number(l.value_num),
-            unit: l.unit || null,
-            ref_low: l.ref_low === "" ? null : Number(l.ref_low),
-            ref_high: l.ref_high === "" ? null : Number(l.ref_high),
-            taken_at: l.taken_at || null,
-          }),
-        });
-        this.admin.editLab = null;
-        this.toast("Показатель обновлён", "success");
-        this.adminLoadLabs();
-      } catch (e) { this.toast("Не удалось сохранить", "error"); console.error(e); }
-      finally { this.admin.busy = false; }
-    },
-
-    async adminDeleteLab(row) {
-      if (!confirm(`Удалить показатель «${row.analyte_name}»?`)) return;
-      try {
-        await this.api(`/api/admin/labs/${row.id}?user_id=${this.admin.labsUser.id}`, { method: "DELETE" });
-        this.toast("Показатель удалён", "success");
-        this.adminLoadLabs();
-      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
-    },
-
-    async adminAddLab() {
-      const n = this.admin.newLab;
-      if (!n.analyte_name.trim()) { this.toast("Название показателя обязательно", "error"); return; }
-      this.admin.busy = true;
-      try {
-        await this.api(`/api/admin/users/${this.admin.labsUser.id}/labs`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            analyte_name: n.analyte_name.trim(),
-            value_num: n.value_num === "" ? null : Number(n.value_num),
-            unit: n.unit || null,
-            ref_low: n.ref_low === "" ? null : Number(n.ref_low),
-            ref_high: n.ref_high === "" ? null : Number(n.ref_high),
-            taken_at: n.taken_at || null,
-          }),
-        });
-        this.admin.newLab = { analyte_name: "", value_num: "", unit: "", ref_low: "", ref_high: "", taken_at: "" };
-        this.admin.newLabOpen = false;
-        this.toast("Показатель добавлен", "success");
-        this.adminLoadLabs();
-      } catch (e) { this.toast("Не удалось добавить", "error"); console.error(e); }
-      finally { this.admin.busy = false; }
-    },
-
-    async loadSelectors() {
-      try {
-        const [cl, dr] = await Promise.all([this.api("/api/clinics"), this.api("/api/doctors")]);
-        this.clinics = cl || [];
-        this.doctors = dr || [];
-        // Кэш анализов для подсказок динамики.
-        this.api("/api/analytes").then((a) => { this.analyteAll = a || []; });
-      } catch (e) { console.error("selectors", e); }
-    },
-
     async loadDocs() {
       const req = ++this._req.docs;
       this.loading.docs = true;
@@ -796,7 +343,6 @@ function cabinet() {
         this.toast("Ошибка загрузки документов", "error"); console.error(e);
       } finally { if (req === this._req.docs) this.loading.docs = false; }
     },
-
     async openDoc(id) {
       const req = ++this._req.doc;
       this.screen = "document";
@@ -818,7 +364,6 @@ function cabinet() {
         this.toast("Ошибка загрузки документа", "error"); console.error(e);
       } finally { if (req === this._req.doc) this.loading.doc = false; }
     },
-
     async loadReports() {
       const req = ++this._req.reports;
       this.loading.reports = true;
@@ -834,8 +379,6 @@ function cabinet() {
         this.toast("Ошибка загрузки заключений", "error"); console.error(e);
       } finally { if (req === this._req.reports) this.loading.reports = false; }
     },
-
-    // ===== Фильтры документов =====
     hasFilters() {
       return Object.entries(this.filters).some(([k, v]) => k !== "offset" && v !== "" && v !== null);
     },
@@ -851,8 +394,6 @@ function cabinet() {
       const to = Math.min(this.filters.offset + this.docs.items.length, this.docs.total);
       return `${from}–${to} из ${this.docs.total}`;
     },
-
-    // ===== Аналитика / динамика =====
     filterAnalytes() {
       const q = this.analyteQuery.trim().toLowerCase();
       this.analyteSuggestions = q
@@ -949,8 +490,6 @@ function cabinet() {
         ${dots}${xTicks}
       </svg>`;
     },
-
-    // ===== Загрузка файлов =====
     handleDrop(e) { this.dragOver = false; this.handleFiles(e.dataTransfer.files); },
     async handleFiles(fileList) {
       const files = Array.from(fileList);
@@ -1059,6 +598,20 @@ function cabinet() {
       return "";
     },
 
+    }),
+  };
+}
+
+function healthModule(app) {
+  return {
+    initialHealthState: {
+      accounts: [], stravaConfigured: false, metrics: [], stats: {},
+      activities: [], series: { metric: "", unit: "", points: [] },
+      picked: "", syncState: { state: "idle" },
+      garminEmail: "", garminPassword: "", connecting: false,
+
+    },
+    healthMethods: {
     // ===== Здоровье (Garmin/Strava/Apple Health) =====
     async loadHealth() {
       try {
@@ -1194,18 +747,15 @@ function cabinet() {
       } catch (err) { this.toast("Не удалось импортировать экспорт", "error"); console.error(err); }
       finally { e.target.value = ""; }
     },
-    metricLabel(m) { return METRIC_LABELS[m] || m; },
-    providerLabel(p) { return PROVIDER_LABELS[p] || p; },
-    fmtMetricValue(p) {
-      if (this.health.series.metric === "sleep_seconds") return `${fmtNum(p.value_num / 3600)} ч`;
-      return `${fmtNum(p.value_num)} ${this.health.series.unit || ""}`;
-    },
-    fmtDuration(s) {
-      if (s == null) return "—";
-      const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
-      return h ? `${h} ч ${m} мин` : `${m} мин`;
-    },
 
+    },
+  };
+}
+
+function assistantModule(app) {
+  return {
+    initialAssistantState: { question: "", answer: "", chunks: [], busy: false },
+    assistantMethods: {
     // ===== Ассистент (RAG) =====
     async askAssistant() {
       const q = this.assistant.question.trim();
@@ -1304,7 +854,448 @@ function cabinet() {
         console.error(e);
       } finally { this.ragIndex.benching = false; }
     },
+    },
+  };
+}
 
+function adminModule(app) {
+  return {
+    initialAdminState: {
+      users: [],
+      newUser: { telegram_user_id: "", display_name: "" },
+      labsUser: null,          // пользователь, чьи анализы открыты
+      labs: { items: [], total: 0 },
+      labsQuery: "",
+      labsOffset: 0,
+      editLab: null,           // копия строки в форме редактирования (null = закрыта)
+      newLabOpen: false,
+      newLab: { analyte_name: "", value_num: "", unit: "", ref_low: "", ref_high: "", taken_at: "" },
+      busy: false,
+
+    },
+    adminMethods: {
+    async adminLoadUsers() {
+      try {
+        const data = await this.api("/api/admin/users");
+        this.admin.users = data?.items || [];
+      } catch (e) { this.toast("Нет доступа к администрированию", "error"); console.error(e); }
+    },
+
+    async adminCreateUser() {
+      const tg = parseInt(String(this.admin.newUser.telegram_user_id).trim(), 10);
+      if (!tg || tg <= 0) { this.toast("Введите числовой Telegram ID", "error"); return; }
+      try {
+        await this.api("/api/admin/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ telegram_user_id: tg, display_name: this.admin.newUser.display_name || null }),
+        });
+        this.admin.newUser = { telegram_user_id: "", display_name: "" };
+        this.toast("Пользователь добавлен", "success");
+        this.adminLoadUsers();
+      } catch (e) {
+        this.toast(String(e.message).includes("409") ? "Такой пользователь уже есть" : "Не удалось добавить пользователя", "error");
+      }
+    },
+
+    async adminSetRole(u, role) {
+      try {
+        await this.api(`/api/admin/users/${u.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role }),
+        });
+        this.toast(`Роль обновлена: ${role}`, "success");
+      } catch (e) {
+        this.toast(String(e.message).includes("409") ? "Нельзя разжаловать последнего администратора" : "Не удалось сменить роль", "error");
+      }
+      this.adminLoadUsers();
+    },
+
+    async adminDeleteUser(u) {
+      if (!confirm(`Удалить пользователя ${u.display_name || u.telegram_user_id} со всеми данными? Это необратимо.`)) return;
+      try {
+        await this.api(`/api/admin/users/${u.id}`, { method: "DELETE" });
+        this.toast("Пользователь удалён", "success");
+        if (this.admin.labsUser?.id === u.id) this.admin.labsUser = null;
+      } catch (e) {
+        this.toast(String(e.message).includes("409") ? "Нельзя удалить самого себя" : "Не удалось удалить", "error");
+      }
+      this.adminLoadUsers();
+    },
+
+    async adminOpenLabs(u) {
+      this.admin.labsUser = u;
+      this.admin.labsQuery = "";
+      this.admin.labsOffset = 0;
+      this.admin.editLab = null;
+      this.admin.newLabOpen = false;
+      await this.adminLoadLabs();
+    },
+
+    async adminLoadLabs() {
+      if (!this.admin.labsUser) return;
+      try {
+        const p = new URLSearchParams({ limit: 50, offset: this.admin.labsOffset });
+        if (this.admin.labsQuery) p.set("q", this.admin.labsQuery);
+        const data = await this.api(`/api/admin/users/${this.admin.labsUser.id}/labs?${p}`);
+        this.admin.labs = data || { items: [], total: 0 };
+      } catch (e) { this.toast("Не удалось загрузить анализы", "error"); console.error(e); }
+    },
+
+    adminStartEditLab(row) {
+      // Копия, а не ссылка: отмена редактирования не должна портить список.
+      this.admin.editLab = { ...row };
+    },
+
+    async adminSaveLab() {
+      const l = this.admin.editLab;
+      if (!l) return;
+      this.admin.busy = true;
+      try {
+        await this.api(`/api/admin/labs/${l.id}?user_id=${this.admin.labsUser.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analyte_name: l.analyte_name,
+            value_num: l.value_num === "" ? null : Number(l.value_num),
+            unit: l.unit || null,
+            ref_low: l.ref_low === "" ? null : Number(l.ref_low),
+            ref_high: l.ref_high === "" ? null : Number(l.ref_high),
+            taken_at: l.taken_at || null,
+          }),
+        });
+        this.admin.editLab = null;
+        this.toast("Показатель обновлён", "success");
+        this.adminLoadLabs();
+      } catch (e) { this.toast("Не удалось сохранить", "error"); console.error(e); }
+      finally { this.admin.busy = false; }
+    },
+
+    async adminDeleteLab(row) {
+      if (!confirm(`Удалить показатель «${row.analyte_name}»?`)) return;
+      try {
+        await this.api(`/api/admin/labs/${row.id}?user_id=${this.admin.labsUser.id}`, { method: "DELETE" });
+        this.toast("Показатель удалён", "success");
+        this.adminLoadLabs();
+      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
+    },
+
+    async adminAddLab() {
+      const n = this.admin.newLab;
+      if (!n.analyte_name.trim()) { this.toast("Название показателя обязательно", "error"); return; }
+      this.admin.busy = true;
+      try {
+        await this.api(`/api/admin/users/${this.admin.labsUser.id}/labs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analyte_name: n.analyte_name.trim(),
+            value_num: n.value_num === "" ? null : Number(n.value_num),
+            unit: n.unit || null,
+            ref_low: n.ref_low === "" ? null : Number(n.ref_low),
+            ref_high: n.ref_high === "" ? null : Number(n.ref_high),
+            taken_at: n.taken_at || null,
+          }),
+        });
+        this.admin.newLab = { analyte_name: "", value_num: "", unit: "", ref_low: "", ref_high: "", taken_at: "" };
+        this.admin.newLabOpen = false;
+        this.toast("Показатель добавлен", "success");
+        this.adminLoadLabs();
+      } catch (e) { this.toast("Не удалось добавить", "error"); console.error(e); }
+      finally { this.admin.busy = false; }
+    },
+
+    },
+  };
+}
+
+function cabinet() {
+  const app = {
+    PAGE_SIZE,
+    screen: "overview",
+    theme: localStorage.getItem("botkin.theme") || "dark",
+
+    // Аутентификация
+    isAuthed: false,
+    authMode: "login",
+    authForm: { email: "", password: "", display_name: "" },
+    authBusy: false,
+    user: null,
+
+    // Данные
+    stats: {},
+    analytesCount: 0,
+    clinics: [],
+    doctors: [],
+    external: { today: null },
+    patient: {
+      profile: { sex: "", birth_date: "", height_cm: "", weight_kg: "", blood_type: "", allergies: "", chronic_conditions: "", latitude: "", longitude: "" },
+      complaints: [],
+      medications: [],
+      newComplaint: "",
+      newMed: { name: "", dosage: "", schedule: "" },
+      busy: false,
+      cityQuery: "", cityResults: [], showCities: false,
+      drugResults: [], showDrugs: false,
+    },
+    ragIndex: { chunks: {}, reindex: { state: "idle" }, research: { state: "idle" }, benching: false, benchModels: "", benchResults: null },
+    loading: { stats: false, docs: false, doc: false, reports: false, dynamics: false },
+    toasts: [],
+    _req: { docs: 0, doc: 0, reports: 0, dynamics: 0 },
+
+
+    // ===== Инициализация =====
+    // ===== Инициализация =====
+
+    async init() {
+      document.documentElement.setAttribute("data-theme", this.theme);
+      // Проверяем сессию: cookie отправляется автоматически.
+      try {
+        this.user = await this.api("/api/auth/me", { headers: {} });
+        this.isAuthed = true;
+      } catch (e) {
+        this.isAuthed = false;
+        return;
+      }
+      await Promise.all([this.loadStats(), this.loadSelectors()]);
+      this.loadExternal();
+      // Закрытие подсказок анализов по клику вне.
+      document.addEventListener("click", (e) => {
+        if (!e.target.closest(".analyte-picker")) this.analyteFocused = false;
+      });
+    },
+    async api(path, opts = {}) {
+      const headers = { ...(opts.headers || {}) };
+      const res = await fetch(path, { ...opts, headers, credentials: "same-origin" });
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => "")}`);
+      const ct = res.headers.get("content-type") || "";
+      return ct.includes("application/json") ? res.json() : res.text();
+    },
+    toast(msg, type = "info") {
+      const id = ++this._seq;
+      this.toasts.push({ id, msg, type });
+      setTimeout(() => { this.toasts = this.toasts.filter((t) => t.id !== id); }, 3200);
+    },
+    toggleTheme() {
+      this.theme = this.theme === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", this.theme);
+      localStorage.setItem("botkin.theme", this.theme);
+      // Перерисовать график при смене темы — цвета берутся из CSS-переменных.
+      if (this.dynamics.points.length) this.$nextTick(() => this.renderChart());
+    },
+    // Списки загружаются сразу при входе на экран (без ожидания фильтров).
+    go(s) {
+      this.screen = s;
+      if (s === "documents") this.loadDocs();
+      else if (s === "reports") this.loadReports();
+      else if (s === "overview") { this.loadStats(); this.loadExternal(); }
+      else if (s === "health") this.loadHealth();
+      else if (s === "admin") this.adminLoadUsers();
+      else if (s === "profile") this.loadPatient();
+      if (s !== "documents" && this.selMode) this.toggleSelMode();
+    },
+    toggleAuthMode() {
+      this.authMode = this.authMode === "login" ? "register" : "login";
+      this.authForm.password = "";
+    },
+    async submitAuth() {
+      this.authBusy = true;
+      const endpoint = this.authMode === "login" ? "/api/auth/login" : "/api/auth/register";
+      const body = this.authMode === "login"
+        ? { email: this.authForm.email, password: this.authForm.password }
+        : { email: this.authForm.email, password: this.authForm.password, display_name: this.authForm.display_name || null };
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          credentials: "same-origin",
+        });
+        if (!res.ok) {
+          const detail = (await res.json().catch(() => ({})))?.detail || `Ошибка ${res.status}`;
+          this.toast(detail, "error");
+          return;
+        }
+        this.user = await this.api("/api/auth/me", { headers: {} });
+        this.isAuthed = true;
+        this.authForm = { email: "", password: "", display_name: "" };
+        await Promise.all([this.loadStats(), this.loadSelectors()]);
+        this.loadExternal();
+        this.go("overview");
+        this.toast(this.authMode === "login" ? "Вход выполнен" : "Аккаунт создан", "success");
+      } catch (e) {
+        this.toast("Ошибка сети", "error"); console.error(e);
+      } finally {
+        this.authBusy = false;
+      }
+    },
+    async logout() {
+      try {
+        await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+      } catch (e) { /* ignored */ }
+      this.isAuthed = false;
+      this.user = null;
+      this.screen = "overview";
+      this.authMode = "login";
+    },
+    async loadStats() {
+      this.loading.stats = true;
+      try {
+        const [s, me] = await Promise.all([
+          this.api("/api/stats"),
+          this.api("/api/me"),
+        ]);
+        this.stats = s || {};
+        this.user = me;
+        // Отдельный лёгкий запрос за списком анализов — только ради счётчика на дашборде.
+        this.api("/api/analytes").then((a) => { this.analytesCount = (a || []).length; });
+      } catch (e) { this.toast("Не удалось загрузить сводку", "error"); console.error(e); }
+      finally { this.loading.stats = false; }
+    },
+    async loadExternal() {
+      try {
+        this.external.today = await this.api("/api/external/today");
+      } catch (e) { console.error("external", e); }
+    },
+    async loadPatient() {
+      try {
+        const [profile, complaints, meds] = await Promise.all([
+          this.api("/api/patient/profile"),
+          this.api("/api/patient/complaints"),
+          this.api("/api/patient/medications"),
+        ]);
+        const p = profile || {};
+        this.patient.profile = {
+          sex: p.sex || "", birth_date: p.birth_date || "",
+          height_cm: p.height_cm ?? "", weight_kg: p.weight_kg ?? "",
+          blood_type: p.blood_type || "", allergies: p.allergies || "",
+          chronic_conditions: p.chronic_conditions || "",
+          latitude: p.latitude ?? "", longitude: p.longitude ?? "",
+        };
+        this.patient.complaints = complaints?.items || [];
+        this.patient.medications = meds?.items || [];
+        // Восстанавливаем город по координатам
+        if (p.latitude && p.longitude) {
+          this.patient.cityQuery = p.city_name || "";
+        }
+      } catch (e) { console.error("patient", e); }
+    },
+
+    async savePatientProfile() {
+      const p = this.patient.profile;
+      this.patient.busy = true;
+      try {
+        await this.api("/api/patient/profile", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sex: p.sex || null,
+            birth_date: p.birth_date || null,
+            height_cm: p.height_cm === "" ? null : Number(p.height_cm),
+            weight_kg: p.weight_kg === "" ? null : Number(p.weight_kg),
+            blood_type: p.blood_type || null,
+            allergies: p.allergies || null,
+            chronic_conditions: p.chronic_conditions || null,
+            latitude: p.latitude === "" ? null : Number(p.latitude),
+            longitude: p.longitude === "" ? null : Number(p.longitude),
+          }),
+        });
+        this.toast("Профиль сохранён — будет учтён в рекомендациях", "success");
+      } catch (e) { this.toast("Не удалось сохранить профиль", "error"); console.error(e); }
+      finally { this.patient.busy = false; }
+    },
+
+    async searchCities() {
+      const q = this.patient.cityQuery.trim();
+      if (q.length < 2) { this.patient.cityResults = []; return; }
+      try {
+        this.patient.cityResults = await this.api(`/api/directory/cities?q=${encodeURIComponent(q)}`);
+      } catch (e) { console.error("cities", e); }
+    },
+
+    selectCity(c) {
+      this.patient.cityQuery = c.name;
+      this.patient.profile.latitude = c.lat;
+      this.patient.profile.longitude = c.lon;
+      this.patient.showCities = false;
+    },
+
+    async searchDrugs() {
+      const q = this.patient.newMed.name.trim();
+      if (q.length < 2) { this.patient.drugResults = []; return; }
+      try {
+        this.patient.drugResults = await this.api(`/api/directory/drugs?q=${encodeURIComponent(q)}`);
+      } catch (e) { console.error("drugs", e); }
+    },
+
+    selectDrug(d) {
+      this.patient.newMed.name = d.name;
+      this.patient.showDrugs = false;
+    },
+
+    async addComplaint() {
+      const text = this.patient.newComplaint.trim();
+      if (text.length < 3) { this.toast("Опишите жалобу подробнее", "error"); return; }
+      try {
+        await this.api("/api/patient/complaints", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        this.patient.newComplaint = "";
+        this.toast("Жалоба записана", "success");
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось сохранить", "error"); console.error(e); }
+    },
+
+    async deleteComplaint(c) {
+      try {
+        await this.api(`/api/patient/complaints/${c.id}`, { method: "DELETE" });
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
+    },
+
+    async addMedication() {
+      const m = this.patient.newMed;
+      if (!m.name.trim()) { this.toast("Укажите название препарата", "error"); return; }
+      try {
+        await this.api("/api/patient/medications", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: m.name.trim(), dosage: m.dosage || null, schedule: m.schedule || null }),
+        });
+        this.patient.newMed = { name: "", dosage: "", schedule: "" };
+        this.toast("Препарат добавлен", "success");
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось добавить", "error"); console.error(e); }
+    },
+
+    async toggleMedication(m) {
+      try {
+        await this.api(`/api/patient/medications/${m.id}?is_active=${m.is_active ? "false" : "true"}`,
+                       { method: "PATCH" });
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось изменить статус", "error"); console.error(e); }
+    },
+
+    async deleteMedication(m) {
+      try {
+        await this.api(`/api/patient/medications/${m.id}`, { method: "DELETE" });
+        this.loadPatient();
+      } catch (e) { this.toast("Не удалось удалить", "error"); console.error(e); }
+    },
+    async loadSelectors() {
+      try {
+        const [cl, dr] = await Promise.all([this.api("/api/clinics"), this.api("/api/doctors")]);
+        this.clinics = cl || [];
+        this.doctors = dr || [];
+        // Кэш анализов для подсказок динамики.
+        this.api("/api/analytes").then((a) => { this.analyteAll = a || []; });
+      } catch (e) { console.error("selectors", e); }
+    },
+    isAdmin() { return this.user?.role === "admin"; },
     // ===== Форматтеры =====
     typeLabel(t) { return TYPE_LABELS[t] || "Документ"; },
     statusLabel(s) { return STATUS_LABELS[s] || s; },
@@ -1345,7 +1336,31 @@ function cabinet() {
       const pos = 25 + ((r.value_num - r.ref_low) / span) * 50;
       return Math.max(0, Math.min(100, pos));
     },
+
   };
+
+  // Documents state and methods are merged at the top level because the HTML
+  // bindings address them without a module prefix.
+  Object.assign(app, documentsModule(app));
+
+  const { initialHealthState, healthMethods } = healthModule(app);
+  app.health = { ...initialHealthState, ...bindMethods(app, healthMethods) };
+
+  const { initialAssistantState, assistantMethods } = assistantModule(app);
+  app.assistant = { ...initialAssistantState, ...bindMethods(app, assistantMethods) };
+
+  const { initialAdminState, adminMethods } = adminModule(app);
+  app.admin = { ...initialAdminState, ...bindMethods(app, adminMethods) };
+
+  // Top-level aliases for methods called directly from HTML outside their
+  // module prefix (e.g. @click="askAssistant()").
+  for (const src of [app.health, app.assistant, app.admin]) {
+    for (const [name, fn] of Object.entries(src)) {
+      if (typeof fn === "function" && !(name in app)) app[name] = fn;
+    }
+  }
+
+  return app;
 }
 
 // Чистые хелперы вне компонента (используются и в renderChart).

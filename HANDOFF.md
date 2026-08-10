@@ -74,12 +74,12 @@
 
 ```bash
 uv sync                          # поставить зависимости из uv.lock
-uv run pytest -m "not llm"       # 313 passed — основной способ проверки
+uv run pytest -m "not llm"       # 613+ passed — основной способ проверки
 uv run ruff check src/ tests/    # линт
 ```
 
-Тесты, дёргающие реальную модель, помечены `@pytest.mark.llm` и без Ollama авто-скипаются.
-Их запускает только оператор с GPU (`uv run pytest -m llm -s`) — тебе они недоступны.
+Тесты, дёргающие реальную модель, помечены `@pytest.mark.llm` (`test_e2e_llm.py`, `test_e2e_reasoning.py`)
+и без Ollama авто-скипаются. Их запускает только оператор с GPU (`uv run pytest -m llm -s`) — тебе они недоступны.
 
 ## Открытый техдолг (кандидаты на фикс)
 

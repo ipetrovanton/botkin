@@ -3,7 +3,7 @@
 Приоритет источников:
 1. Переменные окружения (из .env через python-dotenv)
 2. config.json в корне проекта
-3. Жёстко заданные значения по умолчанию
+3. src/botkin/defaults.json — значения по умолчанию
 """
 import json
 import logging
@@ -24,159 +24,28 @@ except ImportError:
 log = logging.getLogger("botkin.config")
 
 CONFIG_PATH = _project_root / "config.json"
-
-_DEFAULTS: dict = {
-    "vlm": {
-        "model": "qwen3-vl:8b-instruct",
-        "temperature": 0.0,
-        "classify_temperature": 0.1,
-        "num_ctx": 16384,
-        "max_tokens": 8192,
-        "num_predict": 8192,
-        "repeat_penalty": 1.2,
-        "structured_output": True,
-    },
-    # Текстовая модель для обработки текстового слоя PDF (run_analysis text_layer).
-    # По умолчанию совпадает с VLM, но для скорости лучше выбрать лёгкую text-only
-    # модель, например qwen3:1.7b (1.4 GB) или qwen3:8b (≈5 GB).
-    "text_model": {
-        "model": "qwen3-vl:8b-instruct",
-        "temperature": 0.0,
-        "num_ctx": 4096,
-        "max_tokens": 8192,
-        "num_predict": 8192,
-        "repeat_penalty": 1.2,
-        "structured_output": True,
-        # Компактный построчный вывод вместо JSON-схемы на текстовом слое: ключи JSON
-        # стоят больше токенов, чем данные (замер: вызов быстрее в 1.9–2.4 раза).
-        # При пустом разборе код сам откатывается на JSON-схему.
-        "compact_output": True,
-    },
-    "ollama": {
-        "keep_alive": "30m",
-        "probe_timeout": 1.5,
-        "wsl_detect_timeout": 5.0,
-        "warmup_timeout": 300.0,
-    },
-    "pdf_to_image": {
-        "render_dpi": 200,
-        "max_pages": 50,
-    },
-    "image": {
-        "extract_long_side": 1280,
-        "jpeg_quality": 90,
-        "classify_long_side": 768,
-        "clahe_clip": 2.0,
-        "clahe_tile": 8,
-        "unsharp_amount": 1.5,
-        "unsharp_sigma": 3.0,
-        "deskew_min_angle": 3.0,
-        "deskew_min_area": 0.40,
-        "deskew_max_area": 0.97,
-        "deskew_open_kernel": 9,
-        "deskew_close_kernel": 35,
-        "lowres_warn": 1500,
-    },
-    "database": {
-        "sqlite_path": "./data/botkin.db",
-    },
-    "bot": {
-        "api_url": "http://localhost:8000",
-    },
-    "storage": {
-        # local — файлы на диске (по умолчанию); minio — S3-хранилище с версиями.
-        "backend": "local",
-        "minio": {
-            "endpoint": "localhost:9000",
-            "bucket": "botkin-documents",
-            "secure": False,
-        },
-    },
-    "upload": {
-        "max_bytes": 20 * 1024 * 1024,
-        "allowed_extensions": [".pdf", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"],
-        "sources_dir": "./sources",
-    },
-    "drugs": {
-        "max_edit_ratio": 0.40,
-        "ratio_floor": 70,
-    },
-    "analytes": {
-        "max_edit_ratio": 0.35,
-        "ratio_floor": 75,
-        "short_key_len": 3,
-    },
-    "rag": {
-        "embed_model": "bge-m3",
-        "embed_batch": 64,
-        "top_k": 8,
-        "recommend_model": "qwen3:8b",
-        "recommend_num_ctx": 8192,
-        "recommend_num_predict": 2048,
-        # Мощная uncensored-модель для комплексных рекомендаций по образу жизни:
-        # медицинские темы без отказов (лучшая по бенчу habr/bench-health-report).
-        "lifestyle_model": "huihui_ai/Qwen3.6-abliterated:27b",
-        # Комплексный разбор длиннее Q&A-ответа: 2048 обрезал «Взаимодействия» на живом
-        # прогоне (боевая БД, 7 препаратов) — 4096 с запасом.
-        "lifestyle_num_predict": 4096,
-        # Живой веб-доступ модели: подмешивание веб-поиска и PubMed в контекст.
-        "web_enabled": False,
-        "web_results": 4,
-        # Research-RAG: свежие публикации PubMed по темам (автономное обновление).
-        "research": {
-            "tool": "botkin-rag",
-            "email": "botkin@example.com",
-            "per_topic": 15,
-            "topics": [
-                "lymphocytosis differential diagnosis",
-                "monocytosis causes clinical significance",
-                "basophilia clinical interpretation",
-                "complete blood count abnormalities interpretation",
-                "cerebrospinal fluid cell count interpretation",
-                "elevated lymphocytes viral infection",
-            ],
-        },
-    },
-    "auth": {
-        # telegram_user_id, которым при первом входе присваивается роль admin.
-        # Демо-уровень: идентификация остаётся по заголовку, ролью управляет БД.
-        "admin_telegram_ids": [],
-    },
-    "health": {
-        "tokens_dir": "./data/health_tokens",
-        "sync_days": 30,
-        "request_pause": 0.5,
-    },
-    "external": {
-        # Координаты по умолчанию для погоды (Москва).
-        # Пользователь может переопределить через профиль.
-        "default_latitude": 55.7558,
-        "default_longitude": 37.6173,
-        "weather_enabled": True,
-        "geomagnetic_enabled": True,
-        "astrology_enabled": False,
-    },
-}
+DEFAULTS_PATH = Path(__file__).with_name("defaults.json")
 
 
-def _load_json_config() -> dict:
-    if not CONFIG_PATH.exists():
-        log.warning("config.json не найден по пути %s, используются значения по умолчанию", CONFIG_PATH)
+def _load_json_config(path: Path = CONFIG_PATH) -> dict:
+    if not path.exists():
+        log.warning("%s не найден по пути %s, используются значения по умолчанию", path.name, path)
         return {}
     try:
-        with open(CONFIG_PATH, encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        log.error("Ошибка загрузки config.json: %s", e)
+        log.error("Ошибка загрузки %s: %s", path.name, e)
         return {}
 
 
-_json = _load_json_config()
+_user_config = _load_json_config(CONFIG_PATH)
+_default_config = _load_json_config(DEFAULTS_PATH)
 
 
 def _default_for(key_path: str) -> object:
-    """Значение из _DEFAULTS по точечному пути; None, если пути там нет."""
-    value = _DEFAULTS
+    """Значение из defaults.json по точечному пути; None, если пути там нет."""
+    value = _default_config
     for part in key_path.split("."):
         if not isinstance(value, dict) or part not in value:
             return None
@@ -185,8 +54,8 @@ def _default_for(key_path: str) -> object:
 
 
 def _get(key_path: str, default: object = None) -> object:
-    """config.json по пути, иначе дефолт из _DEFAULTS. Дефолт хранится в одном месте."""
-    value = _json
+    """config.json по пути, иначе дефолт из defaults.json. Дефолт хранится в одном месте."""
+    value = _user_config
     for part in key_path.split("."):
         if not isinstance(value, dict):
             value = None
@@ -203,7 +72,7 @@ def _as_bool(v: object) -> bool:
 
 
 def setting(key_path: str, env_name: str, cast: Callable[[object], object] = str) -> object:
-    """Единый порядок разрешения настройки: env → config.json → _DEFAULTS.
+    """Единый порядок разрешения настройки: env → config.json → defaults.json.
 
     Приведение типа cast применяется в одной точке к любому источнику — закрывает
     12-factor дыру, где часть констант (VLM_*) читала env, а IMAGE_*/DRUG_*/ANALYTE_*/
@@ -215,6 +84,20 @@ def setting(key_path: str, env_name: str, cast: Callable[[object], object] = str
     return cast(_get(key_path))
 
 
+def _get_list(key_path: str) -> list:
+    value = _get(key_path, [])
+    if value is None:
+        return []
+    return list(value)
+
+
+def _get_set(key_path: str) -> set[str]:
+    value = _get(key_path, [])
+    if value is None:
+        return set()
+    return set(value)
+
+
 def _resolve_path(raw: str) -> Path:
     p = Path(raw)
     return p if p.is_absolute() else (_project_root / p)
@@ -224,7 +107,7 @@ def _resolve_path(raw: str) -> Path:
 # Типизированные модели конфигурации (pydantic).
 # Валидируют значения при загрузке, дают IDE-автодополнение и единый источник правды.
 # Заполняются из тех же setting()/_get() функций — приоритет env → config.json →
-# _DEFAULTS сохраняется. Модульные константы ниже экспортируют значения из Settings.
+# defaults.json сохраняется. Модульные константы ниже экспортируют значения из Settings.
 # ---------------------------------------------------------------------------
 
 class VlmConfig(BaseModel):
@@ -381,7 +264,7 @@ class Settings(BaseModel):
 
 
 def _build_settings() -> Settings:
-    """Собирает Settings из env → config.json → _DEFAULTS (через setting()/_get())."""
+    """Собирает Settings из env → config.json → defaults.json (через setting()/_get())."""
     _vlm_request_timeout = float(os.getenv("VLM_REQUEST_TIMEOUT", "120"))
     _admin_ids_env = os.getenv("ADMIN_TELEGRAM_IDS", "")
     _admin_ids: frozenset[int] = frozenset(
@@ -466,7 +349,7 @@ def _build_settings() -> Settings:
         ),
         upload=UploadConfig(
             max_bytes=setting("upload.max_bytes", "UPLOAD_MAX_BYTES", int),
-            allowed_extensions=set(_get("upload.allowed_extensions")),
+            allowed_extensions=_get_set("upload.allowed_extensions"),
             sources_dir=_resolve_path(os.getenv("SOURCES_DIR", _get("upload.sources_dir"))),
         ),
         drugs=DrugsConfig(
@@ -492,7 +375,7 @@ def _build_settings() -> Settings:
             research_tool=_get("rag.research.tool"),
             research_email=_get("rag.research.email"),
             research_per_topic=int(_get("rag.research.per_topic")),
-            research_topics=list(_get("rag.research.topics")),
+            research_topics=_get_list("rag.research.topics"),
         ),
         health=HealthConfig(
             tokens_dir=_resolve_path(os.getenv("HEALTH_TOKENS_DIR", _get("health.tokens_dir"))),

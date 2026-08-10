@@ -98,7 +98,7 @@ def test_rag_context_includes_forms(monkeypatch, tmp_path):
     importlib.reload(recommend)
     with botkin.db.connection.get_conn() as conn:
         uid = UserRepo(conn).get_id(int(TG))
-    ctx = recommend._patient_context(uid)
+    ctx = recommend.build_patient_context(uid)
     assert "мужской" in ctx
     assert "пенициллин" in ctx
     assert "Аторвастатин" in ctx

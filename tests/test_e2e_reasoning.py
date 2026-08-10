@@ -29,7 +29,7 @@ try:
 except (AttributeError, ValueError):
     pass
 
-pytestmark = pytest.mark.reasoning
+pytestmark = [pytest.mark.llm, pytest.mark.reasoning]
 
 _REASONING_MODEL = os.getenv("REASONING_MODEL", "huihui_ai/Qwen3.6-abliterated:27b")
 _REASONING_NUM_PREDICT = int(os.getenv("REASONING_NUM_PREDICT", "8192"))
