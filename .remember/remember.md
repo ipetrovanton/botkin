@@ -7,8 +7,8 @@
 - `aad23de` — lifestyle-рекомендации uncensored-моделью (recommend_lifestyle, /api/rag/lifestyle, кнопка UI)
 - статья habr/botkin-habr-article.md: цифры обновлены (13–14 с/док, 640+ тестов)
 
-**Тесты:** 613 passed (`uv run pytest -m "not llm" -q`), ruff clean.
-`test_e2e_reasoning.py` теперь помечен `@pytest.mark.llm`, поэтому `-m "not llm"` сам исключает его.
+**Тесты:** 657 passed (613 unit + 44 GPU/LLM), ruff clean, node --check app.js clean.
+GPU-gate пройден: 34/34 e2e документов + 10 reasoning-тестов, 46м 42с.
 
 **Что сделано в этой сессии (2026-08-09):**
 - pipeline/queue.py: LlmQueue поверх Semaphore(1), position()/snapshot(), тесты в test_llm_queue.py
@@ -25,6 +25,6 @@
 - `HANDOFF.md` актуализирован (613 passed, маркер `llm`).
 
 **Следующий шаг:**
-1. e2e-прогон 34 доков на GPU для gate перед merge в master
+1. ✅ GPU-gate пройден (657 passed)
 2. Merge feat/queue-and-lifestyle-recs → master, push
 3. Техдолг: персистентность фоновых задач после рестарта; unknown-рецепты
