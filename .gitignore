@@ -88,7 +88,9 @@ data/
 
 # Внутренние директории инструментов
 .agents/
-.remember/
+# .remember/ tracks handoff files (remember.md, now.md, README.md) for cross-machine sync.
+# Only last-stop.md is auto-generated and should stay ignored.
+.remember/last-stop.md
 skills-lock.json
 
 # Временные тестовые дампы

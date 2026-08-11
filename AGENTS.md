@@ -487,3 +487,38 @@ uv run python scripts/bench/bench_models.py --models qwen3-vl:8b-instruct glm-oc
   `benchmarks/models_comparison_YYYY-MM-DD.md`.
 - `TEXT_MODEL` оставлен по умолчанию: так сравнивается именно качество/скорость первой
   ступени (VLM/OCR), а структурирование идёт на `TEXT_MODEL`.
+
+---
+
+## 11. Handoff и перенос состояния на другой компьютер
+
+Контекст сессий хранится в `.remember/` и `habr/`. Эти файлы закоммичены в `master` и
+синхронизируются обычным `git pull` / `git push`.
+
+### Файлы
+
+- `.remember/remember.md` — основной handoff: цель, что сделано, что сломано, следующий шаг.
+- `.remember/now.md` — хронологические чекпоинты сессий.
+- `.remember/last-stop.md` — автоснимок Devin-harness (не редактировать).
+- `habr/YYYY-MM-DD--*.md` + `habr/lab-results-journal.md` — фактура для Хабра.
+
+### Перенос на другой компьютер
+
+```bash
+git pull origin master
+# стартовый хук читает .remember/remember.md и .remember/now.md
+```
+
+### Сохранение состояния в конце сессии
+
+```bash
+scripts/sync-handoff.sh "docs(handoff): session checkpoint"
+```
+
+Скрипт закоммитит и запушит изменения в `.remember/` и `habr/` в текущую ветку.
+
+### Важно
+
+- Не оставляй `.remember/`- и `habr/`-изменения незакоммиченными — на другом компьютере их не будет.
+- `stash` и незакоммиченные worktree-изменения — не способ переноса контекста, только git-история.
+
