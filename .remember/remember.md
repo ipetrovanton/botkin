@@ -26,10 +26,15 @@
 - `uv run pytest tests/test_structured_audit.py tests/test_run_e2e_patient_audit.py tests/test_score_e2e_report.py tests/test_summarize_patient.py tests/test_deep_model_benchmark.py` — 24 passed.
 - Полный `pytest` — 7 pre-existing Windows-only failures (`/tmp/a.jpg` не существует на Windows), 652 passed.
 
+## Git
+
+- Commit `cbadd7e` в `release/habr-article` со всеми изменениями benchmark.
+- Commit `3ad8a70` в `master` с дополнением ссылки на Git в `habr/2026-08-13--e2e-patient-benchmark.md`.
+- `origin/master` обновлён до `3ad8a70`.
+
 ## Следующий шаг
 
-- Зафиксировать результаты в `habr/2026-08-13--e2e-patient-benchmark.md`.
-- По желанию: сделать commit/PR ветки `release/habr-article`.
+- Проверить CI/репозиторий на GitHub; при необходимости открыть PR или продолжить следующую итерацию статьи.
 
 # Handoff: release/habr-article (после rebase на origin/master)
 
