@@ -124,3 +124,4 @@ Gemma оказалась значительно быстрее (~3×), но из
 - Файлы результатов: `benchmarks/e2e_patient_audit_v2/` и `benchmarks/e2e_patient_reports_verified_v2/`.
 - Изменённые файлы: `scripts/bench/structured_audit.py`, `scripts/bench/run_e2e_patient_audit.py`, `scripts/bench/deep_model_benchmark.py`, `tests/test_structured_audit.py`, `scripts/bench/bench_compare.py`.
 - Системная настройка Ollama: drop-in `override.conf` с `OLLAMA_KV_CACHE_TYPE=q8_0` и `OLLAMA_FLASH_ATTENTION=1`.
+- Git: commit `cbadd7e` в `release/habr-article`, merge в `master`, push `828f9cd` в `origin/master`.
