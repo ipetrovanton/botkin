@@ -4,6 +4,7 @@
 Telegram-фото апскейлятся до целевого разрешения; крупные — ужимаются. Контраст/резкость
 повышаются (CLAHE + unsharp), наклон фото выпрямляется best-effort (с фолбэком на полный кадр).
 """
+
 from __future__ import annotations
 
 import base64
@@ -61,10 +62,14 @@ def _enhance(arr: np.ndarray) -> np.ndarray:
     lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)
     luminance, a, b = cv2.split(lab)
     tile = (IMAGE_CLAHE_TILE, IMAGE_CLAHE_TILE)
-    luminance = cv2.createCLAHE(clipLimit=IMAGE_CLAHE_CLIP, tileGridSize=tile).apply(luminance)
+    luminance = cv2.createCLAHE(clipLimit=IMAGE_CLAHE_CLIP, tileGridSize=tile).apply(
+        luminance
+    )
     out = cv2.cvtColor(cv2.merge((luminance, a, b)), cv2.COLOR_LAB2RGB)
     blur = cv2.GaussianBlur(out, (0, 0), IMAGE_UNSHARP_SIGMA)
-    return cv2.addWeighted(out, IMAGE_UNSHARP_AMOUNT, blur, 1.0 - IMAGE_UNSHARP_AMOUNT, 0)
+    return cv2.addWeighted(
+        out, IMAGE_UNSHARP_AMOUNT, blur, 1.0 - IMAGE_UNSHARP_AMOUNT, 0
+    )
 
 
 def _doc_angle(arr: np.ndarray) -> float | None:
@@ -104,8 +109,11 @@ def _deskew(arr: np.ndarray) -> np.ndarray:
     height, width = arr.shape[:2]
     matrix = cv2.getRotationMatrix2D((width / 2, height / 2), angle, 1.0)
     return cv2.warpAffine(
-        arr, matrix, (width, height),
-        flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE,
+        arr,
+        matrix,
+        (width, height),
+        flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_REPLICATE,
     )
 
 
@@ -115,12 +123,16 @@ def _encode_jpeg(img: Image.Image) -> bytes:
     return buf.getvalue()
 
 
-
 def _pdf_pages(path: Path, long_side: int, upscale: bool, enhance: bool) -> list[bytes]:
     out: list[bytes] = []
     with pymupdf.open(str(path)) as doc:
-        log.info("[PDF] %s: страниц в документе=%d | рендер до %d @ %d dpi",
-                 path.name, doc.page_count, MAX_PAGES, PDF_RENDER_DPI)
+        log.info(
+            "[PDF] %s: страниц в документе=%d | рендер до %d @ %d dpi",
+            path.name,
+            doc.page_count,
+            MAX_PAGES,
+            PDF_RENDER_DPI,
+        )
         for index, page in enumerate(doc):
             if index >= MAX_PAGES:
                 break
@@ -131,8 +143,16 @@ def _pdf_pages(path: Path, long_side: int, upscale: bool, enhance: bool) -> list
                 img = Image.fromarray(_enhance(np.asarray(img)))
             fw, fh = img.size
             jpeg = _encode_jpeg(img)
-            log.info("[PDF] %s стр.%d: рендер %dx%d → итог %dx%d px, JPEG %d КБ",
-                     path.name, index + 1, pix.width, pix.height, fw, fh, len(jpeg) // 1024)
+            log.info(
+                "[PDF] %s стр.%d: рендер %dx%d → итог %dx%d px, JPEG %d КБ",
+                path.name,
+                index + 1,
+                pix.width,
+                pix.height,
+                fw,
+                fh,
+                len(jpeg) // 1024,
+            )
             out.append(jpeg)
     return out
 
@@ -161,8 +181,25 @@ def prepare_images(
             img = Image.fromarray(_enhance(np.asarray(img)))
         fw, fh = img.size
         jpeg = _encode_jpeg(img)
-    log.info("[IMG] %s: итог %dx%d px, JPEG %d КБ", path.name, fw, fh, len(jpeg) // 1024)
+    log.info(
+        "[IMG] %s: итог %dx%d px, JPEG %d КБ", path.name, fw, fh, len(jpeg) // 1024
+    )
     return [jpeg]
+
+
+def prepare_report_images(
+    file_path: Path | str,
+    long_side: int | None = None,
+    upscale: bool = False,
+    deskew: bool = False,
+    enhance: bool = False,
+) -> list[bytes]:
+    images = prepare_images(file_path, long_side, upscale, deskew, enhance)
+    if Path(file_path).suffix.lower() == ".pdf" or len(images) != 1:
+        return images
+    with Image.open(io.BytesIO(images[0])) as image:
+        rotated = _encode_jpeg(image.rotate(180))
+    return [images[0], rotated]
 
 
 def to_base64_jpegs(images: list[bytes]) -> list[str]:
