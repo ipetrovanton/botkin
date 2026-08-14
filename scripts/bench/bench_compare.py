@@ -1,5 +1,6 @@
 """Парсит результаты оптимизированного прогона из лога."""
-import json, re
+import json
+import re
 from pathlib import Path
 
 log_path = Path(__file__).resolve().parent.parent.parent / "bench_qwen3-vl_8b-instruct.log"
@@ -40,8 +41,8 @@ total_s = sum(d["total_s"] for d in docs)
 
 # Сводка из лога
 wall_s = 0
-for l in reversed(lines):
-    m = re.search(r"(\d+\.\d+)s.*\((\d+):(\d+):(\d+)\)", l)
+for line in reversed(lines):
+    m = re.search(r"(\d+\.\d+)s.*\((\d+):(\d+):(\d+)\)", line)
     if m:
         wall_s = float(m.group(1))
         break
@@ -65,13 +66,13 @@ result = {
     "error": None, "docs": docs,
 }
 
-print(f"ОПТИМИЗИРОВАННЫЙ ПРОГОН:")
+print("ОПТИМИЗИРОВАННЫЙ ПРОГОН:")
 print(f"  PASS: {passed}, FAIL: {failed}, документов: {len(docs)}")
 print(f"  Точность: {total_matched}/{total_expected} ({total_matched/total_expected:.1%})")
 print(f"  Время: {total_s:.1f}s, среднее: {total_s/len(docs):.1f}s/док")
 print(f"  Score: {result['score']:.5f}")
 print()
-print(f"BASELINE:")
+print("BASELINE:")
 print(f"  PASS: {baseline['passed']}, FAIL: {baseline['failed']}")
 print(f"  Точность: {baseline['total_matched']}/{baseline['total_expected']} ({baseline['accuracy']:.1%})")
 print(f"  Время: {baseline['total_s']:.1f}s, среднее: {baseline['avg_time_per_doc']:.1f}s/док")

@@ -1,5 +1,7 @@
 """Прогон e2e N раз с замером времени и качества."""
-import subprocess, re, sys
+import subprocess
+import re
+import sys
 
 N = 3
 results = []

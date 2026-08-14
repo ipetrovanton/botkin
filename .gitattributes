@@ -1,0 +1,2 @@
+data/botkin.db filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/documents/samples/*.pdf filter=lfs diff=lfs merge=lfs -text

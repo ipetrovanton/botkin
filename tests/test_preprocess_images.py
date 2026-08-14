@@ -6,7 +6,12 @@ import pymupdf
 import pytest
 from PIL import Image
 
-from botkin.preprocess.images import prepare_images, to_base64_jpegs, _doc_angle
+from botkin.preprocess.images import (
+    prepare_images,
+    prepare_report_images,
+    to_base64_jpegs,
+    _doc_angle,
+)
 
 
 def _make_pdf(tmp_path, pages=2):
@@ -26,24 +31,24 @@ def _make_png(tmp_path, size):
 
 
 def test_small_photo_upscaled_for_extract(tmp_path):
-    path = _make_png(tmp_path, (720, 1280))   # типичное Telegram-фото
+    path = _make_png(tmp_path, (720, 1280))  # типичное Telegram-фото
     images = prepare_images(path, long_side=2200, upscale=True)
     img = Image.open(io.BytesIO(images[0]))
-    assert max(img.size) == 2200              # апскейл до целевого
+    assert max(img.size) == 2200  # апскейл до целевого
 
 
 def test_large_photo_downscaled(tmp_path):
     path = _make_png(tmp_path, (4000, 3000))
     images = prepare_images(path, long_side=2200, upscale=True)
     img = Image.open(io.BytesIO(images[0]))
-    assert max(img.size) == 2200              # даунскейл до целевого
+    assert max(img.size) == 2200  # даунскейл до целевого
 
 
 def test_classify_downscale_only_no_upscale(tmp_path):
-    path = _make_png(tmp_path, (560, 800))    # меньше classify-цели (1000)
+    path = _make_png(tmp_path, (560, 800))  # меньше classify-цели (1000)
     images = prepare_images(path, long_side=1000, upscale=False)
     img = Image.open(io.BytesIO(images[0]))
-    assert max(img.size) == 800               # маленькое НЕ растёт (только вниз)
+    assert max(img.size) == 800  # маленькое НЕ растёт (только вниз)
 
 
 def test_pdf_yields_one_image_per_page(tmp_path):
@@ -53,8 +58,34 @@ def test_pdf_yields_one_image_per_page(tmp_path):
         Image.open(io.BytesIO(raw))
 
 
+def test_report_photo_adds_180_degree_orientation_variant(tmp_path):
+    path = tmp_path / "report.png"
+    image = Image.new("RGB", (100, 200), (255, 255, 255))
+    image.paste((255, 0, 0), (0, 0, 40, 40))
+    image.paste((0, 0, 255), (60, 160, 100, 200))
+    image.save(path)
+
+    original, rotated = [
+        Image.open(io.BytesIO(raw))
+        for raw in prepare_report_images(path, long_side=200)
+    ]
+
+    assert original.size == rotated.size == (100, 200)
+    assert original.getpixel((20, 20))[0] > 200
+    assert rotated.getpixel((79, 179))[0] > 200
+
+
+def test_report_pdf_keeps_one_image_per_page(tmp_path):
+    assert (
+        len(prepare_report_images(_make_pdf(tmp_path, 2), long_side=2200, upscale=True))
+        == 2
+    )
+
+
 def test_to_base64(tmp_path):
-    b64 = to_base64_jpegs(prepare_images(_make_png(tmp_path, (800, 600)), long_side=2200))
+    b64 = to_base64_jpegs(
+        prepare_images(_make_png(tmp_path, (800, 600)), long_side=2200)
+    )
     assert isinstance(b64, list) and b64 and isinstance(b64[0], str)
 
 
@@ -65,7 +96,9 @@ def test_missing_file_raises(tmp_path):
 
 def test_enhance_preserves_size_and_valid_jpeg(tmp_path):
     Image.new("RGB", (1000, 1400), (200, 200, 200)).save(str(tmp_path / "g.png"))
-    raw = prepare_images(tmp_path / "g.png", long_side=2200, upscale=True, enhance=True)[0]
+    raw = prepare_images(
+        tmp_path / "g.png", long_side=2200, upscale=True, enhance=True
+    )[0]
     out = Image.open(io.BytesIO(raw))
     assert out.mode == "RGB"
     assert max(out.size) == 2200
@@ -82,9 +115,9 @@ def _tilted_document(angle_deg):
 
 def test_doc_angle_detects_tilt():
     angle = _doc_angle(_tilted_document(10))
-    assert angle is not None and abs(abs(angle) - 10) <= 3   # ~10° с допуском
+    assert angle is not None and abs(abs(angle) - 10) <= 3  # ~10° с допуском
 
 
 def test_doc_angle_noop_on_uniform():
     uniform = np.full((1000, 800, 3), 235, dtype=np.uint8)  # «документ» во весь кадр
-    assert _doc_angle(uniform) is None                       # площадь > max_area → no-op
+    assert _doc_angle(uniform) is None  # площадь > max_area → no-op

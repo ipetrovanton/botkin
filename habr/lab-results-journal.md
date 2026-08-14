@@ -3374,3 +3374,214 @@ visit_date=null. E2e сначала сделали missing date soft — неп�
 - unit: test_visit_date + e2e_report
 - live extract sample_029 → visit_date=2024-11-17
 - e2e sample_029: PASS 4/4 (diagnosis, doctor, visit_date, rec soft)
+
+## Итерация 42: проверка Turbo Boost и доступности undervolting на ThinkPad P1 Gen 4i
+
+### Проблема
+Пользователь запросил только диагностику: выяснить, включён ли Turbo Boost, и определить реализуемые варианты undervolting без изменения прошивки, профиля питания или напряжений.
+
+### Диагноз
+На момент снимка активна схема Windows Balanced (`381b4222-f694-41f0-9685-ff5bb260df2e`); `PERFBOOSTMODE=0` и для AC, и для DC, а `PROCTHROTTLEMAX=100`. Это отключает boost выше номинальной производительности, не фиксируя частоту. WMI показал Intel Core i9-11950H (8C/16T), текущие `2611 MHz`; Lenovo ThinkPad P1 Gen 4i (20Y3S0K900), BIOS `N40ET53W 1.35` от 2026-03-30, 48 ГБ RAM, RTX 3080 Laptop GPU 16 ГБ. Предыдущий 300-секундный baseline с этим ограничением: CPU package 58.8/61/62°C (mean/P95/max), package power 12.9/14.6/23.0 W, CPU clock max 2611.3 MHz.
+
+`Lenovo_BiosSetting` подтверждает `CPUPowerManagement=Enable` и термопрофили Balanced, но не показывает доступного параметра `Undervolt Protection` или voltage offset. VBS активно, HVCI registry key отсутствует. Установленных Intel XTU или ThrottleStop нет.
+
+### Решение
+Параметры не менялись. Для включения Turbo рассматривается штатное изменение `PERFBOOSTMODE` через `powercfg`; возможность CPU undervolting будет оценена по официальной поддержке Intel и доступности незаблокированного voltage interface, без обхода защиты прошивки.
+
+### Итог
+Turbo Boost точно выключен политикой Windows, а не отсутствует у CPU: Microsoft определяет индекс `PERFBOOSTMODE=0` как `Disabled`; Intel указывает для i9-11950H nominal 2.60 GHz и Max Turbo Frequency 5.00 GHz. Безопасный штатный вариант — включить только AC-значение `PERFBOOSTMODE=1` (`Enabled`), оставить DC=0 и после этого снять отдельный workload-baseline. Значение `2` (`Aggressive`) для первого прогона не нужно: оно просит более агрессивный boost, тогда как на этом ноутбуке ранее уже была цель снизить тепловую нагрузку.
+
+Штатного варианта undervolting пока не найдено. Актуальный Intel XTU 7.14.2.93 (2026-07-10) поддерживает разблокированные Core и чипсеты с полным overclocking, а не данный мобильный i9-11950H на WM590. ThrottleStop 9.7 (2024-12-26) — не OEM-инструмент; его V/F tuning заявлен только для разблокированных Core HX/K. Поэтому установка XTU нецелесообразна, а ThrottleStop можно рассматривать лишь как диагностический последний шаг после отдельного согласия: если FIVR/voltage offset недоступны или заблокированы, ничего не обходить. Прошивка не объявляет user-facing `Undervolt Protection` либо voltage offset через Lenovo WMI. Попытки BIOS downgrade или изменения скрытых UEFI-переменных исключены: они обходят firmware-защиту, связанную с INTEL-SA-00289/CVE-2019-11157.
+
+### Проверка
+- Повторный read-only запрос `powercfg`: `PERFBOOSTMODE=0` найден для AC/DC (`2/2`), `PROCTHROTTLEMAX=100` для AC/DC (`2/2`); текущая WMI-частота CPU — `2611 MHz`.
+- В Windows, UEFI/BIOS и настройках напряжения запись не выполнялась; пакеты не устанавливались.
+- `git diff --check` для уже накопленного CRLF-документа сообщает trailing whitespace также на блоках Iteration 35–36, которые не относятся к этой диагностике; `git ls-files --eol` показывает `i/mixed w/crlf`. Форматирование чужих незакоммиченных записей не менялось.
+
+### Дополнение: TPL / PL1 / PL2
+TPL (Turbo Power Limits) не меняет напряжение и не снимает firmware-lock undervolting. `PL1` задаёт длительный средний package-power, `PL2` — кратковременный power burst, а `Tau` — его окно времени; эти лимиты определяют, сколько Turbo сможет удерживаться после включения `PERFBOOSTMODE`. При текущем `PERFBOOSTMODE=0` повышение TPL не откроет boost: сначала требуется штатно разрешить Turbo.
+
+Фактические PL1/PL2 на этом ThinkPad пока неизвестны: Lenovo BIOS WMI публикует только `CPUPowerManagement=Enable` и thermal Balanced, telemetry-сценарий читает package power, но не power limits, XTU/ThrottleStop не установлены. Вероятный безопасный путь — сначала read-only снять MSR/MMIO значения через ThrottleStop после отдельного согласия на установку, затем включить Turbo на AC и провести baseline с неизменёнными TPL. Если температура слишком высока, TPL следует использовать для уменьшения PL1/PL2 в отдельном профиле, а не для повышения выше OEM-значений. MMIO Lock, Disable-and-Lock Turbo Power Limits, PL4/IccMax и обход EC-политики не применять: Lenovo Intelligent Thermal Solution Service работает и может динамически перезаписывать лимиты.
+
+### Материалы
+- Microsoft Learn, `PERFBOOSTMODE`, опубликовано 2024-03-04, обновлено 2024-05-21, обращение 2026-08-12: https://learn.microsoft.com/en-us/windows-hardware/customize/power-settings/options-for-perf-state-engine-perfboostmode. «`0 | Disabled | Disabled | Disabled`» — индекс 0 отключает boost.
+- Intel ARK, i9-11950H, обращение 2026-08-12: https://www.intel.com/content/www/us/en/products/sku/213798/intel-core-i911950h-processor-24m-cache-up-to-4-90-ghz/specifications.html. «`Max Turbo Frequency 5.00 GHz`» — CPU аппаратно поддерживает Turbo Boost.
+- Intel XTU, версия 7.14.2.93 выпущена 2026-07-10: https://www.intel.com/content/www/us/en/download/17881/intel-extreme-tuning-utility-intel-xtu.html. «`supported with unlocked processors (K- and X-series) only`» — официально XTU не является решением для данного H-процессора.
+- Intel SA-00289, опубликовано 2019-12-10, пересмотрено 2020-03-20: https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00289.html. «`released firmware updates to system manufacturers to mitigate`» — актуальную OEM-прошивку не следует откатывать для возврата voltage interface.
+- Lenovo PSREF ThinkPad P1 Gen 4, изменено 2023-03-30: https://psref.lenovo.com/syspool/Sys/PDF/ThinkPad/ThinkPad_P1_Gen_4/ThinkPad_P1_Gen_4_Spec.html. «`Core i9-11950H | 8 | 16 | 2.6GHz | 5.0GHz`» — подтверждает конфигурацию платформы.
+- TechPowerUp, ThrottleStop 9.7, опубликовано 2024-12-26: https://www.techpowerup.com/330182/techpowerup-releases-throttlestop-9-7-utility-take-charge-of-your-laptops-performance. «`V/F tuning ... only available on unlocked ... HX or K series CPUs`» — условие, которому i9-11950H не соответствует.
+- Intel, Power Management Technology Overview, дата публикации на странице не указана, обращение 2026-08-12: https://cdrdv2-public.intel.com/637748/Power%20Management%20-%20Technology%20Overview%20TechGuide_637748v2.pdf. «`The level of turbo frequency achieved depends on ... estimated power and current, and CPU temperature`» — частота Turbo зависит от доступного power/current/thermal budget.
+- TechPowerUp forum, разъяснение автора ThrottleStop о TPL, дата обращения 2026-08-12: https://www.techpowerup.com/forums/threads/where-are-these-default-tpl-mmio-values-coming-from.292381/. «`The lower values are always in control`» — при расхождении MSR и MMIO действует меньший лимит; это не OEM-документация, а причина сначала считывать оба значения без записи.
+
+### Шаг: Turbo на AC и safety-baseline OEM TPL
+Пользователь явно разрешил включить Turbo от сети и подобрать TPL. `powercfg /setacvalueindex ... PERFBOOSTMODE 1` и `setactive` применены: AC=`1` (Enabled), DC=`0` (Disabled). Через временную portable ThrottleStop 9.7, скачанную из winget-манифеста (SHA-256 `D83D3EDBD037A926D9319C6F4DB62F84657A39D47BD4FAE5FA26F692790E800D`, Authenticode `Valid`, signer TechPowerUp LLC), read-only TPL-снимок показал MSR PL1/PL2/Tau=`109/135/56`, MMIO=`109/109/56`; lock flags отсутствуют.
+
+Контролируемый CPU-only прогон должен был длиться 180 с, но safety-gate остановил 16 workers через 2.464 с при `CPU Package=95°C`. К этому моменту: CPU max clock `4619.99 MHz`, package power max `71.08 W`, package temperature mean/P95/max `92.67/95/95°C`, fans `5184/4285 RPM`, telemetry `errors=[]`. Следовательно, высокие OEM limits не подходят для длительного all-core Turbo на текущем охлаждении.
+
+Попытка применить `PL1/PL2/Tau=30/40/8` через GUI была намеренно верифицирована screenshot до продолжения: ThrottleStop не принял программный `SetWindowText`, кнопка Apply осталась inactive, экран сохранил `109/135/56`. Временные UI-флаги `Disable Controls`/`Sync MMIO` были отменены через Cancel, процесс и созданный временный каталог удалены. **TPL не менялись.** Прямую запись MSR и обход EC/MMIO не использовали из-за отсутствия безопасно проверяемого контракта.
+
+### Текущее состояние
+Turbo включён только на AC. DC остаётся без Turbo. PL1/PL2/Tau сохраняют OEM `109/135/56` (MSR) и `109/109/56` (MMIO); долговременный all-core benchmark с ними не запускать без дополнительного thermal cap.
+
+### Шаг: ручной TPL `30/40/8` — thermally safe, но недостаточен для all-core
+Пользователь вручную применил `PL1=30 W`, `PL2=40 W`, `Tau=8 s` через ThrottleStop. Файл профиля подтвердил raw RAPL limits: `PowerLimitEAX0=0x001B80F0` (30 W) и `PowerLimitEDX0=0x00428140` (40 W); `SyncMMIO=1`, `MSRLock=0`, `LockPowerLimits=0`.
+
+Повторный CPU-only прогон: **182 samples / 180.97 s / errors=[] / abort_reason=null**, загрузка CPU mean/P95=99.28/100%. CPU package power mean/P95/max=`29.95/30.00/30.68 W`; CPU package temperature=`75.55/76/78°C`; fan1=`3641/3645 RPM`, fan2=`3138/3140 RPM`. Thermal cap 95°C не достигнут. Пиковые 4.52 GHz были только в начале, но sustained clock avg/P95=`2466/2498 MHz` — ниже nominal 2.6 GHz. Вывод: 30 W слишком консервативны для цели вернуть заметную all-core производительность; следующий контролируемый шаг — `40/50/8`, затем тот же safety-gated baseline.
+
+### Сложность: пользовательский `45/70/8` — 95°C ещё до CPU stress
+Пользователь выставил иной профиль; сохранённые RAPL values расшифрованы как `PL1=45 W`, `PL2=70 W`, `Tau=8 s`. `SyncMMIO=1`, locks выключены; PP0 raw `0x230` не содержит enable-bit. Первый sample telemetry уже показал `CPU Package=95°C`, `37.12 W`, max clock `4720.56 MHz`, CPU utilization `17.1%`, fan1/fan2 `3645/3131 RPM`. Safety gate не запустил 16 CPU workers: итог `sample_count=1`, `duration=0`, `abort_reason="cpu_package_temp_c reached 95.0C"`, `errors=[]`.
+
+Это не доказывает устойчивую производительность `45/70/8`: нагрев достиг стоп-порога до controlled load. Профиль не оставлять для длительной all-core работы. Нужен следующий ручной выбор: немедленно вернуть доказанно безопасный `30/40/8` или после cooldown попробовать промежуточный `35/45/8` с тем же gate.
+
+### Сложность: `45/55/8` перегревает CPU даже без synthetic stress
+Пользователь снизил PL2 до 55 W, сохранив PL1=45 W, Tau=8 s. До all-core прогона снят 60-секундный cooldown/idle telemetry: **61 samples / 59.98 s / errors=[]**. При CPU utilization mean всего `15.39%` package power был `35.12/46.38/49.33 W` (mean/P95/max), CPU package temperature=`87.15/95/95°C`, core max=`96°C`; fan1/fan2=`5162/4265 RPM`. Это не остаточный короткий пик: P50 package temperature=89°C и вентиляторы уже почти на максимуме.
+
+All-core workers намеренно не запускались. `45/55/8` нельзя оставлять для обычной работы: сначала вручную вернуть `30/40/8`, затем подтвердить cooldown и только после этого продолжать другие задачи.
+
+### Сложность: фактически применённый `35/45/8` тоже не проходит thermal preflight
+После подтверждения пользователя файл ThrottleStop прочитан повторно: `PowerLimitEAX0=0x001B8118` → PL1=35 W, `PowerLimitEDX0=0x00428168` → PL2=45 W, Time=8 s. То есть это не ожидаемый `30/40/8`. 60-секундный telemetry без synthetic stress снова дал **61 samples / 59.98 s / errors=[]**: CPU util mean=20.32%, package power=`35.15/41.64/43.47 W`, package temperature=`83.70/93/95°C`, core max=`97°C`, fan1/fan2=`5180/4277 RPM`.
+
+All-core workers не запускались. Нельзя считать `35/45/8` охлаждённым компромиссом: даже обычный фон доходит до 95°C. Требуется вручную выставить точно PL1=30, PL2=40, Time=8; проверочный raw должен стать `EAX0=0x001B80F0`, `EDX0=0x00428140`.
+
+### Итог практической настройки: Turbo возвращён в Disabled
+Пользователь выставил точный `30/40/8`; raw стал `EAX0=0x001B80F0`, `EDX0=0x00428140`. Однако последующий 60-секундный preflight с обычным фоном всё равно достиг `CPU Package=85.85/94/97°C` при package power=`29.99/37.44/39.28 W` и CPU utilization mean=15.40%. Следовательно, даже самый безопасный проверенный TPL не даёт приемлемой температуры в реальной текущей нагрузке, хотя отдельный 181-секундный 100%-ный synthetic test после холодного старта проходил при P95=76°C. Это важное расхождение: clean stress и фактический рабочий фон дают разные thermal conditions.
+
+Turbo на AC был сразу возвращён в `PERFBOOSTMODE=0`; DC уже был 0. Финальный 60-секундный cooldown при той же фоновой нагрузке: **61 samples / 59.94 s / errors=[]**, CPU package power=`13.99/16.88/17.75 W`, package temperature=`63.97/67/68°C`, clock=`2611 MHz` на всех сэмплах. Временный ThrottleStop завершён, созданный audit-каталог удалён; TPL не остаётся активной пользовательской службой. Итоговое безопасное состояние — Turbo Disabled на AC/DC.
+
+### Почему так
+- **Альтернативы:** оставить Turbo с OEM `109/135/56`; оставить `30/40/8`; отменить Turbo до появления дополнительного охлаждения или меньшей фоновой нагрузки.
+- **Выбрано:** отмена Turbo — единственный вариант, подтверждённый текущим 60-секундным workload-equivalent preflight ниже 70°C P95.
+- **Компромисс:** теряется кратковременная и all-core Turbo-производительность.
+- **Когда пересмотреть:** после устранения текущей фоновой CPU-нагрузки/охлаждения и нового baseline: перед повторным включением CPU package P95 без Turbo должен стабильно оставаться ниже 70°C, после чего нужно заново сравнить TPL в том же фоне.
+
+### Пользовательское переопределение: Turbo снова включён на AC
+После приведённого выше измерения пользователь явно запросил вернуть Turbo и открыть ThrottleStop. Выполнено `PERFBOOSTMODE=1` на AC и повторная активация текущей Balanced-схемы; DC остаётся `0`. ThrottleStop 9.7 загружен как temporary portable через winget: SHA-256 `D83D3EDBD037A926D9319C6F4DB62F84657A39D47BD4FAE5FA26F692790E800D` проверен winget, Authenticode signature `Valid` (TechPowerUp LLC), PID `28796`. Новые TPL, voltage или lock-параметры не записывались.
+
+### Проверка FIVR: native undervolt заблокирован
+В ThrottleStop FIVR выбран `CPU Core`, offset остаётся `0.0 mV`. Пользователь подтвердил, что `Unlock Adjustable Voltage` не устанавливается. Это фактический признак: доступ к hardware voltage interface закрыт firmware, а не отсутствует только в Intel XTU. Voltage offset не применялся.
+
+Найдены community-подходы через downgrade BIOS и скрытые UEFI setup variables, но они отменяют firmware-защиту voltage MSR. Они исключены: Intel SA-00289 описывает уязвимость CVE-2019-11157 и рекомендует OEM BIOS updates; официальный Intel XTU 7.14 поддерживает unlocked K/X и full-overclocking chipsets, что не соответствует i9-11950H/WM590. Безопасные альтернативы остаются ограничением частоты/мощности и устранением реальной причины thermal load.
+
+### Итерация 39: последовательный benchmark Gemma/Qwen/MedGemma с q8 KV-cache
+
+Пользователь разрешил временный отдельный Ollama server на `127.0.0.1:11435` с `OLLAMA_KV_CACHE_TYPE=q8_0`, `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_NUM_PARALLEL=1`, `OLLAMA_MAX_LOADED_MODELS=1`. Permanent env не менялся. Модели запускались строго последовательно; после завершения server остановлен.
+
+Детерминированный fact package построен один раз из реальной БД: 318 лабораторных фактов, 87 рядов, 9 заключений, 29 лекарств, 209 дневных health-агрегатов, 16 активностей, 20 frozen RAG sources; SHA-256=`c04efae696a780716ba8500fd697fe285974e6fae42fc7ae0655ea271f3081bf`. TDD harness/telemetry/fact package: `21 passed`, ruff clean.
+
+Короткая calibration (generation tok/s): Qwen35=`29.3/28.7/25.2` (off4K/off8K/think8K), Gemma31=`2.15/2.18/1.96`, Gemma26 QAT=`47.95/48.19/47.37`, MedGemma27=`3.89/—/4.17`. Gemma31 runtime 21GB и CPU/GPU split ~45/55; Gemma26 QAT ~15GB и наиболее практична.
+
+Full synthesis 3 seed: Qwen35 wall=`621.5s`, output=`19824` chars, token-set Jaccard=`0.250`, number Jaccard=`0.644`, GPU energy≈`8.27Wh`; Gemma31=`3665.9s`, `10599` chars, `0.385`, `0.644`, ≈`32.56Wh`; Gemma26=`270.3s`, `12974` chars, `0.306`, `0.648`, ≈`5.86Wh`; MedGemma27=`3192.4s`, `24117` chars, `0.484`, `0.885`, ≈`30.73Wh`. Все runs thermally constrained; evidence ID coverage `0/0` — модели не использовали требуемый bracket format.
+
+Первый Qwen/Gemma run остановлен после обнаружения ошибки stream aggregation: `setdefault()` сохранял пустой финальный content при непустом content в предыдущих chunks. Исправление перепроверено TDD, повторный full run дал непустые outputs. Live heartbeat добавлен в runner; сохранены raw outputs, thinking, JSONL telemetry и results в ignored `benchmarks/deep_model_benchmark_q8_full/`.
+
+Автоматический quality-pass: все модели — русский язык и без refusal; заголовки synthesis по seed:
+Qwen=`12/12/12`, Gemma31=`12/12/12`, Gemma26=`11/11/12`, MedGemma=`1/1/1`. Последний результат
+означает структурный провал Markdown-формата, несмотря на большой output. Prompt compliance по
+`evidence_ids` — `0/0` у всех моделей. Поэтому speed/thermal/repeatability измерены, но clinical
+accuracy и traceability требуют отдельного golden-set scorer и исправленного structured-output prompt.
+
+### Итерация 40: structured FACT_AUDIT на синтетике и реальном fact package
+
+Синтетические проверки строгой Pydantic-схемы и golden scorer прошли: **24 passed**, ruff clean.
+Scorer проверяет лабораторные value/unit/status, даты, raw/canonical/schedule лекарств,
+contradiction evidence-группы, invalid IDs и provenance findings.
+
+На реальном immutable package SHA=`c04efae...f3081bf`: Qwen35 завершил JSON audit за 445.6s,
+но пропустил почти все обязательные golden facts и выдал 2 invalid external IDs; Gemma31
+завершила за 626.5s с валидным, но пустым assertions; Gemma26 QAT — за 160.0s с тем же
+результатом. MedGemma после 42 минут продолжала свободный content (>13k chars) вместо JSON и
+была остановлена как `structured_output_failed`. Модели были запущены строго по одной.
+
+Вывод: JSON Schema добилась синтаксической валидности у 3/4 моделей, но один prompt на
+318 фактов не обеспечивает полноту. Следующий фикс — доменная декомпозиция audit на короткие
+лабораторные/даты/лекарства запросы и отдельный scorer по каждому домену.
+
+### Критический quality finding: Qwen подменил patient facts RAG-контекстом
+
+В полном Qwen synthesis report обнаружено: модель вывела токсикологическую историю
+синтетических каннабиноидов (URB-597, PRE-084, JP104, JWH/FUB, CB1/CB2, CYP2C9/CYP3A4),
+предложила повторный токсикологический скрининг, ALT/AST, липидограмму и ECG/QTc.
+Fact package пациента таких подтверждённых данных не содержит. Модель сослалась на
+существующие `SRC:*` RAG IDs, но перепутала «источник общего знания» с patient-specific
+доказательством. Это критический hallucination/grounding failure.
+
+Новый scorer должен проверять не только существование ID, но и тип/роль источника:
+`LAB/REP/MED/HLT/ACT` — допустимы для утверждений о пациенте; `SRC` — только общий
+контекст и не доказательство экспозиции/диагноза. Valid evidence ID без проверки
+семантической опоры оказался недостаточным.
+
+### Итерация 41: проверка наличия ThrottleStop перед созданием ярлыка
+
+**Проблема.** Пользователь запросил запуск ThrottleStop и создание ярлыка на рабочем столе,
+но по handoff предыдущая portable-копия была временной и затем удалена.
+
+**Диагноз.** Проверены стандартные пути (`Desktop`, `Downloads`, `Documents\ThrottleStop`,
+`Program Files`, `Program Files (x86)`, `C:\ThrottleStop`) и выполнен рекурсивный поиск
+`ThrottleStop.exe` в профиле пользователя и каталогах программ. Результат: дословно
+`THROTTLESTOP_EXE_NOT_FOUND`. Поэтому запуск и создание рабочего ярлыка пока невозможны;
+создание ярлыка без target создало бы нерабочий артефакт.
+
+**Решение.** После явного согласия пользователя установлен пакет `TechPowerUp.ThrottleStop`
+через `winget`. Источник скачивания — `https://uk2-dl.techpowerup.com/files/ThrottleStop_9.7.zip`;
+winget сообщил `Successfully verified installer hash`. Для распакованного EXE дополнительно
+проверены SHA-256=`5846F38B6671DA8626A560BF1543EB496348AB11659E6EFA5E1ED6E9739C27E2`,
+Authenticode=`Valid`, signer=`TechPowerUp LLC`, version=`9.7.0.0`.
+
+Создан ярлык `ThrottleStop.lnk` на рабочем столе пользователя с target на установленный
+`ThrottleStop.exe`. Приложение запущено через `Start-Process`, PID=`32672`; через 2 секунды
+процесс оставался живым и отвечал (`Responding=True`). Настройки TPL/voltage не изменялись.
+
+**Итог.** ThrottleStop установлен, ярлык создан, процесс запущен и проверен. Контекст записан
+в `.remember/now.md`.
+
+### Итерация 42: Gemma31 domain audit остановлен по решению пользователя
+
+После Qwen domain audit начали Gemma31 batches. Завершены два laboratory batch за
+`988s` и `1226.7s`, а также date batch за `141s`; каждый модельный процесс был изолирован.
+Поскольку Gemma31 работает через CPU-offload и полный domain audit занял бы часы,
+пользователь решил остановить её и ограничить дальнейшее structured-сравнение Qwen35 и
+Gemma26 QAT. Gemma31 остаётся в общем calibration/full-synthesis benchmark как reference,
+но новые domain batches для неё не продолжаются.
+
+### Итерация 43: Qwen35/Gemma26 на раздельных e2e patient packages
+
+Sidecar-фикстуры разделены строго по `(patient_name, birth_date)`: Петров Антон Игоревич
+(20 документов, 79 labs, 11 reports, 8 meds, 209 Garmin aggregates, 16 activities),
+Петрова Инна Игоревна (2 docs, 13 labs, без Garmin), Саулина Инна Игоревна
+(12 docs, 347 labs, без Garmin). Weather facts отсутствуют; dates отсутствующие в
+sidecars остаются missing. Qwen35 и Gemma26 прошли по каждому package отдельно, без
+смешивания models/patients.
+
+Qwen wall: Petro 474.2s, Petrovа 350.4s, Saulina 316.9s. Gemma26 wall: Petro 470.1s,
+Petrovа 244.8s, Saulina 331.1s. Guard после исправления absence-детектора: все 6
+`garmin_leak=false`, `weather_leak=false`, `passed_guards=true`. Все patient-specific
+reports имеют `evidence cited=0`: модели не добавили требуемые evidence IDs в свободный
+Markdown, поэтому это отдельная traceability проблема, не доказательство корректности
+выводов.
+
+### Итерация 44: strict Garmin audit
+
+В e2e Garmin package сохранены 209 daily health aggregates и 16 activities; исправлен loader,
+который раньше терял `value_json` с фазами сна. Garmin connector по коду возвращает sleep
+(total/deep/light/REM/awake), HRV, resting/continuous heart rate, steps, stress, Body Battery,
+blood pressure, weight и activity fields.
+
+После обязательного schema-контракта (`HLT/ACT` IDs, date, value, unit, sleep phases,
+activity duration/distance/HR/calories) и уменьшения batch до 20 из-за truncation:
+Qwen35 и Gemma26 получили `passed=true`: каждый `225` valid evidence IDs, `209/209`
+metrics, `29/29` sleep phases, `16/16` activities, invalid IDs=`0`. Артефакты:
+`benchmarks/garmin_audit_strict3/`. Это первый audit, где конкретные Garmin numbers и
+sleep phases проверены scorer-ом, а не только наличие слова Garmin в prose.
+
+### Итерация 45: deterministic verified Garmin summary
+
+Добавлен post-processor `summarize_garmin.py`, который принимает только `passed=true`
+merged audit и создаёт `verified_garmin_summary.json/.md`. Он детерминированно считает
+average/min/max по метрикам, среднюю длительность сна, переносит deep/light/REM/awake
+по датам, суммирует activities и сохраняет evidence IDs. LLM на этом шаге не вызывается.
+
+Qwen и Gemma26 получили одинаковый summary: sleep average `7.48h`/29 дней, HRV `32.72ms`,
+resting HR `60.2`, steps `5609.93`, stress `36.1`, Body Battery `63.17`; activities
+`45738.17s`, `67658.72m`, `10556 calories`. Summary предназначен как проверенный компактный
+контекст для следующего clinical synthesis, но не содержит автоматических медицинских
+рекомендаций.

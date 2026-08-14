@@ -31,29 +31,19 @@ FONTS = {
 # Статьи по порядку + журнал + аналитика прогона.
 SECTIONS: list[tuple[str, Path, Path | None]] = [
     (
-        "Оптимизация скорости локальной LLM (Ollama + qwen3-vl)",
-        HABR / "2026-06-27--ollama-speed-optimization.md",
-        None,
-    ),
-    (
-        "RAG из медсправочников + синхронизация Garmin/Strava/Apple Health",
-        HABR / "2026-07-04--rag-and-health-sync.md",
-        None,
-    ),
-    (
-        "Локальные LLM без цензуры для разбора анализов",
-        HABR / "2026-07-05--uncensored-med-llm.md",
+        "Боткин: локальный медицинский ассистент на одной видеокарте",
+        HABR / "botkin-habr-article.md",
         HABR / "bench-uncensored",
     ),
     (
-        "Аналитика прогона uncensored-моделей",
+        "Методология замера производительности и точности нейросетей",
+        HABR / "benchmark-methodology.md",
+        HABR / "bench-uncensored",
+    ),
+    (
+        "Аналитика прогона uncensored-моделей (таблицы метрик)",
         HABR / "bench-uncensored" / "analysis.md",
         HABR / "bench-uncensored",
-    ),
-    (
-        "Журнал итераций: OCR/VLM-распознавание лабораторных результатов",
-        HABR / "lab-results-journal.md",
-        None,
     ),
 ]
 
@@ -363,11 +353,9 @@ def build_title_page(pdf: HabrPDF) -> None:
     pdf.ln(20)
     pdf.set_text_color(100, 100, 100)
     items = [
-        "1. Оптимизация скорости Ollama + qwen3-vl на RTX 3080 Laptop",
-        "2. RAG из медсправочников + синхронизация Garmin/Strava/Apple Health",
-        "3. Локальные LLM без цензуры: 5 свежих моделей, RAG из PubMed, живой веб",
-        "4. Аналитика прогона uncensored-моделей (6 графиков)",
-        "5. Журнал итераций OCR/VLM-распознавания лабораторных результатов",
+        "1. Статья: OCR анализов → RAG → uncensored-LLM → живой веб",
+        "2. Методология замера производительности и точности",
+        "3. Аналитика прогона 6 моделей (таблицы + 6 графиков)",
     ]
     for it in items:
         _mc(pdf, 5, it, 9)
