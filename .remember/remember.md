@@ -1,4 +1,52 @@
+# Handoff: master — аудит состояния проекта 2026-08-17
+
+**Ветка:** `master`
+**Цель:** проверить текущее состояние Botkin: незакоммиченные изменения, работоспособность бэкенда/фронтенда, лишний код.
+
+**Сделано:**
+- `pytest` — 659 passed, 44 deselected; `ruff check src tests` — чисто.
+- `uvicorn` запущен, проверены `/health`, статика, аутентификация, `/api/*`, загрузка документа до `extracted`.
+- UI-аудит Playwright: все экраны, кнопка камеры, мобильный viewport, загрузка через UI, тёмная/светлая тема — работают.
+- CLI-точки входа `botkin-api` и `botkin-bot` импортируются без ошибок.
+- Очистка по согласию пользователя: удалено 104 файла в корне (491 КБ) — `_*.py`, `_*.log`, `_*.out`,
+  `_*.json`, `_*.txt`, `_*.jpg`, плюс `extract_text.py`, `test_image.jpg/png`, `test_baseline.jpg`.
+  Удалены `proposals/` целиком (70 файлов, концепции логотипа со змеёй — решено НЕ переходить на новый
+  логотип), `_ui_audit_screenshots/` (13 PNG) и `scripts/_ui_audit.py`.
+  Оставлены сознательно: `bench_*.log` и `e2e_run.log` — первичные данные статьи.
+  `data/botkin.db` возвращён через `git restore`.
+- Графика фронтенда: гипотеза «используются PNG» не подтвердилась — интерфейс изначально на inline SVG
+  (favicon data-URI, все иконки `<svg>`, стрелка select — data-URI). Бинарные ассеты: только 2 `.woff2`.
+  Реальная растровая зависимость — эмодзи `🌤️`/`🧲`/`♈` в блоке «Внешние факторы»; заменены на inline SVG
+  (`stroke="currentColor"`, `stroke-width="1.7"`, viewBox 24×24). CSS `.external-icon`: `font-size: 24px`
+  → `line-height: 0` + `color: var(--brand-1)`.
+- После правок: 659 passed, `ruff check src tests` чист, `node --check app.js` OK.
+- Фактура: `habr/2026-08-17--frontend-audit-state.md`; журнал обновлён итерацией 48.
+
+**Состояние:**
+- Корень чистый: остались только конфиги, документация и bench-логи.
+- Незакоммиченные изменения в `src/botkin/web/*` (bindMethods, metricLabel, кнопка камеры, SVG-иконки),
+  `docs/deploy-local-web.md`, `.remember/*`, `habr/*`.
+- Untracked к коммиту: материалы статьи в `habr/` и `scripts/build_article_docx.py`.
+- Предсуществующий техдолг вне скоупа линта: `scripts/benchmark_backends.py` (F401),
+  `scripts/build_habr_pdf.py` (F841, E741). Не трогались.
+
+**Следующий шаг:**
+1. Пользователь проверяет работающий кабинет на http://127.0.0.1:8000 (бэк со статикой запущен).
+2. По итогам проверки — правки интерфейса либо закрытие задачи.
+
+---
+
 # Handoff: release/habr-article — Qwen vs Gemma e2e benchmark завершён
+
+## 2026-08-16: собрана полная статья для Хабра (docx)
+
+- Статья: `habr/2026-08-16--botkin-full-article.md` → `habr/2026-08-16--botkin-full-article.docx`
+  (172 абзаца, 6 таблиц, 10 мем-блоков, 16 код-блоков; все числа — из реальных прогонов).
+- Сборка: `scripts/build_article_docx.py` (python-docx; ставится во временное venv
+  `%TEMP%\article-venv` через `uv pip install --python ... python-docx`, проектный lock не тронут).
+- Фактура: `habr/2026-08-16--full-article-docx.md`.
+- Следующий шаг (если понадобится): добавить реальные скриншоты вместо описаний мемов,
+  тогда проще перейти на pandoc.
 
 **Ветка:** `release/habr-article`
 **Статус:** structured audit + humanize пройдены для всех трёх пациентов (Петров А.И., Петрова И.И., Саулина И.И.).
@@ -198,6 +246,22 @@
   Program Files/Start Menu/HKCU Run сохранены. В UAC Start-Process добавлен WindowStyle Hidden.
   Source trace scan снова пуст. Local commit `7ef7b89` создан one-shot Botkin Dev identity; no Git config change.
   GitHub remote по-прежнему не создан: MCP create_repository failure x4, local gh no auth.
+- 2026-08-17: контекст восстановлен фактической проверкой. Репозиторий чист, `origin` указывает на
+  `https://github.com/ipetrovanton/rtx-power-tray.git`, HEAD=`7ef7b89`; установленная v1.0.3 запущена
+  из Program Files в двух ожидаемых PyInstaller процессах, HKCU Run=`RtxPowerTray.exe --minimized`.
+  Controller закреплён на конкретном RTX PnP ID, status refresh=5s; Disable делает UAC
+  `Disable-PnpDevice`, но блокируется при active NVIDIA display/loaded Ollama. RTX сейчас Code=0,
+  P0/29.49W/56C/0%/0MiB; PnP action в сессии не выполняли.
+- 2026-08-17: пользователь сообщил, что RTX Power Tray не появляется в трее. Диагноз: процессы
+  запущены, но дочерний процесс `RtxPowerTray.exe` был в `Not Responding` (завис). Причина:
+  `controller.status()` синхронно вызывает `subprocess.run()` без таймаута для `ollama ps`,
+  `nvidia-smi` и `powershell.exe`; при неответе любого из них GUI-поток зависает, иконка не
+  регистрируется. Исправлено: добавлены `QUERY_TIMEOUT_S=10` и `ELEVATED_TIMEOUT_S=60`, все
+  `subprocess.run` в `controller.py` обернуты timeout + обработка `TimeoutExpired`. Версия поднята
+  до `1.0.4`, MSI пересобран и установлен (`RTX Power Tray 1.0.4` в `HKLM\Uninstall`). Зависшие
+  процессы убиты, приложение запущено вручную: оба процесса `Responding=True`. Коммит `e720d82`
+  запушен на `origin/main`; release v1.0.4 опубликован с MSI SHA-256
+  `5E53A0705EBD8D77000A682146D3B7C6CACBC252317D63CD8DE6DFDF4711421B`.
 
 **Benchmark Qwen/Gemma/MedGemma (2026-08-12) завершён.**
 - Temporary Ollama server `127.0.0.1:11435`: q8 KV-cache, Flash Attention, max one model, stopped after run.
@@ -256,3 +320,41 @@
   both models produced `verified_garmin_summary.md/.json`: sleep avg 7.48h/29d, HRV 32.72,
   resting HR 60.2, steps 5609.93, stress 36.1, Body Battery 63.17, activities 45738.17s /
   67658.72m / 10556 calories. Tests: 8 passed, ruff clean.
+
+# Handoff: дизайн-концепция BOTkin — профиль и змея-B
+
+**Ветка:** `master`  
+**Цель:** утвердить знак до интеграции во фронтенд.
+
+## Сделано (2026-08-14)
+
+- `proposals/generate_botkin.py`: 15 вариантов логотипа/леттеринга.
+- Профиль сверён с портретом Крамского 1880 года (Wikimedia Commons, public domain): высокий лоб, залысина, небольшая круглая оправа, тонкие усы, узкая длинная борода, бабочка.
+- После неудачного трёхчетвертного варианта выбран чистый правый профиль: одна видимая линза и дужка к уху; варианты 05–09 в `proposals/direction-botkin.html`.
+- Змея: голова слева от чаши, смотрит вправо; тело идёт спиралью за/перед чашей и продолжается в B; варианты 01–04.
+- Змея рендерится слоями: полный контур позади → чаша/ножка → передние сегменты → голова с вырезанным глазом и раздвоенным языком.
+- Галерея проверена headless Chrome в тёмной/светлой темах и крупном виде; временные скриншоты удалены.
+- `uv run ruff check proposals/generate_botkin.py` → `All checks passed!`.
+- Фактура обновлена: `habr/2026-08-14--design-concepts.md`, `habr/lab-results-journal.md` (Iteration 46).
+
+## Состояние и следующий шаг
+
+Интеграции в `src/botkin/web/` ещё нет. Пользователю нужно выбрать вариант профиля (05–09) и змеи (01–04) либо дать следующую правку. После утверждения — финальная ручная доводка выбранной геометрии, затем favicon/brand lockup и внедрение в интерфейс.
+
+# Handoff: доступ к локальному кабинету через интернет
+
+**Ветка:** `master`  
+**Статус:** исследование и документация завершены 2026-08-16; сетевые настройки на реальном роутере не применялись.
+
+## Сделано
+
+- `docs/deploy-local-web.md` переписан в детальную инструкцию на 504 строки: Tailscale Serve, KeenDNS, Keenetic/OpenWrt WireGuard, Caddy, Cloudflare Access, CGNAT и Windows Firewall.
+- Рекомендация: Tailscale Serve для доверенных устройств; KeenDNS только с `Password protected`, если нужен обычный браузер без VPN-клиента.
+- Выявлен публичный blocker: `get_user_id()` доверяет внешнему `X-Telegram-User-Id`; также cookie `secure=False`, регистрация открыта, отсутствуют rate limiting и Trusted Hosts.
+- Нельзя публиковать `8000`, Ollama `11434`, MinIO `9000/9001`; наружу должен смотреть только VPN или HTTPS reverse proxy с внешней авторизацией.
+- Cudy TR3000/OpenWrt при CGNAT сам входящую доступность не создаёт; старые firmware images опасны для нового NAND ревизий конца 2025 года.
+- `git diff --check -- docs/deploy-local-web.md habr/2026-08-16--internet-access-options.md` — exit code 0.
+
+## Следующий шаг
+
+Если пользователь выберет конкретную схему и попросит внедрение: сначала уточнить модель/режим Keenetic либо версию OpenWrt, WAN IPv4/CGNAT и нужен ли доступ без клиентского приложения; затем настраивать только выбранный вариант. Для публичного URL до настройки сети сначала исправить production auth blockers из раздела 13 инструкции.

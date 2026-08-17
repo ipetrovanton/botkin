@@ -1,3 +1,14 @@
+2026-08-17 — аудит состояния проекта на master.
+- pytest: 659 passed, 44 deselected; ruff check src tests: clean.
+- FastAPI + uvicorn работает; /health, статика, API аутентификации и загрузка документа до extracted — OK.
+- UI-аудит Playwright: все экраны, кнопка камеры, мобильный viewport, загрузка через UI, темы — OK.
+- Очистка выполнена: удалено 104 файла в корне (491 КБ), proposals/ (70 файлов), _ui_audit_screenshots/, scripts/_ui_audit.py.
+- Оставлены bench_*.log и e2e_run.log (первичные данные статьи); data/botkin.db возвращён git restore.
+- Логотип НЕ меняем — вариант со змеёй отклонён, proposals/ удалена.
+- PNG во фронтенде не было: всё уже inline SVG. Заменены только эмодзи 🌤️/🧲/♈ на SVG-иконки.
+- После правок: 659 passed, ruff check src tests чист, node --check app.js OK.
+- Фактура: habr/2026-08-17--frontend-audit-state.md; журнал обновлён итерацией 48.
+
 2026-08-13 — e2e patient benchmark Qwen/Gemma, release/habr-article.
 - Перезапущен Ollama с OLLAMA_KV_CACHE_TYPE=q8_0 + OLLAMA_FLASH_ATTENTION=1.
 - structured_audit.py: lab_batch_size 16→32, num_ctx 8192→16384, num_predict 4096→8192.
@@ -84,3 +95,9 @@ qwen2.5vl:7b исключена из покрытия (76.3%, слишком с�
 2026-08-12 | release/habr-article | final TPL outcome: exact 30/40/8 raw confirmed, but 60s real-background preflight still 85.85/94/97C at only 15.4% CPU. AC Turbo reverted to PERFBOOSTMODE=0; post-revert 60s cooling=63.97/67/68C, 13.99/16.88/17.75W, locked 2611MHz. ThrottleStop process stopped and audit dir removed. Current safe state Turbo disabled AC/DC; no further TPL tuning until cooling/background root cause resolved.
 2026-08-12 | release/habr-article | user explicitly requested Turbo back + ThrottleStop. Applied PERFBOOSTMODE AC=1/DC=0 and verified. Downloaded current stable TS 9.7 into temp with winget hash verification and Valid TechPowerUp signature; started PID 28796 and restored foreground. No TPL/voltage/lock changes made in this new run. Temp path C:\Users\ipetr\AppData\Local\Temp\ThrottleStop-open-12468.
 2026-08-12 | release/habr-article | FIVR check: CPU Core selected, Unlock Adjustable Voltage checkbox cannot be enabled, offset stays 0.0mV. Native voltage interface is firmware-locked. Do not attempt BIOS downgrade/hidden UEFI variables/modified firmware; Intel XTU is unsupported for i9-11950H/WM590. Turbo stays AC=1/DC=0 by user's latest explicit request; TS remains open, no voltage/TPL write in current run.
+2026-08-14 | master | Дизайн BOTkin: профиль исправлен по реальному портрету Крамского — смотрит вправо, очки, залысина, узкая борода; голова змеи слева от чаши и направлена вправо, тело послойно проходит спиралью и продолжается в B. Превью: proposals/direction-botkin.html; ruff чист; интеграция ждёт выбора пользователя.
+2026-08-14 | master | Кобра доработана: открытая пасть с 3 клыками и языком, cobra_width() капюшон-горб smoothstep, слои тело-сзади→голова→чаша→B-спереди, первый виток за чашей. Грабли: пасть съедала собственная шея — решён S-изгибом затылка; угол головы задан явно (-24°). ruff чист.
+2026-08-14 | master | Вариант 01 «наливная кобра-B» доведён: fmt 3 знака + 60 точек на сегмент, раздельные челюсти с прозрачной пастью, 3 клыка + 2 мелких зуба, зрачок-щель, 3 прорези на капюшоне, чаша с двойным ободом и бликом. Галерея перегенерирована; ruff чист. Превью: 127.0.0.1:55548/direction-botkin.html.
+2026-08-14 | master | По фидбеку: убран внутренний обод чаши, убраны фронтальные сегменты змеи; чаша теперь рисуется последней и перекрывает тело кобры, которая проходит за неё. Голова остаётся видимой слева. ruff чист. Превью: 127.0.0.1:55548/direction-botkin.html.
+2026-08-16 | master | Инструкция интернет-доступа завершена: docs/deploy-local-web.md (504 строки), рекомендуются Tailscale Serve или KeenDNS Password protected; прямой 8000 запрещён из-за legacy X-Telegram-User-Id. git diff --check целевого документа чист.
+2026-08-17 | master | Контекст RTX Power Tray восстановлен: repo C:\Sandbox\rtx-power-tray clean, public origin ipetrovanton/rtx-power-tray, HEAD 7ef7b89. Installed v1.0.3 runs as expected two PyInstaller parent/child processes from Program Files with HKCU Run --minimized. Core: pinned RTX 3080 PnP ID; status poll 5s, UAC PnP Enable/Disable, blocks disable for active NVIDIA display or loaded Ollama. Current RTX enabled Code0 but P0 29.49W/56C, 0%/0MiB; no PnP action executed.
