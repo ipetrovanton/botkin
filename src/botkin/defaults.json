@@ -112,12 +112,5 @@
     "tokens_dir": "./data/health_tokens",
     "sync_days": 30,
     "request_pause": 0.5
-  },
-  "external": {
-    "default_latitude": 55.7558,
-    "default_longitude": 37.6173,
-    "weather_enabled": true,
-    "geomagnetic_enabled": true,
-    "astrology_enabled": false
   }
 }

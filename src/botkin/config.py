@@ -237,14 +237,6 @@ class HealthConfig(BaseModel):
     strava_client_secret: str
 
 
-class ExternalConfig(BaseModel):
-    default_latitude: float
-    default_longitude: float
-    weather_enabled: bool
-    geomagnetic_enabled: bool
-    astrology_enabled: bool
-
-
 class Settings(BaseModel):
     vlm: VlmConfig
     text_model: TextModelConfig
@@ -260,7 +252,6 @@ class Settings(BaseModel):
     analytes: AnalytesConfig
     rag: RagConfig
     health: HealthConfig
-    external: ExternalConfig
 
 
 def _build_settings() -> Settings:
@@ -383,13 +374,6 @@ def _build_settings() -> Settings:
             request_pause=setting("health.request_pause", "HEALTH_REQUEST_PAUSE", float),
             strava_client_id=os.getenv("STRAVA_CLIENT_ID", ""),
             strava_client_secret=os.getenv("STRAVA_CLIENT_SECRET", ""),
-        ),
-        external=ExternalConfig(
-            default_latitude=setting("external.default_latitude", "EXT_DEFAULT_LAT", float),
-            default_longitude=setting("external.default_longitude", "EXT_DEFAULT_LON", float),
-            weather_enabled=setting("external.weather_enabled", "EXT_WEATHER_ENABLED", _as_bool),
-            geomagnetic_enabled=setting("external.geomagnetic_enabled", "EXT_GEOMAGNETIC_ENABLED", _as_bool),
-            astrology_enabled=setting("external.astrology_enabled", "EXT_ASTROLOGY_ENABLED", _as_bool),
         ),
     )
 
@@ -575,10 +559,3 @@ HEALTH_REQUEST_PAUSE = settings.health.request_pause
 STRAVA_CLIENT_ID = settings.health.strava_client_id
 STRAVA_CLIENT_SECRET = settings.health.strava_client_secret
 
-# Внешние данные для рекомендаций: погода (Open-Meteo), геомагнитная активность
-# (NOAA SWPC), астрология (развлекательный модуль, по умолчанию выключен).
-EXT_DEFAULT_LAT = settings.external.default_latitude
-EXT_DEFAULT_LON = settings.external.default_longitude
-EXT_WEATHER_ENABLED = settings.external.weather_enabled
-EXT_GEOMAGNETIC_ENABLED = settings.external.geomagnetic_enabled
-EXT_ASTROLOGY_ENABLED = settings.external.astrology_enabled

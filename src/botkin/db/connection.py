@@ -48,10 +48,6 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "unit_mismatch": "INTEGER",
     },
     "doctor_reports": {"medications_normalized_json": "TEXT"},
-    "patient_profile": {
-        "latitude": "REAL",
-        "longitude": "REAL",
-    },
 }
 
 
@@ -67,6 +63,20 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
 def _drop_prescriptions(conn: sqlite3.Connection) -> None:
     """Тип prescription снят с поддержки — удаляем таблицу из старых БД."""
     conn.execute("DROP TABLE IF EXISTS prescriptions")
+    conn.commit()
+
+
+def _drop_profile_coordinates(conn: sqlite3.Connection) -> None:
+    """Погодный блок снят — координаты пациенту больше не нужны.
+
+    latitude/longitude заводились только под запрос погоды по месту жительства.
+    DROP COLUMN доступен с SQLite 3.35; проверка по PRAGMA делает вызов
+    идемпотентным, как и остальные миграции.
+    """
+    existing = {r["name"] for r in conn.execute("PRAGMA table_info(patient_profile)").fetchall()}
+    for column in ("latitude", "longitude"):
+        if column in existing:
+            conn.execute(f"ALTER TABLE patient_profile DROP COLUMN {column}")
     conn.commit()
 
 
@@ -200,6 +210,7 @@ def init_db() -> None:
         _migrate_documents_schema(conn)
         _migrate_rag_chunks_schema(conn)
         _drop_prescriptions(conn)
+        _drop_profile_coordinates(conn)
 
 
 @contextmanager

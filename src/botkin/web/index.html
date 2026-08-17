@@ -168,44 +168,6 @@
           </button>
         </div>
       </div>
-
-      <!-- Внешние факторы: погода, геомагнитная активность -->
-      <div class="panel" x-show="external.today" x-cloak>
-        <div class="panel-head"><h2 class="panel-title">Внешние факторы</h2></div>
-        <div class="external-grid">
-          <template x-if="external.today?.weather">
-            <div class="external-card">
-              <div class="external-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.5" cy="7.5" r="3"/><path d="M8.5 2.2v1.5M3.2 7.5h1.5M12.3 7.5h1.5M4.75 3.75l1.05 1.05M12.25 3.75l-1.05 1.05"/><path d="M17.5 20.5H8a3.5 3.5 0 01-.4-6.98 4.6 4.6 0 018.72-1.02 3.5 3.5 0 011.18 8z"/></svg>
-              </div>
-              <div class="external-val" x-text="external.today.weather.temperature + '°C'"></div>
-              <div class="external-lbl" x-text="external.today.weather.description"></div>
-              <div class="muted" style="font-size:11px;margin-top:2px">
-                Ветер <span x-text="external.today.weather.windspeed + ' км/ч'"></span>,
-                влажность <span x-text="external.today.weather.humidity + '%'"></span>
-              </div>
-            </div>
-          </template>
-          <template x-if="external.today?.geomagnetic">
-            <div class="external-card">
-              <div class="external-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 20.5V12a7.5 7.5 0 0115 0v8.5h-5V12a2.5 2.5 0 00-5 0v8.5z"/><path d="M4.5 16h5M14.5 16h5"/></svg>
-              </div>
-              <div class="external-val" x-text="'Kp ' + external.today.geomagnetic.kp_index"></div>
-              <div class="external-lbl" x-text="external.today.geomagnetic.level"></div>
-            </div>
-          </template>
-          <template x-if="external.today?.horoscope">
-            <div class="external-card external-card--fun">
-              <div class="external-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.4l2.45 5.3 5.8.62-4.33 3.92 1.2 5.7L12 16.1l-5.12 2.84 1.2-5.7-4.33-3.92 5.8-.62z"/></svg>
-              </div>
-              <div class="external-val" x-text="external.today.horoscope.sign"></div>
-              <div class="external-lbl" style="font-size:11px" x-text="external.today.horoscope.text"></div>
-            </div>
-          </template>
-        </div>
-      </div>
     </section>
     <section x-show="screen==='documents'" class="screen">
       <div class="screen-head">
@@ -1016,26 +978,6 @@
         </div>
         <textarea class="filter-input" rows="2" placeholder="Аллергии (лекарства, продукты…)" style="margin-top:10px" x-model="patient.profile.allergies"></textarea>
         <textarea class="filter-input" rows="2" placeholder="Хронические состояния" style="margin-top:10px" x-model="patient.profile.chronic_conditions"></textarea>
-        <div class="filter-row" style="margin-top:10px">
-          <input type="text" class="filter-input" placeholder="Город (для погоды)"
-                 x-model="patient.cityQuery"
-                 @input="searchCities()"
-                 @focus="patient.showCities = true"
-                 @blur="setTimeout(() => patient.showCities = false, 200)">
-          <input type="hidden" x-model="patient.profile.latitude">
-          <input type="hidden" x-model="patient.profile.longitude">
-        </div>
-        <div x-show="patient.showCities && patient.cityResults.length" x-cloak
-             style="position:relative;z-index:10">
-          <div class="autocomplete-list">
-            <template x-for="c in patient.cityResults" :key="c.label">
-              <div class="autocomplete-item" @mousedown="selectCity(c)">
-                <span x-text="c.name"></span>
-                <span class="muted" style="font-size:12px;margin-left:6px" x-text="c.region"></span>
-              </div>
-            </template>
-          </div>
-        </div>
         <button class="btn btn-primary" style="margin-top:10px" @click="savePatientProfile()" :disabled="patient.busy">Сохранить</button>
       </div>
 

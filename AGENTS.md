@@ -118,8 +118,7 @@ botkin/
 │   │       ├── admin.py     # /api/admin/* — пользователи, анализы (роль admin)
 │   │       ├── health_sync.py # /api/health/* — Garmin Connect, метрики
 │   │       ├── rag.py       # /api/rag/* — индексация, рекомендации, research, бенчмарк
-│   │       ├── external.py  # /api/external/* — погода, геомагнитка, гороскоп
-│   │       └── directory.py # /api/directory/* — автодополнение: препараты, города
+│   │       └── directory.py # /api/directory/* — автодополнение: препараты
 │   ├── bot/                 # Telegram-бот (aiogram)
 │   │   ├── main.py          # Точка входа бота
 │   │   └── handlers/        # /start, /help, /show, /dynamics, upload
@@ -215,11 +214,10 @@ Ollama должна быть доступна по `OLLAMA_URL` (по умолч
 
 ---
 
-## 📡 5.2. Новые API-эндпоинты (справочники, RAG, внешние данные)
+## 📡 5.2. Новые API-эндпоинты (справочники, RAG)
 
 ### Справочники (автодополнение в формах)
 - `GET /api/directory/drugs?q=парацет` — поиск препаратов по ГРЛС (префикс, ≥2 символа)
-- `GET /api/directory/cities?q=Моск` — поиск городов РФ с координатами (префикс, ≥2 символа)
 
 ### RAG
 - `POST /api/rag/reindex` — индексация справочников ГРЛС/ФСЛИ в векторный индекс
@@ -231,11 +229,8 @@ Ollama должна быть доступна по `OLLAMA_URL` (по умолч
 - `GET /api/rag/research/status` — статус обновления PubMed
 - `POST /api/rag/benchmark` — бенчмарк embedding-моделей (hit_rate, MRR, avg_distance)
 
-### Внешние данные
-- `GET /api/external/today` — погода, геомагнитная активность, гороскоп (по координатам профиля)
-
 ### Пациент
-- `GET/PUT /api/patient/profile` — профиль тела (пол, рост, вес, группа крови, аллергии, координаты)
+- `GET/PUT /api/patient/profile` — профиль тела (пол, рост, вес, группа крови, аллергии)
 - `GET/POST/DELETE /api/patient/complaints` — жалобы
 - `GET/POST/PATCH/DELETE /api/patient/medications` — текущие препараты
 

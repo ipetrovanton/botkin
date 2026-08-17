@@ -12,6 +12,17 @@
 - После правок: 661 passed, ruff check src tests чист, node --check app.js OK.
 - Фактура: habr/2026-08-17--frontend-audit-state.md; журнал обновлён итерацией 48.
 
+2026-08-17 (2) | master | Погодный блок удалён целиком (итерация 49 журнала).
+- Снесены: пакет external/ (weather+astrology), роут /api/external/today, reference/cities.py+json,
+  эндпоинт /api/directory/cities, tests/test_external.py.
+- Отвязаны: app.py, rag/context.py (_external_context), config.py (ExternalConfig + EXT_*),
+  defaults.json (секция external), промпты rag_recommend.md и lifestyle_recommend.md.
+- БД: TDD-миграция _drop_profile_coordinates() убирает latitude/longitude из patient_profile.
+- Находка: пикер города был мёртвым — в ProfileRequest нет полей lat/lon, Pydantic их отбрасывал,
+  координаты никогда не сохранялись, погода всегда шла по дефолтной Москве.
+- scripts/bench/* НЕ трогали: их external.weather.available — guard от галлюцинаций для статьи.
+- 643 passed, ruff чист, консоль браузера чиста. Сервер перезапущен на 127.0.0.1:8000.
+
 2026-08-13 — e2e patient benchmark Qwen/Gemma, release/habr-article.
 - Перезапущен Ollama с OLLAMA_KV_CACHE_TYPE=q8_0 + OLLAMA_FLASH_ATTENTION=1.
 - structured_audit.py: lab_batch_size 16→32, num_ctx 8192→16384, num_predict 4096→8192.

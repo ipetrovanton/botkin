@@ -60,7 +60,7 @@ RAG-рекомендации на основе анализов, данных н
                    ┌──────────▼─────────┐   ┌──────▼─────────────────────┐
                    │  Ollama (WSL2)     │   │ reference/drugs/  (ГРЛС)   │
                    │  qwen3-vl:8b-instr │   │ reference/analytes/ (ФСЛИ) │
-                   │  bge-m3 (embed)    │   │ reference/cities.json     │
+                   │  bge-m3 (embed)    │   │                            │
                    └────────────────────┘   └────────────────────────────┘
                               │
                    ┌──────────▼─────────┐   ┌────────────────────────────┐
@@ -225,7 +225,7 @@ botkin/
 │   ├── preprocess/images.py # Подготовка PDF/фото к VLM
 │   ├── rag/                 # embeddings.py, store.py, retriever.py, indexer.py,
 │   │                        # recommend.py, research.py, benchmark.py, websearch.py
-│   ├── reference/           # units.py, drugs/ (ГРЛС), analytes/ (ФСЛИ), cities.json
+│   ├── reference/           # units.py, drugs/ (ГРЛС), analytes/ (ФСЛИ)
 │   ├── storage.py           # LocalStorage / MinioStorage (S3)
 │   ├── viz/plots.py         # Графики динамики (Plotly)
 │   ├── web/                 # SPA: index.html, app.js, styles.css, vendor/alpine.min.js

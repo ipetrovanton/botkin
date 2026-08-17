@@ -12,7 +12,6 @@ class PatientRepo(BaseRepo):
     PROFILE_COLUMNS = frozenset({
         "sex", "birth_date", "height_cm", "weight_kg",
         "blood_type", "allergies", "chronic_conditions",
-        "latitude", "longitude",
     })
 
     # --- профиль тела ---

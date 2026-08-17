@@ -3699,3 +3699,78 @@ TOAST: scan.gif: формат не поддерживается — нужен P
 Итог: **661 passed**, `ruff check src tests` чист.
 
 Урок: `accept` — подсказка для диалога, а не валидация; его всё равно обходит drag-and-drop. Поэтому внятное сообщение об ошибке нужно независимо от того, насколько точно настроен фильтр.
+
+## Итерация 49: снятие блока внешних факторов — и мёртвый пикер города под ним
+
+### Проблема
+
+В логах сервера постоянно висело `[WARNING] botkin.external.weather: не удалось получить Kp`. Пользователь решил убрать погодный блок из фронтенда и бэкенда целиком.
+
+### Диагноз
+
+Погода оказалась проросшей в шесть слоёв, а не в один виджет:
+
+| Слой | Что связано |
+|---|---|
+| `external/weather.py` | 210 строк: `fetch_weather`, `fetch_geomagnetic`, `gather_external_context` — погода и Kp в одном модуле |
+| `api/routes/external.py` | эндпоинт `/api/external/today` |
+| `rag/context.py` | `_external_context()` подмешивал погоду в контекст LLM |
+| промпты | `rag_recommend.md` и `lifestyle_recommend.md` инструктировали учитывать метеозависимость |
+| `config.py` / `defaults.json` | `ExternalConfig` и пять констант `EXT_*` |
+| фронтенд + БД | панель «Внешние факторы», пикер города, колонки `latitude`/`longitude` |
+
+**Главная находка — пикер города был мёртвым.** UI записывал координаты в `patient.profile.latitude/longitude` и слал их в `PUT /api/patient/profile`, но в `ProfileRequest` таких полей нет, а `set_fields()` строится по `model_fields_set`. Pydantic молча отбрасывал их, и до `upsert_profile()` они не доходили.
+
+Проверено изолированно, на временной БД:
+
+```text
+PUT : 200
+GET : {'sex': 'male', 'latitude': None, 'longitude': None}
+```
+
+`sex` сохранился, координаты — нет. То есть погода **всегда** запрашивалась по дефолтной Москве из `defaults.json`, сколько бы город пользователь ни выбирал. Функция существовала в интерфейсе, но не работала ни дня.
+
+### Решение
+
+Удалено: пакет `external/` (weather + astrology), роут `external.py`, справочник `reference/cities.py` и `cities.json`, эндпоинт `/api/directory/cities`, `tests/test_external.py`.
+
+Отвязано: регистрация роутера в `app.py`, `_external_context()` и его вызов в `rag/context.py`, `ExternalConfig` с константами `EXT_*`, секция `external` в `defaults.json`, упоминания погоды в двух промптах (с перенумерацией правил).
+
+Схема БД — TDD. RED: два теста, на свежей БД и на legacy-БД с данными. GREEN: `_drop_profile_coordinates()` по образцу существующего `_drop_prescriptions()`, идемпотентный через `PRAGMA table_info`:
+
+```python
+existing = {r["name"] for r in conn.execute("PRAGMA table_info(patient_profile)").fetchall()}
+for column in ("latitude", "longitude"):
+    if column in existing:
+        conn.execute(f"ALTER TABLE patient_profile DROP COLUMN {column}")
+```
+
+`ALTER TABLE ... DROP COLUMN` доступен с SQLite 3.35; в окружении 3.50.4. Legacy-тест проверяет, что прочие поля профиля переживают миграцию.
+
+Бенчмарки `scripts/bench/*` намеренно не тронуты: их `external.weather.available` — это guard от галлюцинаций, погода там жёстко задана как недоступная, обращения к модулю нет. На эти прогоны опираются цифры статьи.
+
+### Итог
+
+Проверка на перезапущенном сервере:
+
+```text
+/api/external/today              -> 404
+/api/directory/cities?q=Моск     -> 404
+/api/directory/drugs             -> 200
+profile keys: allergies, birth_date, blood_type, chronic_conditions,
+              height_cm, sex, updated_at, user_id, weight_kg
+```
+
+**643 passed** (было 661: минус 20 тестов удалённых модулей, плюс 2 миграционных), `ruff check src tests` чист, `node --check app.js` OK, ошибок в консоли браузера нет.
+
+### Побочная находка: закоммиченная SQLite ломает откат
+
+`git restore data/botkin.db` вернул БД к состоянию из коммита — а там схема **старее** текущего кода: нет колонок `email` и `sync_interval_hours`. Сервер к тому моменту уже стартовал, а миграции применяются только в `init_db()` при запуске. Итог — 500 на регистрации:
+
+```text
+sqlite3.OperationalError: no such column: email
+```
+
+Лечится перезапуском (миграции догоняют схему), но сам факт показателен: бинарная БД в git — это артефакт, который при откате тихо понижает схему и расходится с кодом. Для статьи — аргумент против версионирования рабочей SQLite вместе с исходниками.
+
+Урок: прежде чем удалять «просто виджет», стоит пройти по всем слоям. Здесь за виджетом обнаружились мёртвый пикер города, две колонки в БД, инструкции в промптах LLM и пять констант конфига.

@@ -28,6 +28,58 @@ def test_prescriptions_table_dropped(set_test_db):
     assert "prescriptions" not in names
 
 
+def test_profile_coordinates_dropped(set_test_db):
+    """Погодный блок снят — координаты в профиле больше не хранятся.
+
+    latitude/longitude заводились только ради запроса погоды по месту
+    пациента. Через API они всё равно не сохранялись (в ProfileRequest таких
+    полей не было), так что колонки были мёртвым грузом.
+    """
+    from botkin.db.connection import get_conn
+    with get_conn() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(patient_profile)").fetchall()}
+    assert "latitude" not in cols and "longitude" not in cols
+    # Остальной профиль не пострадал.
+    assert {"sex", "birth_date", "height_cm", "weight_kg"} <= cols
+
+
+def test_legacy_profile_coordinates_removed_keeping_data(tmp_path, monkeypatch):
+    """Старая БД с колонками координат чистится, прочие поля профиля целы."""
+    import importlib
+    import sqlite3
+
+    db = tmp_path / "legacy_geo.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript("""
+        CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_user_id INTEGER UNIQUE);
+        CREATE TABLE patient_profile (
+            user_id INTEGER PRIMARY KEY REFERENCES users(id),
+            sex TEXT, birth_date TEXT, height_cm REAL, weight_kg REAL,
+            blood_type TEXT, allergies TEXT, chronic_conditions TEXT,
+            latitude REAL, longitude REAL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO users (id, telegram_user_id) VALUES (1, 42);
+        INSERT INTO patient_profile (user_id, sex, height_cm, latitude, longitude)
+        VALUES (1, 'male', 180.0, 55.75, 37.61);
+    """)
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setenv("SQLITE_PATH", str(db))
+    import botkin.config
+    import botkin.db.connection
+    importlib.reload(botkin.config)
+    importlib.reload(botkin.db.connection)
+    botkin.db.connection.init_db()
+
+    with botkin.db.connection.get_conn() as c:
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(patient_profile)").fetchall()}
+        row = c.execute("SELECT sex, height_cm FROM patient_profile WHERE user_id=1").fetchone()
+    assert "latitude" not in cols and "longitude" not in cols
+    assert row["sex"] == "male" and row["height_cm"] == 180.0
+
+
 def test_migration_idempotent(set_test_db):
     # Повторный init_db не должен падать на уже добавленных колонках.
     from botkin.db.connection import init_db

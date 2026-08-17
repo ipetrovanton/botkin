@@ -3,7 +3,7 @@
 Контекст собирается из трёх источников:
 1. Профиль пациента из БД — свежие отклонения анализов, назначенные лекарства.
 2. Заключения врачей и лабораторные отклонения.
-3. Данные носимых устройств за последние 2 недели (агрегаты) и внешние факторы.
+3. Данные носимых устройств за последние 2 недели (агрегаты).
 
 Модуль не зависит от конкретной RAG-задачи: вызывается и из `recommend`,
 и из `recommend_lifestyle`.
@@ -16,16 +16,8 @@ import logging
 import sqlite3
 
 from botkin.clinical.facts import build_lab_facts, render_lab_facts
-from botkin.config import (
-    EXT_ASTROLOGY_ENABLED,
-    EXT_DEFAULT_LAT,
-    EXT_DEFAULT_LON,
-    EXT_GEOMAGNETIC_ENABLED,
-    EXT_WEATHER_ENABLED,
-)
 from botkin.db.connection import get_conn
 from botkin.db.repos import HealthRepo, PatientRepo
-from botkin.external import astrology, weather
 
 log = logging.getLogger(__name__)
 
@@ -113,41 +105,6 @@ def _reports_context(conn: sqlite3.Connection, user_id: int) -> str | None:
     return "\n".join(lines) if len(lines) > 1 else None
 
 
-def _external_context(conn: sqlite3.Connection, user_id: int) -> str | None:
-    """Погода, геомагнитная активность и (опционально) развлекательный гороскоп.
-
-    Погода запрашивается по координатам из профиля пациента или по умолчанию (Москва).
-    Все источники — graceful: при ошибке сети блок просто пропускается.
-    """
-    lines: list[str] = []
-
-    lat, lon = EXT_DEFAULT_LAT, EXT_DEFAULT_LON
-    birth_date = None
-    repo = PatientRepo(conn, user_id)
-    profile = repo.get_profile()
-    if profile:
-        if profile.get("latitude"):
-            lat = profile["latitude"]
-        if profile.get("longitude"):
-            lon = profile["longitude"]
-        birth_date = profile.get("birth_date")
-
-    if EXT_WEATHER_ENABLED or EXT_GEOMAGNETIC_ENABLED:
-        ext = weather.gather_external_context(
-            latitude=lat if EXT_WEATHER_ENABLED else None,
-            longitude=lon if EXT_WEATHER_ENABLED else None,
-        )
-        if ext:
-            lines.append(ext)
-
-    if EXT_ASTROLOGY_ENABLED:
-        horo = astrology.get_daily_horoscope(birth_date)
-        if horo:
-            lines.append(horo)
-
-    return "\n".join(lines) if lines else None
-
-
 def build_patient_context(user_id: int) -> str:
     """Профиль/жалобы/препараты + отклонения анализов + назначения + носимые устройства."""
     parts: list[str] = []
@@ -194,8 +151,4 @@ def build_patient_context(user_id: int) -> str:
                 unit = rows[0].get("unit") or ""
                 lines.append(f"- {metric}: среднее {avg:.1f} {unit}".rstrip())
             parts.append("\n".join(lines))
-
-        ext_block = _external_context(conn, user_id)
-        if ext_block:
-            parts.append(ext_block)
     return "\n\n".join(parts) if parts else "Данных о пациенте в базе нет."

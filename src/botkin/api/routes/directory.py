@@ -1,6 +1,6 @@
-"""API веб-кабинета: справочники — поиск препаратов (ГРЛС) и городов РФ.
+"""API веб-кабинета: справочник препаратов (ГРЛС).
 
-Автодополнение в формах: ввод названия препарата / города → топ совпадений.
+Автодополнение в формах: ввод названия препарата → топ совпадений.
 """
 from __future__ import annotations
 
@@ -47,15 +47,3 @@ def search_drugs(
             "ref_key": r["ref_key"],
         })
     return results
-
-
-@router.get("/cities")
-def search_cities(
-    q: str = Query(..., min_length=2, max_length=100),
-    limit: int = Query(10, ge=1, le=50),
-    user_id: int = Depends(get_user_id),
-) -> list[dict]:
-    """Поиск городов РФ по первым буквам. Возвращает [{name, region, lat, lon, type, label}]."""
-    from botkin.reference.cities import search_cities as _search
-
-    return _search(q, limit=limit)
