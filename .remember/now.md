@@ -23,6 +23,20 @@
 - scripts/bench/* НЕ трогали: их external.weather.available — guard от галлюцинаций для статьи.
 - 643 passed, ruff чист, консоль браузера чиста. Сервер перезапущен на 127.0.0.1:8000.
 
+2026-08-17 (3) | master | Миграции приведены к сходимости (итерация 50 журнала).
+- data/botkin.db лежит в Git LFS (161 МБ); git restore тянет реальную базу из LFS-кэша.
+- Найдено DDL-сравнением: 11 висячих FK на _users_old/_documents_old. Причина — ALTER TABLE RENAME
+  в SQLite >=3.25 переписывает REFERENCES дочерних таблиц; после DROP ссылка висячая.
+- Найдено тестом сходимости: _migrate_documents_schema терял file_sha256 и verified_at
+  (захардкоженный new_ddl + new_cols). Хеш дедупликации и флаг верификации пропадали.
+- Фикс в db/connection.py: PRAGMA legacy_alter_table=ON вокруг renames; новый
+  _repair_dangling_foreign_keys(); _copy_shared_columns() вместо ручных списков;
+  _apply_migrations вызывается дважды (до и после пересозданий, идемпотентно).
+- Новые тесты: test_legacy_db_converges_to_fresh_schema, test_migration_leaves_no_dangling_foreign_keys.
+- Проверено на реальной БД: данные целы (2/35/318/9), висячих FK нет, схемы совпадают.
+- data/botkin.db закоммичена в мигрированном виде — git restore больше не понижает схему.
+- 645 passed, ruff чист.
+
 2026-08-13 — e2e patient benchmark Qwen/Gemma, release/habr-article.
 - Перезапущен Ollama с OLLAMA_KV_CACHE_TYPE=q8_0 + OLLAMA_FLASH_ATTENTION=1.
 - structured_audit.py: lab_batch_size 16→32, num_ctx 8192→16384, num_predict 4096→8192.

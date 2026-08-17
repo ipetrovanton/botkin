@@ -1,4 +1,5 @@
 """Подключение к SQLite."""
+import re
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -8,6 +9,14 @@ from botkin.config import SQLITE_PATH
 
 DB_PATH = Path(SQLITE_PATH)
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+
+# Промежуточные имена, под которыми миграции пересоздают таблицы, и их реальные
+# цели. Нужны для восстановления FK: см. _repair_dangling_foreign_keys.
+_MIGRATION_TEMP_TABLES = {
+    "_users_old": "users",
+    "_documents_old": "documents",
+    "_rag_chunks_old": "rag_chunks",
+}
 
 
 # Колонки, добавляемые поверх существующих таблиц (идемпотентно).
@@ -49,6 +58,20 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
     },
     "doctor_reports": {"medications_normalized_json": "TEXT"},
 }
+
+
+def _copy_shared_columns(conn: sqlite3.Connection, source: str, target: str) -> None:
+    """Переносит данные по колонкам, присутствующим в обеих таблицах.
+
+    Список считается из PRAGMA, а не перечисляется вручную: захардкоженный
+    перечень отстаёт от схемы, и добавленную в _MIGRATIONS колонку легко забыть
+    в переносе. Так при пересоздании documents терялись file_sha256 (хеш
+    дедупликации) и verified_at (подтверждение пользователем).
+    """
+    src = {r["name"] for r in conn.execute(f"PRAGMA table_info({source})").fetchall()}
+    dst = {r["name"] for r in conn.execute(f"PRAGMA table_info({target})").fetchall()}
+    columns = ", ".join(f'"{c}"' for c in sorted(src & dst))
+    conn.execute(f"INSERT INTO {target} ({columns}) SELECT {columns} FROM {source}")
 
 
 def _apply_migrations(conn: sqlite3.Connection) -> None:
@@ -95,6 +118,10 @@ def _migrate_users_schema(conn: sqlite3.Connection) -> None:
         return  # уже мигрировано или свежая схема
 
     conn.execute("PRAGMA foreign_keys=OFF")
+    # legacy_alter_table=ON обязателен: с SQLite 3.25 обычный RENAME переписывает
+    # REFERENCES в дочерних таблицах вслед за переименованием, и после DROP
+    # временной таблицы ссылки становятся висячими.
+    conn.execute("PRAGMA legacy_alter_table=ON")
     conn.execute("ALTER TABLE users RENAME TO _users_old")
     conn.executescript("""
         CREATE TABLE users (
@@ -108,11 +135,9 @@ def _migrate_users_schema(conn: sqlite3.Connection) -> None:
         )
     """)
     # Переносим все колонки, которые существуют в старой таблице.
-    old_cols = {r["name"] for r in conn.execute("PRAGMA table_info(_users_old)").fetchall()}
-    new_cols = ["id", "telegram_user_id", "role", "display_name", "created_at"]
-    shared = ", ".join(c for c in new_cols if c in old_cols)
-    conn.execute(f"INSERT INTO users ({shared}) SELECT {shared} FROM _users_old")
+    _copy_shared_columns(conn, "_users_old", "users")
     conn.execute("DROP TABLE _users_old")
+    conn.execute("PRAGMA legacy_alter_table=OFF")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.commit()
 
@@ -143,25 +168,23 @@ def _migrate_documents_schema(conn: sqlite3.Connection) -> None:
         clinic TEXT,
         delivered_at TIMESTAMP,
         stage_started_at REAL,
+        verified_at TIMESTAMP,
+        file_sha256 TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """
-    new_cols = ["id", "user_id", "doc_type", "source_path", "raw_text", "status",
-                "confidence", "raw_extraction", "title", "clinic", "delivered_at",
-                "stage_started_at", "created_at"]
-    old_cols = {r["name"] for r in conn.execute("PRAGMA table_info(documents)").fetchall()}
-    shared = ", ".join(c for c in new_cols if c in old_cols)
-
     conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("PRAGMA legacy_alter_table=ON")  # см. _migrate_users_schema
     conn.execute("ALTER TABLE documents RENAME TO _documents_old")
     # legacy-рецепты больше не валидны под новым CHECK — переразмечаем в unknown.
     conn.execute("UPDATE _documents_old SET doc_type='unknown' WHERE doc_type='prescription'")
     conn.executescript(new_ddl)
-    conn.execute(f"INSERT INTO documents ({shared}) SELECT {shared} FROM _documents_old")
+    _copy_shared_columns(conn, "_documents_old", "documents")
     conn.execute("DROP TABLE _documents_old")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_user_created ON documents(user_id, created_at)")
+    conn.execute("PRAGMA legacy_alter_table=OFF")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.commit()
 
@@ -191,12 +214,71 @@ def _migrate_rag_chunks_schema(conn: sqlite3.Connection) -> None:
         UNIQUE(source, ref_key)
     )
     """
-    cols = "id, source, user_id, ref_key, text, meta_json, created_at"
+    conn.execute("PRAGMA legacy_alter_table=ON")  # см. _migrate_users_schema
     conn.execute("ALTER TABLE rag_chunks RENAME TO _rag_chunks_old")
     conn.executescript(new_ddl)
-    conn.execute(f"INSERT INTO rag_chunks ({cols}) SELECT {cols} FROM _rag_chunks_old")
+    # id входит в общие колонки — vec0-вектора ссылаются на rag_chunks.id.
+    _copy_shared_columns(conn, "_rag_chunks_old", "rag_chunks")
     conn.execute("DROP TABLE _rag_chunks_old")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_rag_chunks_source ON rag_chunks(source)")
+    conn.execute("PRAGMA legacy_alter_table=OFF")
+    conn.commit()
+
+
+def _repair_dangling_foreign_keys(conn: sqlite3.Connection) -> None:
+    """Возвращает FK дочерних таблиц на реальных родителей.
+
+    БД, мигрированные до появления legacy_alter_table=ON, содержат ссылки на
+    промежуточные _users_old/_documents_old, которых уже нет. Сейчас это не
+    ломает работу (get_conn не включает foreign_keys), но делает ограничения
+    бессмысленными: ON DELETE CASCADE у sessions не сработает, а включение
+    проверки FK уронит вставки.
+
+    Таблица пересоздаётся по своему же DDL с подменой только имени цели —
+    состав колонок и ограничений не трогаем, поэтому починка не зависит от
+    того, насколько схема успела разойтись со schema.sql.
+    """
+    tables = {r["name"]: r["sql"] for r in conn.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()}
+
+    broken: dict[str, set[str]] = {}
+    for name in tables:
+        targets = {r["table"] for r in conn.execute(
+            f"PRAGMA foreign_key_list({name})").fetchall()}
+        missing = {t for t in targets if t not in tables and t in _MIGRATION_TEMP_TABLES}
+        if missing:
+            broken[name] = missing
+    if not broken:
+        return
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+    # Правим строго по одной таблице, поэтому финальный RENAME не должен
+    # переписывать ссылки в остальных — иначе получим новую порцию висячих FK.
+    conn.execute("PRAGMA legacy_alter_table=ON")
+    for name, missing in broken.items():
+        sql = tables[name] or ""
+        for temp_name in missing:
+            real = _MIGRATION_TEMP_TABLES[temp_name]
+            if real not in tables:
+                continue  # родителя нет вовсе — не наш случай, оставляем как есть
+            sql = sql.replace(f'"{temp_name}"', real).replace(f" {temp_name}(", f" {real}(")
+
+        staging = f"{name}__fk_repair"
+        conn.execute(re.sub(rf'^CREATE TABLE "?{re.escape(name)}"?',
+                            f"CREATE TABLE {staging}", sql, count=1))
+        columns = ", ".join(f'"{r["name"]}"' for r in conn.execute(
+            f"PRAGMA table_info({name})").fetchall())
+        conn.execute(f"INSERT INTO {staging} ({columns}) SELECT {columns} FROM {name}")
+        # DROP TABLE уносит индексы таблицы — восстанавливаем их после переноса.
+        index_ddl = [r["sql"] for r in conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name = ? "
+            "AND sql IS NOT NULL", (name,)).fetchall()]
+        conn.execute(f"DROP TABLE {name}")
+        conn.execute(f"ALTER TABLE {staging} RENAME TO {name}")
+        for ddl in index_ddl:
+            conn.execute(ddl)
+    conn.execute("PRAGMA legacy_alter_table=OFF")
     conn.commit()
 
 
@@ -205,12 +287,22 @@ def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         conn.commit()
+        # Сначала добавляем колонки: пересоздающие миграции ниже переносят данные
+        # по пересечению колонок, поэтому к их запуску исходная таблица должна
+        # содержать всё, что есть в _MIGRATIONS.
         _apply_migrations(conn)
         _migrate_users_schema(conn)
         _migrate_documents_schema(conn)
         _migrate_rag_chunks_schema(conn)
+        # Повторно и идемпотентно: DDL пересозданных таблиц захардкожен и может
+        # отстать от _MIGRATIONS, а второй проход дописывает недостающие колонки
+        # без ручной синхронизации двух списков.
+        _apply_migrations(conn)
         _drop_prescriptions(conn)
         _drop_profile_coordinates(conn)
+        # Последним: ремонт опирается на актуальный DDL, поэтому должен видеть
+        # результат всех пересозданий и удалений колонок выше.
+        _repair_dangling_foreign_keys(conn)
 
 
 @contextmanager

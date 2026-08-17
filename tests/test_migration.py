@@ -195,3 +195,167 @@ def test_lab_results_normalization_columns(set_test_db):
         "match_status", "unit_expected", "unit_mismatch",
         "ref_operator", "ref_text",
     } <= cols
+
+
+# ===== Сходимость схемы: старая БД должна догонять свежую =====
+
+_LEGACY_SCHEMA = """
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_user_id INTEGER NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    doc_type TEXT CHECK(doc_type IN ('analysis','doctor_report','prescription','unknown')),
+    source_path TEXT NOT NULL,
+    raw_text TEXT,
+    status TEXT NOT NULL DEFAULT 'received'
+        CHECK(status IN ('received','processing','extracted','failed')),
+    confidence REAL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE lab_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL REFERENCES documents(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    analyte_code TEXT,
+    analyte_name TEXT NOT NULL,
+    value_num REAL,
+    value_text TEXT,
+    unit TEXT,
+    ref_low REAL,
+    ref_high REAL,
+    taken_at TIMESTAMP,
+    source_table_cell TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE doctor_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL REFERENCES documents(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    diagnosis TEXT,
+    recommendations_json TEXT,
+    complaints_json TEXT,
+    anamnesis TEXT,
+    medications_json TEXT,
+    visit_date TIMESTAMP,
+    doctor_name TEXT,
+    department TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE prescriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER);
+INSERT INTO users (id, telegram_user_id) VALUES (1, 42);
+INSERT INTO documents (id, user_id, doc_type, source_path, status)
+VALUES (1, 1, 'analysis', '/tmp/a.jpg', 'extracted');
+INSERT INTO lab_results (document_id, user_id, analyte_name, value_num)
+VALUES (1, 1, 'Гемоглобин', 145.0);
+"""
+
+# Виртуальная таблица rag_vectors и её shadow-таблицы создаются лениво в
+# rag/store.py при первой индексации, а не из schema.sql — в сравнении схемы
+# их не учитываем.
+_LAZY_TABLE_PREFIX = "rag_vectors"
+
+
+def _fingerprint(conn) -> dict:
+    """Сравнимый снимок схемы: колонки с типами, цели FK и индексы.
+
+    Порядок колонок сознательно игнорируется: ALTER TABLE ADD COLUMN дописывает
+    их в конец, поэтому у мигрированной БД порядок иной, чем у свежей, и это не
+    влияет на работу — все запросы адресуют колонки по имени.
+    """
+    tables = {}
+    names = [r["name"] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name NOT LIKE 'sqlite_%' ORDER BY name").fetchall()]
+    for name in names:
+        if name.startswith(_LAZY_TABLE_PREFIX):
+            continue
+        columns = {r["name"]: (r["type"] or "").upper()
+                   for r in conn.execute(f"PRAGMA table_info({name})").fetchall()}
+        fks = {(r["from"], r["table"], r["to"])
+               for r in conn.execute(f"PRAGMA foreign_key_list({name})").fetchall()}
+        tables[name] = {"columns": columns, "fks": fks}
+    indexes = {r["name"] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' "
+        "AND name NOT LIKE 'sqlite_%'").fetchall()}
+    return {"tables": tables, "indexes": indexes}
+
+
+def _fingerprint_of(db_path, monkeypatch):
+    import importlib
+    monkeypatch.setenv("SQLITE_PATH", str(db_path))
+    import botkin.config
+    import botkin.db.connection
+    importlib.reload(botkin.config)
+    importlib.reload(botkin.db.connection)
+    botkin.db.connection.init_db()
+    with botkin.db.connection.get_conn() as conn:
+        return _fingerprint(conn)
+
+
+def test_legacy_db_converges_to_fresh_schema(tmp_path, monkeypatch):
+    """Старая БД после init_db() совпадает по схеме со свежесозданной.
+
+    Страховка от рассинхрона: если в schema.sql появилась колонка, таблица или
+    индекс, а в миграции их не внесли, существующие БД останутся без них — и
+    код упадёт на «no such column» уже в рантайме, как это случилось после
+    git restore закоммиченной data/botkin.db.
+    """
+    import sqlite3
+
+    legacy = tmp_path / "legacy.db"
+    conn = sqlite3.connect(str(legacy))
+    conn.executescript(_LEGACY_SCHEMA)
+    conn.commit()
+    conn.close()
+
+    fresh_fp = _fingerprint_of(tmp_path / "fresh.db", monkeypatch)
+    legacy_fp = _fingerprint_of(legacy, monkeypatch)
+
+    assert set(legacy_fp["tables"]) == set(fresh_fp["tables"]), "набор таблиц разошёлся"
+    for table, fresh_def in fresh_fp["tables"].items():
+        assert legacy_fp["tables"][table]["columns"] == fresh_def["columns"], \
+            f"колонки {table} разошлись"
+        assert legacy_fp["tables"][table]["fks"] == fresh_def["fks"], \
+            f"внешние ключи {table} разошлись"
+    assert legacy_fp["indexes"] == fresh_fp["indexes"], "индексы разошлись"
+
+
+def test_migration_leaves_no_dangling_foreign_keys(tmp_path, monkeypatch):
+    """FK не должны ссылаться на временные таблицы миграций.
+
+    ALTER TABLE ... RENAME в SQLite ≥3.25 переписывает ссылки дочерних таблиц
+    вслед за переименованием. Пересоздание users/documents через промежуточные
+    _users_old/_documents_old оставляло дочерние таблицы указывающими на
+    временное имя, а после DROP ссылка становилась висячей.
+    """
+    import sqlite3
+
+    legacy = tmp_path / "dangling.db"
+    conn = sqlite3.connect(str(legacy))
+    conn.executescript(_LEGACY_SCHEMA)
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setenv("SQLITE_PATH", str(legacy))
+    import importlib
+    import botkin.config
+    import botkin.db.connection
+    importlib.reload(botkin.config)
+    importlib.reload(botkin.db.connection)
+    botkin.db.connection.init_db()
+
+    with botkin.db.connection.get_conn() as conn:
+        existing = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        dangling = []
+        for table in sorted(existing):
+            if table.startswith("sqlite_"):
+                continue
+            for r in conn.execute(f"PRAGMA foreign_key_list({table})").fetchall():
+                if r["table"] not in existing:
+                    dangling.append(f"{table}.{r['from']} -> {r['table']}")
+    assert not dangling, "висячие внешние ключи: " + "; ".join(dangling)
