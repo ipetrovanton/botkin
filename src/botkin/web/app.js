@@ -46,12 +46,10 @@ const STAGE_PROGRESS = {
 
 
 function bindMethods(app, methods) {
-  const out = {};
-  for (const [key, value] of Object.entries(methods)) {
-    if (typeof value === "function") out[key] = value.bind(app);
-    else out[key] = value;
-  }
-  return out;
+  // Методы не биндим заранее: Alpine вызывает их через реактивный Proxy,
+  // и this должен оставаться прокси (иначе мутации this.queue / this.docs
+  // не триггерят перерисовку). См. аудит фронтенда 2026-08-14.
+  return methods;
 }
 
 function documentsModule(app) {
@@ -626,7 +624,7 @@ function healthModule(app) {
         this.health.metrics = met?.items || [];
         this.health.stats = met?.stats || {};
         this.health.activities = act?.items || [];
-        if (rag) this.ragIndex = rag;
+        if (rag) Object.assign(this.ragIndex, rag);
       } catch (e) { console.error("health", e); }
     },
     healthAccount(provider) {
@@ -1299,6 +1297,7 @@ function cabinet() {
     // ===== Форматтеры =====
     typeLabel(t) { return TYPE_LABELS[t] || "Документ"; },
     statusLabel(s) { return STATUS_LABELS[s] || s; },
+    metricLabel(name) { return METRIC_LABELS[name] || name; },
     greeting() {
       const h = new Date().getHours();
       const part = h < 6 ? "Доброй ночи" : h < 12 ? "Доброе утро" : h < 18 ? "Добрый день" : "Добрый вечер";

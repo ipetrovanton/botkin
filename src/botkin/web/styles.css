@@ -195,7 +195,10 @@ body {
   border-radius: var(--radius); padding: 14px; text-align: center;
 }
 .external-card--fun { border-style: dashed; opacity: .8; }
-.external-icon { font-size: 24px; margin-bottom: 6px; }
+/* Иконки — inline SVG, а не эмодзи: системный emoji-шрифт рендерится по-разному
+   на Windows/Android/iOS, а часть Linux-сборок показывает пустые квадраты.
+   line-height: 0 убирает лишний отступ под инлайновым svg. */
+.external-icon { margin-bottom: 8px; line-height: 0; color: var(--brand-1); }
 .external-val { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .external-lbl { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
 
@@ -442,6 +445,9 @@ body {
 @keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
 .dropzone-title { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
 .dropzone-sub { color: var(--text-dim); font-size: 13px; }
+
+.camera-action { text-align: center; margin-bottom: 18px; }
+.camera-action .btn { display: inline-flex; align-items: center; gap: 6px; }
 
 .upload-queue { display: flex; flex-direction: column; gap: 12px; }
 .queue-item {
