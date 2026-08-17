@@ -59,8 +59,10 @@
 ## Рабочие команды
 
 - Тесты: `.venv/bin/python -m pytest`
-- Линт: `.venv/bin/ruff check src tests`
-- Push: токеном из `token.txt` (x-access-token); `gh` CLI недоступен — PR через GitHub API.
+- Линт: `.venv/bin/ruff check src tests scripts` (скоуп как в README; когда здесь
+  стояло только `src tests`, в `scripts/` накопились незамеченные F401/F841/E741)
+- Push: `git push` работает через `gh` (авторизован, scope `repo`) и credential
+  helper `manager`. Файла `token.txt` в рабочей копии нет.
 
 ## Тестовые фикстуры
 

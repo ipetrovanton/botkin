@@ -285,7 +285,8 @@ def render_markdown(pdf: HabrPDF, md: str, base: Path | None) -> None:
         # Список (маркированный)
         m = re.match(r"^(\s*)([-*])\s+(.*)$", line)
         if m:
-            depth = len(m.group(1)) // 2
+            # Глубина считается для каждого пункта внутри цикла: первая итерация
+            # разбирает эту же строку, поэтому отдельная переменная не нужна.
             while i < n:
                 mm = re.match(r"^(\s*)([-*])\s+(.*)$", lines[i])
                 if not mm:
@@ -325,7 +326,7 @@ def render_markdown(pdf: HabrPDF, md: str, base: Path | None) -> None:
                 break
             para_lines.append(nxt)
             i += 1
-        render_paragraph(pdf, " ".join(l.strip() for l in para_lines))
+        render_paragraph(pdf, " ".join(part.strip() for part in para_lines))
 
 
 def _mc(pdf: HabrPDF, h: float, text: str, size: int, style: str = "", align: str = "C") -> None:

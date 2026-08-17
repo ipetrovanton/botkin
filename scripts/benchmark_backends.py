@@ -21,7 +21,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from botkin.llm.extract import run_analysis
-from botkin.llm.client import get_backend
 
 
 def run_benchmark(backend: str, docs_dir: Path, output: Path | None = None) -> dict:
