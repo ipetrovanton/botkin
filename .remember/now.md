@@ -6,7 +6,10 @@
 - Оставлены bench_*.log и e2e_run.log (первичные данные статьи); data/botkin.db возвращён git restore.
 - Логотип НЕ меняем — вариант со змеёй отклонён, proposals/ удалена.
 - PNG во фронтенде не было: всё уже inline SVG. Заменены только эмодзи 🌤️/🧲/♈ на SVG-иконки.
-- После правок: 659 passed, ruff check src tests чист, node --check app.js OK.
+- Отказы загрузки: accept="image/*" предлагал GIF/BMP, сервер их отвергал, а фронт показывал общий тост.
+  Добавлен uploadErrorText(name, status) для 400/413/415 + константы MAX_UPLOAD_BYTES/SUPPORTED_FORMATS_LABEL.
+  Побочно починен run_js в test_cabinet_web.py: не хватало encoding="utf-8" (cp1251 ломал кириллицу).
+- После правок: 661 passed, ruff check src tests чист, node --check app.js OK.
 - Фактура: habr/2026-08-17--frontend-audit-state.md; журнал обновлён итерацией 48.
 
 2026-08-13 — e2e patient benchmark Qwen/Gemma, release/habr-article.

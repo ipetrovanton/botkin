@@ -6,6 +6,14 @@
 
 const PAGE_SIZE = 20;
 
+// Должно совпадать с upload.max_bytes в src/botkin/defaults.json: клиентская
+// проверка экономит трафик, но авторитетна серверная (413).
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const MAX_UPLOAD_LABEL = "20 МБ";
+// Форматы из upload.allowed_extensions — перечисляем их пользователю дословно,
+// иначе после отказа непонятно, что вообще можно загрузить.
+const SUPPORTED_FORMATS_LABEL = "PDF, JPG, PNG, HEIC или WebP";
+
 const TYPE_LABELS = {
   analysis: "Анализы",
   doctor_report: "Заключение",
@@ -164,11 +172,15 @@ function documentsModule(app) {
         const res = await fetch(`/api/documents/${doc.id}/replace`, {
           method: "POST", body: form, credentials: "same-origin",
         });
-        if (res.status === 409) {
-          this.toast((await res.json())?.detail || "Замена отклонена", "error");
+        if (!res.ok) {
+          // 409 — отказ бизнес-логики (нет исходника / тот же файл), его текст
+          // приходит с сервера. Остальные коды объясняем сами, как при загрузке.
+          const detail = res.status === 409
+            ? (await res.json().catch(() => ({})))?.detail || "Замена отклонена"
+            : uploadErrorText(file.name, res.status);
+          this.toast(detail, "error");
           return;
         }
-        if (!res.ok) throw new Error(String(res.status));
       } catch (e) { this.toast("Не удалось заменить файл", "error"); console.error(e); return; }
       this.queue.unshift({
         id: ++this._seq, name: `${doc.title || "Документ #" + doc.id} (новая версия)`,
@@ -493,7 +505,7 @@ function documentsModule(app) {
       const files = Array.from(fileList);
       if (!files.length) return;
       for (const file of files) {
-        if (file.size > 20 * 1024 * 1024) { this.toast(`${file.name}: больше 20 МБ`, "error"); continue; }
+        if (file.size > MAX_UPLOAD_BYTES) { this.toast(uploadErrorText(file.name, 413), "error"); continue; }
         const raw = {
           id: ++this._seq, name: file.name, state: "uploading", status: "received", docId: null,
           progress: 0, etaSeconds: null, stageElapsedSeconds: 0, alive: true,
@@ -516,15 +528,20 @@ function documentsModule(app) {
           body: fd,
           credentials: "same-origin",
         });
-        if (!res.ok) throw new Error(`upload ${res.status}`);
+        if (!res.ok) {
+          item.state = "failed"; item.status = "failed";
+          this.toast(uploadErrorText(item.name, res.status), "error");
+          return;
+        }
         const data = await res.json();
         item.docId = data.document_id;
         item.state = "processing";
         item.status = "received";
         this.pollStatus(item);
       } catch (e) {
+        // Сюда попадают только сетевые сбои: HTTP-отказ обработан выше.
         item.state = "failed"; item.status = "failed";
-        this.toast(`Не удалось загрузить ${item.name}`, "error");
+        this.toast(uploadErrorText(item.name, null), "error");
         console.error(e);
       } finally { this.uploading = false; }
     },
@@ -1366,6 +1383,20 @@ function cabinet() {
 // Экранирование для innerHTML-шаблона графика: имя/единица показателя и сырые даты
 // приходят из OCR/LLM-извлечения загруженного документа — это внешние данные,
 // крафтовое имя вида `"><script>` не должно исполняться (stored XSS).
+// Причина отказа загрузки по коду ответа. Бэкенд различает 413/400/415
+// (api/routes/upload.py, api/services/documents.py), и разница важна
+// пользователю: 413 и 400 — «возьми другой файл», 415 — «этот формат не
+// поддерживается вовсе». Неизвестный код и сетевой сбой причину не выдумывают.
+const UPLOAD_ERRORS = {
+  400: "файл пустой",
+  413: `файл больше ${MAX_UPLOAD_LABEL}`,
+  415: `формат не поддерживается — нужен ${SUPPORTED_FORMATS_LABEL}`,
+};
+function uploadErrorText(name, status) {
+  const reason = UPLOAD_ERRORS[status];
+  return reason ? `${name}: ${reason}` : `Не удалось загрузить ${name}`;
+}
+
 function escapeHtml(v) {
   return String(v ?? "").replace(/[&<>"']/g, (ch) => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]

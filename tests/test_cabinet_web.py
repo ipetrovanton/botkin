@@ -34,8 +34,11 @@ def run_js(snippet: str) -> str:
     with tempfile.TemporaryDirectory() as tmp:
         script = Path(tmp) / "app_test.js"
         script.write_text(bootstrap, encoding="utf-8")
+        # encoding обязателен: text=True на Windows декодирует stdout в cp1251,
+        # а node пишет UTF-8 — кириллица в выводе превращалась бы в мусор.
         res = subprocess.run(
-            ["node", str(script)], capture_output=True, text=True, timeout=30,
+            ["node", str(script)], capture_output=True, text=True,
+            encoding="utf-8", timeout=30,
         )
     assert res.returncode == 0, res.stderr
     return res.stdout.strip()
@@ -66,6 +69,41 @@ def test_stage_done_knows_processing_status():
         "]));"
     )
     assert json.loads(out) == [True, False, True, False]
+
+
+def test_upload_error_text_names_the_actual_reason():
+    """Отказ загрузки объясняется причиной, а не общим «не удалось».
+
+    Бэкенд различает 413 (больше лимита), 400 (пустой файл) и 415
+    (неподдерживаемый формат) — см. src/botkin/api/routes/upload.py.
+    Раньше фронт показывал на любой не-ok один текст, и пользователь не мог
+    понять, повторять загрузку или брать другой файл. Особенно заметно с
+    accept="image/*": диалог предлагает GIF/BMP, а сервер их отвергает.
+    """
+    out = run_js(
+        "console.log(JSON.stringify(["
+        "uploadErrorText('скан.gif', 415),"
+        "uploadErrorText('скан.pdf', 413),"
+        "uploadErrorText('скан.pdf', 400),"
+        "uploadErrorText('скан.pdf', 500),"   # неизвестный код — не выдумываем причину
+        "uploadErrorText('скан.pdf', null),"  # сетевой сбой, кода нет
+        "]));"
+    )
+    fmt, too_big, empty, server, offline = json.loads(out)
+    assert "скан.gif" in fmt and "формат" in fmt
+    # Лимит в тексте берётся из той же константы, что и клиентская проверка.
+    assert "20 МБ" in too_big
+    assert "пуст" in empty
+    assert server == offline == "Не удалось загрузить скан.pdf"
+
+
+def test_upload_error_text_lists_only_supported_formats():
+    """Перечень в сообщении совпадает с upload.allowed_extensions бэкенда."""
+    out = run_js("console.log(uploadErrorText('f', 415));")
+    for fmt in ["PDF", "JPG", "PNG", "HEIC", "WebP"]:
+        assert fmt in out, f"формат {fmt} не назван пользователю: {out}"
+    # GIF/BMP сервер не принимает — обещать их нельзя.
+    assert "GIF" not in out and "BMP" not in out
 
 
 def test_progress_pct_covers_every_poll_status():
