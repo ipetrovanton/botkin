@@ -36,6 +36,9 @@
 - Проверено на реальной БД: данные целы (2/35/318/9), висячих FK нет, схемы совпадают.
 - data/botkin.db закоммичена в мигрированном виде — git restore больше не понижает схему.
 - 645 passed, ruff чист.
+- Запушено: origin/master = f4630c9 (5 коммитов), LFS-объект БД 161 МБ загружен.
+  Аутентификация через gh (ipetrovanton, scope repo) + credential helper manager;
+  token.txt отсутствует, заметка в CLAUDE.md про него устарела.
 
 2026-08-13 — e2e patient benchmark Qwen/Gemma, release/habr-article.
 - Перезапущен Ollama с OLLAMA_KV_CACHE_TYPE=q8_0 + OLLAMA_FLASH_ATTENTION=1.
